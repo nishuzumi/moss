@@ -21,7 +21,9 @@ This is the contract an agent (or the skill/prompt layer steering it) must follo
    - approvals ↔ expected spender (the protocol's own contracts), amount no larger than the spend
    Mechanical checks can't do this step: only you hold the user's words.
 
-7. **Present, don't push.** Show the user a human-readable summary built from `effects` (pay X, receive ~Y, approve Z to spender S, gas ≈ G) before any signing UI. Uncertainty (slippage, book movement) must be stated. The wallet re-checks affordability; you never promise execution results.
+7. **Read observations as narrative, not law.** `observations` are protocol-authored receipts ("Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)") — use them to enrich your summary and cross-check intent alignment in protocol terms. They can only tighten the outcome: a declared receipt that failed to appear surfaces as a `CONFIRMATION_MISSING` warning (halt rule applies). An observation never excuses, softens, or overrides a warning.
+
+8. **Present, don't push.** Show the user a human-readable summary built from `effects` (pay X, receive ~Y, approve Z to spender S, gas ≈ G) — quote the observation sentence where one exists — before any signing UI. Uncertainty (slippage, book movement) must be stated. The wallet re-checks affordability; you never promise execution results.
 
 ## Hard rules
 

@@ -73,7 +73,40 @@ Rules that make or break review:
 - **Build-time reads are fine.** Capabilities are async: read the orderbook, check allowances, compute minOut — then encode. Plans must stand alone once built.
 - **Cleanup steps matter.** Refund/unwrap/sweep calls belong in the same plan — a missing cleanup step is exactly the class of bug simulation catches.
 
-## 4. Introduce tokens (if any) — `src/tokens.ts`
+## 4. Declare on-chain receipts — `@Event`
+
+`expects`/warnings are the closed **audit plane**; `@Event` is the open **observation plane** ([ADR 0008](./adr/0008-observation-plane.md)): a protocol-authored, human-rendered statement of what happened *in protocol terms* — "Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)". Declare one for every write with a meaningful receipt. It can also gate the flow: a capability that lists `confirms: ["swapResult"]` fails simulation with a `CONFIRMATION_MISSING` warning when the receipt does not appear.
+
+```ts
+@Capability({ /* … */, confirms: ["swapResult"] })  // this write must produce the receipt
+async swap(/* … */) { /* … */ }
+
+/** Dealer (optional preprocessor): filter/enrich/aggregate matched events. */
+countFills(events: DecodedEvent[], ctx: ObserveCtx): void {
+  ctx.shared.fills = events.filter((e) => e.name === "Trade").length;
+}
+
+@Event<MyProto>({                        // the type argument is mandatory
+  events: {
+    router: ["KuruRouterSwap"],          // contract-handle key → ABI event names
+    monUsdc: ["Trade"],                  // multiple contracts and events are fine
+  },
+  dealer: "countFills",                  // a method name (autocompleted) or an inline function
+  intent: "Swapped {amountIn} {tokenIn} into {amountOut} {tokenOut} ({fills} fills)",
+})
+async swapResult(events: DecodedEvent[], ctx: ObserveCtx) {
+  const swap = events.find((e) => e.name === "KuruRouterSwap");
+  if (!swap) return null;                // null → no observation for this plan
+  const tokenIn = await ctx.token(/* … */);  // resolve symbol/decimals via the table
+  return { tokenIn: tokenIn.symbol, amountIn: tokenIn.format(/* … */), /* … */ fills: ctx.shared.fills };
+}
+```
+
+How it runs: after each plan simulates, the registry decodes that plan's logs against your protocol's ABIs, passes the matches through the dealer (if any), then hands them to the handler; the returned object fills the `intent` template's `{placeholders}` — a missing placeholder throws at render time, so keep template and return shape in sync. `ctx` is injected per plan×protocol: `plan`, `account`, `token` (the token table), and `shared` (scratch space between dealer and handler). Contract keys and event names are validated against your ABIs at registration — typos fail before anything ships.
+
+**The red line** (ADR 0008): observations only **tighten** the outcome (via `confirms`) — they can never satisfy it. No observation silences a reconciliation warning; narrate honestly and let the audit plane stay in charge. The template's `depositReceipt` and Kuru's `swapResult` are the reference implementations.
+
+## 5. Introduce tokens (if any) — `src/tokens.ts`
 
 If your protocol mints receipt/LP/staked tokens, list them so they become symbol-addressable for every agent:
 
@@ -85,7 +118,7 @@ export const TOKENS: readonly KnownToken[] = [
 
 Every entry is a security claim: verify symbol/decimals on-chain, note the source. Same-symbol collisions with other packages are rejected at registration ([ADR 0006](./adr/0006-protocol-packages-and-manifests.md)).
 
-## 5. Export the manifest, get listed
+## 6. Export the manifest, get listed
 
 ```ts
 export const myProtoManifest = defineProtocolPackage({
@@ -97,7 +130,7 @@ export const myProtoManifest = defineProtocolPackage({
 
 To enter the official served catalog, add your package to the MCP server (`packages/mcp-server`): one dependency in its `package.json` + your manifest in the `use()` array in `server.ts`. That is the whole listing mechanism.
 
-## 6. Test
+## 7. Test
 
 ```ts
 const registry = new Registry(runtime);
@@ -106,9 +139,9 @@ registry.use(myProtoManifest);
 ```
 
 1. **Offline**: discover/load shape and the built Plan's txs + expects for a known input.
-2. **Live e2e** (`describe.skipIf(!!process.env.MOSS_SKIP_E2E)`): simulate the happy path against Monad mainnet asserting **zero warnings** — free, no funds, no keys. If your flow needs tokens the account lacks, chain plans: acquire in plan 1, spend in plan 2 (see the Kuru round-trip).
+2. **Live e2e** (`describe.skipIf(!!process.env.MOSS_SKIP_E2E)`): simulate the happy path against Monad mainnet asserting **zero warnings** — free, no funds, no keys. Wire the observer (`createTraceSimulator(runtime, { observer: registry.observer() })`) and assert your receipt renders (see the Kuru round-trip's `swapResult` check). If your flow needs tokens the account lacks, chain plans: acquire in plan 1, spend in plan 2.
 
-## 7. Document and submit
+## 8. Document and submit
 
 Header comment: what the protocol is, supported markets/assets, parameter quirks, known risks (upgradeable proxies? fee-on-transfer? cooldowns?). PR per [CONTRIBUTING.md](../CONTRIBUTING.md) with evidence (test output incl. the simulate effects summary) and a changeset.
 

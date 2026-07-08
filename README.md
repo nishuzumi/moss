@@ -61,6 +61,9 @@ pnpm --filter @mossxyz/example-simple-flow wrap
 pnpm --filter @mossxyz/example-simple-flow swap
 ```
 
+New here? [docs/getting-started.md](./docs/getting-started.md) walks the whole
+system one layer at a time — run first, then open each stage up.
+
 ### Use as an MCP server
 
 ```jsonc

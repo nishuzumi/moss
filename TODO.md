@@ -86,14 +86,17 @@
 
 ## 双面制遗留（下轮优先）
 - [ ] **余额差审计层**：候选 token 的前后态 balanceOf（override eth_call），资产流完备性与事件词汇解耦；WETH9 特判退役（ADR 0008 已记录设计）
-- [ ] onboarding「声明事件」章节 + _template 加 @Event 骨架 + mcp-tools/agent-skill 补 observations 说明（叙事 vs 法律）
+- [x] onboarding「声明事件」章节（§4）+ _template 真实 @Event（Deposited 事件 + confirms，CI 保真）+ mcp-tools 补 observations/CONFIRMATION_MISSING/confirms 字段 + agent-skill 补「叙事 vs 法律」规则（7月8日）
 - [ ] ERC-1155 词汇（TransferSingle/Batch）待 nft 协议接入时进审计面
 
 ## 开源发布准备
+- [x] 推送 GitHub 仓库（github.com/nishuzumi/moss，首 commit `c2e14f0`，CI #1 全绿含主网 e2e）
+- [x] CODE_OF_CONDUCT.md（Contributor Covenant 2.1）
+- [x] docs/getting-started.md 新手引导：逐层揭示 discover → load → action → simulate → observations → MCP → 写适配器，每步附 Go deeper 指引
 - [ ] 中文 quickstart 细化（README.zh-CN 已含基础版）
-- [ ] CODE_OF_CONDUCT.md；changesets 首次发布出 CHANGELOG
+- [ ] 仓库描述 + topics（GitHub 网页设置）
+- [ ] changesets 首次发布出 CHANGELOG
 - [ ] 起草第一批 A 类 bounty issue（lending supply 等，指向 WMON 模板）
-- [ ] 推送 GitHub 仓库（github.com/nishuzumi/moss）；仓库描述 + topics
 - [ ] 发布 npm 包前：注册 `@mossxyz` org 确权
 
 ## 已插旗（工程约束与后续事项）

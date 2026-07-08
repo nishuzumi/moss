@@ -13,15 +13,21 @@
  *     types (tokenAmount("asset")) must come AFTER the param they reference.
  *   - Every capability returns plan(steps, flows) with QUANTIFIED expects —
  *     max out, min in. Approvals via Token.approveStep are auto-declared.
+ *   - Writes with a meaningful on-chain receipt declare it: @Event renders
+ *     a protocol-authored observation, and `confirms` makes simulation fail
+ *     loudly (CONFIRMATION_MISSING) when the receipt doesn't appear.
  *   - Verify every address on-chain and note how in a comment.
  */
 import {
   type Address,
   address,
   Capability,
+  type DecodedEvent,
+  Event,
   type Handle,
   NATIVE,
   nativeAmount,
+  type ObserveCtx,
   Protocol,
   plan,
   Query,
@@ -51,6 +57,7 @@ export class ExampleProtocol {
     params: { amount: nativeAmount },
     risk: ["fundOut"],
     tags: ["example"], // CHANGEME: long-tail semantics (clob, lst, ...)
+    confirms: ["depositReceipt"], // this write must produce the receipt below
   })
   async deposit({ amount }: { amount: bigint }) {
     const step = this.vault.deposit([], { value: amount });
@@ -59,6 +66,22 @@ export class ExampleProtocol {
       // CHANGEME: declare what must arrive (receipt tokens? nothing for a
       // pure deposit that only creates a position — that's legitimate).
     });
+  }
+
+  // The observation plane (ADR 0008): after simulation, this plan's logs are
+  // decoded against your ABIs and handed here; the returned values fill the
+  // intent template's {placeholders}. Return null to skip. A `dealer` option
+  // (method name or function) can filter/aggregate events first, sharing
+  // scratch state via ctx.shared — see Kuru's countFills.
+  @Event<ExampleProtocol>({
+    events: { vault: ["Deposited"] }, // contract-handle key → ABI event names
+    intent: "Deposited {amount} MON into the example vault",
+  })
+  async depositReceipt(events: DecodedEvent[], ctx: ObserveCtx) {
+    const hit = events.find((e) => e.name === "Deposited");
+    if (!hit) return null;
+    const { amount } = hit.args as { account: Address; amount: bigint };
+    return { amount: (await ctx.token(NATIVE)).format(amount) };
   }
 
   @Query({

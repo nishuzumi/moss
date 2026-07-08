@@ -49,7 +49,7 @@ pnpm --filter @mossxyz/example-simple-flow wrap
 pnpm --filter @mossxyz/example-simple-flow swap
 ```
 
-MCP 接入、库用法、协议接入指南见英文 [README](./README.md) 与 [docs/](./docs/README.md)。
+新手建议从 [docs/getting-started.md](./docs/getting-started.md)（英文）开始：先整体跑一遍，再逐层拆开 discover / load / action / simulate / observations，最后引导你写自己的适配器。MCP 接入、库用法、协议接入指南见英文 [README](./README.md) 与 [docs/](./docs/README.md)。
 
 ## 参与贡献
 

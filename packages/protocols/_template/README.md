@@ -28,10 +28,14 @@ Then work through this checklist:
       LP tokens, LSTs) — leave empty otherwise. Every entry needs on-chain
       verification noted in a comment.
 - [ ] `src/index.ts`: export your manifest; rename `templateManifest`.
+- [ ] `@Event` receipts: writes with a meaningful on-chain receipt declare it
+      (`depositReceipt` here is the skeleton) and gate on it via `confirms` —
+      see ADR 0008 and the onboarding guide's "Declare on-chain receipts".
 - [ ] `test/`: keep the offline shape tests, add a live e2e that simulates
       your happy path against Monad mainnet with **zero warnings** (free —
-      nothing is signed or sent). Chain plans if your flow needs tokens the
-      test account lacks (see the Kuru round-trip test).
+      nothing is signed or sent). Wire the observer and assert your receipt
+      renders. Chain plans if your flow needs tokens the test account lacks
+      (see the Kuru round-trip test).
 - [ ] List in the served catalog: add your package to `packages/mcp-server`
       (dependency + your manifest in the `use()` array in `server.ts`).
 - [ ] `pnpm install && pnpm -r build && pnpm lint && pnpm -r typecheck && pnpm -r test`

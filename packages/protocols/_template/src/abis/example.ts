@@ -21,4 +21,5 @@ import { parseAbi } from "viem";
 export const ExampleVaultAbi = parseAbi([
   "function deposit() payable",
   "function balanceOf(address owner) view returns (uint256)",
+  "event Deposited(address indexed account, uint256 amount)",
 ]);
