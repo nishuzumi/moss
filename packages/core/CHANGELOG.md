@@ -1,4 +1,4 @@
-# @mossxyz/core
+# @themoss/core
 
 ## 0.1.0
 

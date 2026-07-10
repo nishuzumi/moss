@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/protocol-template",
+  "name": "@themoss/protocol-template",
   "version": "0.0.0",
   "private": true,
   "description": "CHANGEME: Moss protocol adapter for <Protocol> on Monad",
@@ -20,7 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mossxyz/core": "workspace:*",
+    "@themoss/core": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {

@@ -10,11 +10,11 @@ the wallet script signs them; you are the judgment in between.
 
 ## Procedure
 
-1. **Environment**: run `pnpm --filter @mossxyz/example-agent-swap fork`
+1. **Environment**: run `pnpm --filter @themoss/example-agent-swap fork`
    (idempotent — starts the fork on 127.0.0.1:8545 if needed and funds the
    demo wallet with 1,000,000 MON). If it exits non-zero, report its output
    and stop.
-2. **Account**: `pnpm --filter @mossxyz/example-agent-swap wallet address`
+2. **Account**: `pnpm --filter @themoss/example-agent-swap wallet address`
    gives the account every Plan must be built for. Record `wallet balance`
    before trading so you can show the change afterwards.
 3. **Build**: use the moss MCP tools — `discover` to find the capability,
@@ -29,7 +29,7 @@ the wallet script signs them; you are the judgment in between.
      and ask.
 5. **Execute**: write the Plan JSON **exactly as `action` returned it** to a
    temp file (absolute path, e.g. under `$TMPDIR`), then run
-   `pnpm --filter @mossxyz/example-agent-swap wallet send <absolute-path>`.
+   `pnpm --filter @themoss/example-agent-swap wallet send <absolute-path>`.
    The wallet refuses Plans for other chains or other senders — if it
    refuses, report why; do not work around it.
 6. **Report**: transaction hashes and statuses, balances before → after, and

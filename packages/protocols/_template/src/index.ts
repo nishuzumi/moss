@@ -1,4 +1,4 @@
-import { defineProtocolPackage } from "@mossxyz/core";
+import { defineProtocolPackage } from "@themoss/core";
 import { ExampleProtocol } from "./adapter.js";
 import { TOKENS } from "./tokens.js";
 

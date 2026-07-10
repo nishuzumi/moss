@@ -56,7 +56,7 @@ export class MyProto {
   tags: ["isolated-market"],               // free-form long-tail semantics
 })
 async supply({ asset, amount }: { asset: TokenRef; amount: bigint }) {
-  const approve = approveStep(asset, this.pool.address, amount); // from @mossxyz/erc
+  const approve = approveStep(asset, this.pool.address, amount); // from @themoss/erc
   const main = this.pool.supply([asset, amount]);
   return plan([approve, main], {
     out: [{ token: asset, amountMax: amount }],
@@ -69,7 +69,7 @@ Rules that make or break review:
 
 - **Verb ≠ function name.** The verb is what the user experiences: WMON `deposit()` → `wrap`; an LP add → `supply`; a CLOB market order → `swap` with `clob` in tags. If no verb fits, open an issue — extending the closed set is a core decision ([ADR 0003](./adr/0003-two-tier-capability-taxonomy.md)).
 - **Params are human-readable.** Amounts arrive as decimal strings and are scaled by semantic types. A contextual type (`tokenAmount("asset")`) must be declared **after** the parameter it references — decoding runs in declaration order.
-- **`expects` is the safety contract** ([ADR 0004](./adr/0004-quantified-expects-in-plans.md)). Declare the maximum that may leave and the minimum that must arrive. Approvals built with `approveStep` (from `@mossxyz/erc`) are declared automatically; never approve more than the plan spends. Simulation warns on every undeclared difference — an honest, tight `expects` is what makes your capability trustworthy.
+- **`expects` is the safety contract** ([ADR 0004](./adr/0004-quantified-expects-in-plans.md)). Declare the maximum that may leave and the minimum that must arrive. Approvals built with `approveStep` (from `@themoss/erc`) are declared automatically; never approve more than the plan spends. Simulation warns on every undeclared difference — an honest, tight `expects` is what makes your capability trustworthy.
 - **Build-time reads are fine.** Capabilities are async: read the orderbook, check allowances, compute minOut — then encode. Plans must stand alone once built.
 - **Methods receive `(params, ctx)`.** `ctx.account` (`ActionCtx`) is the caller — the sender of every plan transaction. Reach for it when the standard wants the caller *inside calldata* (ERC-721's `safeTransferFrom(from, …)` — see the generic erc721 protocol); everything else ignores the second argument.
 - **Cleanup steps matter.** Refund/unwrap/sweep calls belong in the same plan — a missing cleanup step is exactly the class of bug simulation catches.
@@ -135,7 +135,7 @@ To enter the official served catalog, add your package to the MCP server (`packa
 
 ```ts
 const registry = new Registry(runtime);
-registry.use(systemManifest);   // from @mossxyz/system: token data + wmon
+registry.use(systemManifest);   // from @themoss/system: token data + wmon
 registry.use(myProtoManifest);
 ```
 

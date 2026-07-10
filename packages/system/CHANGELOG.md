@@ -1,4 +1,4 @@
-# @mossxyz/system
+# @themoss/system
 
 ## 0.1.0
 
@@ -29,5 +29,5 @@
 ### Patch Changes
 
 - Updated dependencies
-  - @mossxyz/core@0.1.0
-  - @mossxyz/erc@0.1.0
+  - @themoss/core@0.1.0
+  - @themoss/erc@0.1.0

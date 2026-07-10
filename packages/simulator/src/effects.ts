@@ -1,4 +1,4 @@
-import { type Address, NATIVE, type TokenRef } from "@mossxyz/core";
+import { type Address, NATIVE, type TokenRef } from "@themoss/core";
 import { toEventSelector } from "viem";
 import type { CallFrame, TraceLog } from "./trace.js";
 

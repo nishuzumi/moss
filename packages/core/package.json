@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/core",
+  "name": "@themoss/core",
   "version": "0.1.0",
   "description": "Moss core: semantic types, protocol decorators, Plan model, and the debug_traceCall simulator",
   "license": "MIT",

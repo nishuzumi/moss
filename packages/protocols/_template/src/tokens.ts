@@ -1,4 +1,4 @@
-import type { KnownToken } from "@mossxyz/core";
+import type { KnownToken } from "@themoss/core";
 
 /**
  * Tokens this protocol INTRODUCES (receipt tokens, LP tokens, LSTs) — they

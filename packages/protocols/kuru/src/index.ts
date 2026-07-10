@@ -1,4 +1,4 @@
-import { defineProtocolPackage } from "@mossxyz/core";
+import { defineProtocolPackage } from "@themoss/core";
 import { Kuru } from "./kuru.js";
 
 export { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";

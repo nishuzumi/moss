@@ -5,7 +5,7 @@ import {
   finalizePlan,
   NATIVE,
   plan,
-} from "@mossxyz/core";
+} from "@themoss/core";
 import { padHex, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import {

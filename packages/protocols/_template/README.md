@@ -13,7 +13,7 @@ cd packages/protocols/<yourprotocol>
 
 Then work through this checklist:
 
-- [ ] `package.json`: set `name` to `@mossxyz/protocol-<yourprotocol>`, fix
+- [ ] `package.json`: set `name` to `@themoss/protocol-<yourprotocol>`, fix
       `description`, and **delete the `"private": true` line**.
 - [ ] `src/abis/`: replace `example.ts` with your contract ABIs. Every file
       needs an **ABI origin header** — `compiled` (from contract source, add

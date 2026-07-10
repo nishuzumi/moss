@@ -5,8 +5,8 @@ import {
   NATIVE,
   type Plan,
   Registry,
-} from "@mossxyz/core";
-import { createTraceSimulator } from "@mossxyz/simulator";
+} from "@themoss/core";
+import { createTraceSimulator } from "@themoss/simulator";
 import { decodeFunctionData, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { ierc20Abi } from "../src/abis/erc.js";
@@ -88,7 +88,7 @@ describe("erc20 generic protocol (offline)", () => {
 });
 
 // Live e2e with zero funds; runtime config is explicit test data here — the
-// batteries-included defaults live in @mossxyz/system, above this layer.
+// batteries-included defaults live in @themoss/system, above this layer.
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("erc20 generic protocol (Monad mainnet e2e)", () => {
   it("native transfer simulates with zero warnings", { timeout: 120_000 }, async () => {
     const runtime = createRuntime({ rpcUrl: "https://rpc.monad.xyz", chainId: 143 });

@@ -33,9 +33,9 @@ import {
   type TxStep,
   token,
   tokenAmount,
-} from "@mossxyz/core";
-import { approveStep } from "@mossxyz/erc";
-import { knownTokenAddress } from "@mossxyz/system";
+} from "@themoss/core";
+import { approveStep } from "@themoss/erc";
+import { knownTokenAddress } from "@themoss/system";
 import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 
 export const KURU_ROUTER_ADDRESS: Address = "0xd651346d7c789536ebf06dc72aE3C8502cd695CC";

@@ -5,7 +5,7 @@ import { NATIVE, type TokenRef } from "./types.js";
 /**
  * A token identity: the native coin or one ERC-20, with decimals and symbol.
  * Owns the scaling math — and nothing else. Step building (approve, …) lives
- * in the standards layer (@mossxyz/erc); on-chain metadata fetching is
+ * in the standards layer (@themoss/erc); on-chain metadata fetching is
  * injected into the Registry as a TokenSource fallback. Core knows no ABIs
  * (ADR 0006).
  */

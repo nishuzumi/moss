@@ -1,10 +1,10 @@
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type Address, CATEGORIES, type Plan, Registry, VERBS } from "@mossxyz/core";
-import { erc20MetadataSource, ercManifest } from "@mossxyz/erc";
-import { kuruManifest } from "@mossxyz/protocol-kuru";
-import { createTraceSimulator, type Simulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { type Address, CATEGORIES, type Plan, Registry, VERBS } from "@themoss/core";
+import { erc20MetadataSource, ercManifest } from "@themoss/erc";
+import { kuruManifest } from "@themoss/protocol-kuru";
+import { createTraceSimulator, type Simulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 import { z } from "zod";
 
 export interface MossServerOptions {

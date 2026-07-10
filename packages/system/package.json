@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/system",
+  "name": "@themoss/system",
   "version": "0.1.0",
   "description": "Moss system layer for Monad: the well-known token data, chain defaults, and address-bearing system protocols",
   "license": "MIT",
@@ -19,14 +19,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mossxyz/core": "workspace:*",
-    "@mossxyz/erc": "workspace:*",
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
     "typescript": "~5.9.0",
     "vitest": "^3.2.6",
-    "@mossxyz/simulator": "workspace:*"
+    "@themoss/simulator": "workspace:*"
   }
 }

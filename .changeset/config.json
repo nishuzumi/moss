@@ -5,20 +5,20 @@
   "fixed": [],
   "linked": [
     [
-      "@mossxyz/core",
-      "@mossxyz/simulator",
-      "@mossxyz/erc",
-      "@mossxyz/system",
-      "@mossxyz/protocol-kuru",
-      "@mossxyz/mcp-server"
+      "@themoss/core",
+      "@themoss/simulator",
+      "@themoss/erc",
+      "@themoss/system",
+      "@themoss/protocol-kuru",
+      "@themoss/mcp-server"
     ]
   ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@mossxyz/example-simple-flow",
-    "@mossxyz/example-agent-swap",
-    "@mossxyz/protocol-template"
+    "@themoss/example-simple-flow",
+    "@themoss/example-agent-swap",
+    "@themoss/protocol-template"
   ]
 }

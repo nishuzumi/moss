@@ -23,7 +23,7 @@ import {
   type TxStep,
   token,
   tokenAmount,
-} from "@mossxyz/core";
+} from "@themoss/core";
 import { ierc20Abi } from "./abis/erc.js";
 import { ERC721 } from "./erc721.js";
 

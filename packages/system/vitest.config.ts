@@ -12,9 +12,9 @@ export default defineConfig({
     // Tests run against workspace sources, not dists, so a stale build can
     // never produce phantom failures.
     alias: {
-      "@mossxyz/core": src("../core/src/index.ts"),
-      "@mossxyz/simulator": src("../simulator/src/index.ts"),
-      "@mossxyz/erc": src("../erc/src/index.ts"),
+      "@themoss/core": src("../core/src/index.ts"),
+      "@themoss/simulator": src("../simulator/src/index.ts"),
+      "@themoss/erc": src("../erc/src/index.ts"),
     },
   },
 });

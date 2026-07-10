@@ -7,7 +7,6 @@
 
 ### M0 仓库脚手架 ✅
 - [x] git init + pnpm monorepo：`packages/core`、`packages/protocols`、`packages/mcp-server`、`examples/`
-- [x] npm scope 调研：`@mossxyz` 下零已发布包（发布前需正式注册确权，见插旗）
 - [x] LICENSE（MIT）
 - [x] tsconfig（strict + 标准装饰器）、biome、vitest、tsup、changesets
 - [x] CI（GitHub Actions）：lint / build / typecheck / test（build 先于 typecheck：包间类型经 dist 解析）
@@ -54,12 +53,12 @@
 - [x] SECURITY.md（模型、v1 边界：Permit/跨链桥/闪电贷、已知注意事项、私密披露通道）
 
 ## 分包架构重构（7月7日，应用户提案 —— ADR 0006/0007）✅
-- [x] **一协议一包**：`packages/protocols/<name>` → `@mossxyz/protocol-<name>`；包间组合走显式依赖
+- [x] **一协议一包**：`packages/protocols/<name>` → `@themoss/protocol-<name>`；包间组合走显式依赖
 - [x] **万物皆 manifest**：`defineProtocolPackage` + `registry.use()`；Registry 构造为空、无 import 副作用；core 自身默认物 = `systemManifest`（系统 token 表 + WMON adapter 迁入 core）
 - [x] **Token 表 Registry 作用域化**：协议包 `tokens.ts` 注册自有 token；撞名硬报错（同 symbol 异地址 = 拒绝整个 manifest）、幂等去重、大小写不敏感
-- [x] **@mossxyz/erc 标准层**：contracts/（foundry）→ `gen:abis`（forge 真编译，solc 0.8.28，origin 自动盖章）→ 通用 `erc20` 协议（transfer/balanceOf/allowance，动态地址模式：`contracts:{}` + 注入 runtime）—— 填上 `transfer` verb 真空
+- [x] **@themoss/erc 标准层**：contracts/（foundry）→ `gen:abis`（forge 真编译，solc 0.8.28，origin 自动盖章）→ 通用 `erc20` 协议（transfer/balanceOf/allowance，动态地址模式：`contracts:{}` + 注入 runtime）—— 填上 `transfer` verb 真空
 - [x] **ABI origin 三级制**（ADR 0007）：compiled > explorer > vendored；每包 `src/abis/` + 溯源头；kuru = vendored（kuru-sdk@0.0.95 + 链上行为验证）
-- [x] ~~**@mossxyz/protocols 元包**：官方全家桶 = 聚合 manifest~~（7月8日撤销：整包只有一个数组，mcp-server 自己就是天然组装点 —— 见下方"接口层与组装收敛"）
+- [x] ~~**@themoss/protocols 元包**：官方全家桶 = 聚合 manifest~~（7月8日撤销：整包只有一个数组，mcp-server 自己就是天然组装点 —— 见下方"接口层与组装收敛"）
 - [x] **_template 自校验模板**：真实 workspace 包（private，CI 常规 build/test），贡献 = `cp -r` + README 清单
 - [x] 本地 `.npmrc`（gitignored）：store/cache 收进仓库目录，沙箱裸 `pnpm` 直跑
 
@@ -77,7 +76,7 @@
 - [x] Kuru 示范落地并主网 e2e 验证（KuruRouterSwap + N×Trade 聚合 → 渲染回执）
 
 ## 接口层与组装收敛（7月8日，grilling 收敛 —— ADR 0009 + ADR 0006 修订）✅
-- [x] **@mossxyz/simulator 独立包**：验证引擎（双 tracer 模拟 + effects 提取 + expects 对账 + 观察接线）从 core 拆出，仅依赖 core；core 回归纯 authoring 基座（协议包 e2e、钱包嵌入、mcp-server 三类消费者共用）
+- [x] **@themoss/simulator 独立包**：验证引擎（双 tracer 模拟 + effects 提取 + expects 对账 + 观察接线）从 core 拆出，仅依赖 core；core 回归纯 authoring 基座（协议包 e2e、钱包嵌入、mcp-server 三类消费者共用）
 - [x] **erc = 接口层定性**（ADR 0009）：只有标准接口——编译 ABI + 地址可为调用参数的通用适配器（erc20），零写死地址；单实例标准（WETH9→WMON）的实例适配器住 system
 - [x] **跨协议组合两种货币**：ABI+地址（Handle）与 step builder（approveStep）；协议类只进 `registry.use()`——"协议注入协议"评估后否决（脱离 registry 即退化为 Handle；Plan 是终端产物不可缝合）；"manifest 期实例化"（ERC-4626 场景）记为 deferred
 - [x] **命名链路矫正**：`ERC20Abi`/`WETH9Abi`（接口数据，Abi 后缀承担区分职责）、`ERC20`（通用适配器类）、`WMON`（实例适配器类，原 Wmon）；wagmi 生成名不手改，index.ts 边界起别名
@@ -101,9 +100,9 @@
 - [x] docs/getting-started.md 新手引导：逐层揭示 discover → load → action → simulate → observations → MCP → 写适配器，每步附 Go deeper 指引
 - [x] 中文 quickstart：docs/getting-started.zh-CN.md 与英文版逐节对照（7月8日）
 - [ ] 仓库描述 + topics（GitHub 网页设置）
-- [x] changesets 首次出 CHANGELOG（7月11日）：六包 linked 联动 0.1.0，各包 CHANGELOG.md 落地；`changeset publish` 仍待 @mossxyz org 注册后执行
+- [x] changesets 首次出 CHANGELOG（7月11日）：六包 linked 联动 0.1.0，各包 CHANGELOG.md 落地；`changeset publish` 仍待 @themoss org 注册后执行
 - [x] 第一批 feature issue（7月8日，#5–#15）：8 个协议适配器（Uniswap v4 / PancakeSwap / Clober / Aave v3 / Morpho / Euler v2 / Pendle / FastLane shMONAD，均来自 app.monad.xyz 首页生态）+ 2 个接口层 ERC（4626 触发 ADR 0009 deferred 设计、1155 含审计面词汇）+ 1 个永续 verb/category 设计讨论；label 体系：adapter / interface-layer / 类目（dex/lending/staking/yield）/ difficulty:starter-intermediate-advanced / needs-design
-- [ ] 发布 npm 包前：注册 `@mossxyz` org 确权
+- [ ] 发布 npm 包前：注册 `@themoss` org 确权
 - [x] **examples/agent-swap 实盘示例**（7月10日）：Claude Code 子 agent（`.claude/agents/moss-trader.md` + 根 `.mcp.json`，零手工配置）在 Monad Foundry anvil 本地主网 fork 上走完 discover→action→simulate→钱包签名→落链，headless 实跑验收；调研结论：contract.dev 等托管 fork 不支持 geth tracer（simulate 跑不了），monad-anvil 全套支持且 chainId=143
 
 ## 已插旗（工程约束与后续事项）

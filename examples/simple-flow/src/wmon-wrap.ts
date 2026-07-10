@@ -5,13 +5,13 @@
  *
  *   discover → load → action (build Plan) → simulate → reconcile
  *
- * Run:  pnpm --filter @mossxyz/example-simple-flow wrap
+ * Run:  pnpm --filter @themoss/example-simple-flow wrap
  */
-import { type Plan, Registry } from "@mossxyz/core";
-import { ercManifest } from "@mossxyz/erc";
-import { kuruManifest } from "@mossxyz/protocol-kuru";
-import { createTraceSimulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { type Plan, Registry } from "@themoss/core";
+import { ercManifest } from "@themoss/erc";
+import { kuruManifest } from "@themoss/protocol-kuru";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 
 const ACCOUNT = (process.env.MOSS_ACCOUNT ??
   "0xCcCccCCCcCCcccCcCccccCcCCCCcccccCcCCcCcC") as `0x${string}`;

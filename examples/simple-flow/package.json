@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/example-simple-flow",
+  "name": "@themoss/example-simple-flow",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,11 +11,11 @@
     "build": "echo \"examples are not built\" && exit 0"
   },
   "dependencies": {
-    "@mossxyz/core": "workspace:*",
-    "@mossxyz/erc": "workspace:*",
-    "@mossxyz/protocol-kuru": "workspace:*",
-    "@mossxyz/simulator": "workspace:*",
-    "@mossxyz/system": "workspace:*",
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {

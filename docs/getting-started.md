@@ -34,7 +34,7 @@ also runs live mainnet e2e — free, but it needs an RPC that supports
 ## 1. Run the whole flow once
 
 ```bash
-pnpm --filter @mossxyz/example-simple-flow wrap
+pnpm --filter @themoss/example-simple-flow wrap
 ```
 
 You just watched the canonical four-step flow — wrapping 1.5 MON into WMON:
@@ -52,14 +52,14 @@ The last line is the point of the whole system:
 
 Now let's take those four steps apart. Create a scratch file to follow along
 (`examples/simple-flow/src/play.ts`, run with
-`pnpm --filter @mossxyz/example-simple-flow exec tsx src/play.ts`):
+`pnpm --filter @themoss/example-simple-flow exec tsx src/play.ts`):
 
 ```ts
-import { Registry } from "@mossxyz/core";
-import { ercManifest } from "@mossxyz/erc";
-import { kuruManifest } from "@mossxyz/protocol-kuru";
-import { createTraceSimulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { Registry } from "@themoss/core";
+import { ercManifest } from "@themoss/erc";
+import { kuruManifest } from "@themoss/protocol-kuru";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 
 const runtime = monadRuntime();
 const registry = new Registry(runtime);
@@ -165,7 +165,7 @@ Two experiments worth running:
 - **Chain plans** — pass `[sellPlan, buyBackPlan]` in one call: plan B runs
   on plan A's simulated state, so it can spend USDC the account only holds
   inside the simulation. That is how multi-step flows (claim → swap → supply)
-  are verified end to end. Run `pnpm --filter @mossxyz/example-simple-flow
+  are verified end to end. Run `pnpm --filter @themoss/example-simple-flow
   swap` to watch a MON → USDC → MON round-trip do exactly this.
 
 **Go deeper:** [mcp-tools.md](./mcp-tools.md#simulate) — warning codes ·
@@ -251,12 +251,12 @@ Definition of Done your PR is reviewed against
 
 | Layer | Package | One-line charter |
 | --- | --- | --- |
-| machinery | `@mossxyz/core` | decorators, Plans, Registry — zero chain data |
-| verification | `@mossxyz/simulator` | trace simulation + effects reconciliation |
-| interfaces | `@mossxyz/erc` | compiled standard ABIs + address-free generic adapters (erc20, erc721) |
-| instances | `@mossxyz/system` | Monad token table, chain defaults, WMON |
-| protocols | `@mossxyz/protocol-*` | one package per protocol |
-| product | `@mossxyz/mcp-server` | the four tools, batteries included |
+| machinery | `@themoss/core` | decorators, Plans, Registry — zero chain data |
+| verification | `@themoss/simulator` | trace simulation + effects reconciliation |
+| interfaces | `@themoss/erc` | compiled standard ABIs + address-free generic adapters (erc20, erc721) |
+| instances | `@themoss/system` | Monad token table, chain defaults, WMON |
+| protocols | `@themoss/protocol-*` | one package per protocol |
+| product | `@themoss/mcp-server` | the four tools, batteries included |
 
 Why it is layered this way: [ADR 0006](./adr/0006-protocol-packages-and-manifests.md)
 and [ADR 0009](./adr/0009-erc-interface-layer-and-composition.md). Every other

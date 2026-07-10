@@ -1,4 +1,4 @@
-import { defineProtocolPackage } from "@mossxyz/core";
+import { defineProtocolPackage } from "@themoss/core";
 import { MONAD_TOKENS } from "./tokens.js";
 import { WMON } from "./wmon.js";
 

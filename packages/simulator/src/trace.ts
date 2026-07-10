@@ -1,4 +1,4 @@
-import type { Address, Hex } from "@mossxyz/core";
+import type { Address, Hex } from "@themoss/core";
 import type { PublicClient } from "viem";
 
 /** One frame of a callTracer result. Addresses arrive lowercase. */
