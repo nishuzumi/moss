@@ -1,6 +1,6 @@
 {
   "name": "@mossxyz/simulator",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Moss verification engine: debug_traceCall simulation, effects extraction, expects reconciliation",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@mossxyz/mcp-server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Moss MCP server: discover / load / action / simulate over stdio",
   "license": "MIT",
   "type": "module",

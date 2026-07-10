@@ -18,6 +18,7 @@
   "updateInternalDependencies": "patch",
   "ignore": [
     "@mossxyz/example-simple-flow",
+    "@mossxyz/example-agent-swap",
     "@mossxyz/protocol-template"
   ]
 }

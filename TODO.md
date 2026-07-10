@@ -101,7 +101,7 @@
 - [x] docs/getting-started.md 新手引导：逐层揭示 discover → load → action → simulate → observations → MCP → 写适配器，每步附 Go deeper 指引
 - [x] 中文 quickstart：docs/getting-started.zh-CN.md 与英文版逐节对照（7月8日）
 - [ ] 仓库描述 + topics（GitHub 网页设置）
-- [ ] changesets 首次发布出 CHANGELOG
+- [x] changesets 首次出 CHANGELOG（7月11日）：六包 linked 联动 0.1.0，各包 CHANGELOG.md 落地；`changeset publish` 仍待 @mossxyz org 注册后执行
 - [x] 第一批 feature issue（7月8日，#5–#15）：8 个协议适配器（Uniswap v4 / PancakeSwap / Clober / Aave v3 / Morpho / Euler v2 / Pendle / FastLane shMONAD，均来自 app.monad.xyz 首页生态）+ 2 个接口层 ERC（4626 触发 ADR 0009 deferred 设计、1155 含审计面词汇）+ 1 个永续 verb/category 设计讨论；label 体系：adapter / interface-layer / 类目（dex/lending/staking/yield）/ difficulty:starter-intermediate-advanced / needs-design
 - [ ] 发布 npm 包前：注册 `@mossxyz` org 确权
 - [x] **examples/agent-swap 实盘示例**（7月10日）：Claude Code 子 agent（`.claude/agents/moss-trader.md` + 根 `.mcp.json`，零手工配置）在 Monad Foundry anvil 本地主网 fork 上走完 discover→action→simulate→钱包签名→落链，headless 实跑验收；调研结论：contract.dev 等托管 fork 不支持 geth tracer（simulate 跑不了），monad-anvil 全套支持且 chainId=143

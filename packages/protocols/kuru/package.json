@@ -1,6 +1,6 @@
 {
   "name": "@mossxyz/protocol-kuru",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Moss protocol adapter for Kuru — Monad-native on-chain CLOB DEX",
   "license": "MIT",
   "type": "module",

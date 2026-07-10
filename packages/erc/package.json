@@ -1,6 +1,6 @@
 {
   "name": "@mossxyz/erc",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Moss interface layer: compiled ERC standard ABIs and address-free generic adapters",
   "license": "MIT",
   "type": "module",
