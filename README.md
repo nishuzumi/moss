@@ -67,6 +67,11 @@ pnpm --filter @mossxyz/example-simple-flow wrap
 pnpm --filter @mossxyz/example-simple-flow swap
 ```
 
+Want to see a trade actually land? [examples/agent-swap](./examples/agent-swap)
+runs a Claude Code subagent that drives the MCP tools end to end and — only
+after a clean simulation — signs and sends on a **local anvil fork of Monad
+mainnet**. Real orderbook state, zero real funds, zero configuration.
+
 New here? [docs/getting-started.md](./docs/getting-started.md) walks the whole
 system one layer at a time — run first, then open each stage up.
 
@@ -130,6 +135,7 @@ Machinery at the bottom, standards above it, instances above that, the product s
 | [MCP tools reference](./docs/mcp-tools.md) | The `discover` / `load` / `action` / `simulate` contracts, Plan anatomy, warning codes |
 | [Protocol onboarding](./docs/protocol-onboarding.md) | Writing and submitting an adapter, ABIs to receipts |
 | [Agent skill guide](./docs/agent-skill.md) | The rules an agent must follow: mandatory simulation, halt on warnings, intent alignment |
+| [Agent swap example](./examples/agent-swap/README.md) | A Claude Code subagent trading for real on a local Monad mainnet fork |
 | [ADRs](./docs/adr/) | Every design decision with its trade-offs |
 | [Glossary](./CONTEXT.md) | The project's ubiquitous language |
 

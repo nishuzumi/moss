@@ -21,6 +21,28 @@ importers:
         specifier: ~5.9.0
         version: 5.9.3
 
+  examples/agent-swap:
+    dependencies:
+      '@mossxyz/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@mossxyz/erc':
+        specifier: workspace:*
+        version: link:../../packages/erc
+      '@mossxyz/system':
+        specifier: workspace:*
+        version: link:../../packages/system
+      viem:
+        specifier: ^2.54.3
+        version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.0
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+
   examples/simple-flow:
     dependencies:
       '@mossxyz/core':

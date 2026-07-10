@@ -9,4 +9,6 @@ coverage/
 .npmrc
 .pnpm-cache/
 .pnpm-state/
-.claude/
+# .claude/agents ships with the repo (the agent-swap example); the rest is local.
+.claude/*
+!.claude/agents/
