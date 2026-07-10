@@ -1,6 +1,6 @@
-import { type MossRuntime, NATIVE, type Plan, type QueryResult, Registry } from "@mossxyz/core";
-import { createTraceSimulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { type MossRuntime, NATIVE, type Plan, type QueryResult, Registry } from "@themoss/core";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 import { formatUnits } from "viem";
 import { describe, expect, it } from "vitest";
 import { kuruManifest, USDC_ADDRESS } from "../src/index.js";

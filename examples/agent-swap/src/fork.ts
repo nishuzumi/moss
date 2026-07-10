@@ -6,13 +6,13 @@
  * Requires the Monad flavor of Foundry (Monad gas model + opcode pricing):
  *   curl -L https://foundry.category.xyz | bash && foundryup --network monad
  *
- * Run:  pnpm --filter @mossxyz/example-agent-swap fork
+ * Run:  pnpm --filter @themoss/example-agent-swap fork
  */
 import { spawn, spawnSync } from "node:child_process";
 import { openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MONAD_CHAIN_ID } from "@mossxyz/system";
+import { MONAD_CHAIN_ID } from "@themoss/system";
 import { formatEther } from "viem";
 import { devAccount, FORK_RPC_URL, rpc } from "./dev-wallet.js";
 

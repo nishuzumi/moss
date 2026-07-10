@@ -1,4 +1,4 @@
-import type { Hex } from "@mossxyz/core";
+import type { Hex } from "@themoss/core";
 import { toHex } from "viem";
 import type { PrestateDiff, StateOverrides } from "./trace.js";
 

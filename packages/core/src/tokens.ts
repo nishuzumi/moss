@@ -3,9 +3,9 @@ import { NATIVE, type TokenRef } from "./types.js";
 
 /**
  * One entry of the well-known token table: the interface standard is defined
- * once (@mossxyz/erc), instances are registered by address into a
+ * once (@themoss/erc), instances are registered by address into a
  * per-registry table. Core owns only the MECHANISM — the actual token data
- * ships in @mossxyz/system's manifest and in protocol packages' tokens.ts.
+ * ships in @themoss/system's manifest and in protocol packages' tokens.ts.
  */
 export interface KnownToken {
   symbol: string;
@@ -67,7 +67,7 @@ export class TokenTable {
    * Build the TokenSource used by semantic decoding: table first (verified
    * metadata, zero RPC). Unknown SYMBOLS throw loudly — they must never fall
    * through to the chain. Unknown ADDRESSES go to the injected fallback
-   * (e.g. @mossxyz/erc's erc20MetadataSource) or throw with guidance when
+   * (e.g. @themoss/erc's erc20MetadataSource) or throw with guidance when
    * none is wired — core itself reads no contracts (ADR 0006).
    */
   source(fallback?: TokenSource): TokenSource {
@@ -87,7 +87,7 @@ export class TokenTable {
           new Error(
             `token ${ref} is not in the token table and no fallback is configured — ` +
               "register it via a package manifest, or construct the Registry with " +
-              "{ tokenFallback: erc20MetadataSource(client) } from @mossxyz/erc",
+              "{ tokenFallback: erc20MetadataSource(client) } from @themoss/erc",
           ),
         );
       }

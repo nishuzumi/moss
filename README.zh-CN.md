@@ -48,10 +48,10 @@ pnpm install
 pnpm build
 
 # 标准调用流：discover → load → action → simulate
-pnpm --filter @mossxyz/example-simple-flow wrap
+pnpm --filter @themoss/example-simple-flow wrap
 
 # 跨 Plan 组合（真实订单簿）：MON → USDC → MON
-pnpm --filter @mossxyz/example-simple-flow swap
+pnpm --filter @themoss/example-simple-flow swap
 ```
 
 想看一笔交易真正落链？[examples/agent-swap](./examples/agent-swap) 用一个 Claude Code 子 agent 走完 MCP 工具全流程，并在模拟零警告之后才签名发送——执行在**本地 anvil fork 的 Monad 主网**上：真实订单簿状态、零真实资金、零配置。

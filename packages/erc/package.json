@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/erc",
+  "name": "@themoss/erc",
   "version": "0.1.0",
   "description": "Moss interface layer: compiled ERC standard ABIs and address-free generic adapters",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "gen:abis": "wagmi generate"
   },
   "dependencies": {
-    "@mossxyz/core": "workspace:*",
+    "@themoss/core": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {
@@ -29,6 +29,6 @@
     "tsx": "^4.19.0",
     "typescript": "~5.9.0",
     "vitest": "^3.2.6",
-    "@mossxyz/simulator": "workspace:*"
+    "@themoss/simulator": "workspace:*"
   }
 }

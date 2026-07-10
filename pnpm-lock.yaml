@@ -23,13 +23,13 @@ importers:
 
   examples/agent-swap:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@mossxyz/erc':
+      '@themoss/erc':
         specifier: workspace:*
         version: link:../../packages/erc
-      '@mossxyz/system':
+      '@themoss/system':
         specifier: workspace:*
         version: link:../../packages/system
       viem:
@@ -45,19 +45,19 @@ importers:
 
   examples/simple-flow:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@mossxyz/erc':
+      '@themoss/erc':
         specifier: workspace:*
         version: link:../../packages/erc
-      '@mossxyz/protocol-kuru':
+      '@themoss/protocol-kuru':
         specifier: workspace:*
         version: link:../../packages/protocols/kuru
-      '@mossxyz/simulator':
+      '@themoss/simulator':
         specifier: workspace:*
         version: link:../../packages/simulator
-      '@mossxyz/system':
+      '@themoss/system':
         specifier: workspace:*
         version: link:../../packages/system
       viem:
@@ -89,14 +89,14 @@ importers:
 
   packages/erc:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../core
       viem:
         specifier: ^2.54.3
         version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
-      '@mossxyz/simulator':
+      '@themoss/simulator':
         specifier: workspace:*
         version: link:../simulator
       '@wagmi/cli':
@@ -120,19 +120,19 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../core
-      '@mossxyz/erc':
+      '@themoss/erc':
         specifier: workspace:*
         version: link:../erc
-      '@mossxyz/protocol-kuru':
+      '@themoss/protocol-kuru':
         specifier: workspace:*
         version: link:../protocols/kuru
-      '@mossxyz/simulator':
+      '@themoss/simulator':
         specifier: workspace:*
         version: link:../simulator
-      '@mossxyz/system':
+      '@themoss/system':
         specifier: workspace:*
         version: link:../system
       zod:
@@ -151,7 +151,7 @@ importers:
 
   packages/protocols/_template:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../../core
       viem:
@@ -170,20 +170,20 @@ importers:
 
   packages/protocols/kuru:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../../core
-      '@mossxyz/erc':
+      '@themoss/erc':
         specifier: workspace:*
         version: link:../../erc
-      '@mossxyz/system':
+      '@themoss/system':
         specifier: workspace:*
         version: link:../../system
       viem:
         specifier: ^2.54.3
         version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
-      '@mossxyz/simulator':
+      '@themoss/simulator':
         specifier: workspace:*
         version: link:../../simulator
       tsup:
@@ -201,7 +201,7 @@ importers:
 
   packages/simulator:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../core
       viem:
@@ -220,17 +220,17 @@ importers:
 
   packages/system:
     dependencies:
-      '@mossxyz/core':
+      '@themoss/core':
         specifier: workspace:*
         version: link:../core
-      '@mossxyz/erc':
+      '@themoss/erc':
         specifier: workspace:*
         version: link:../erc
       viem:
         specifier: ^2.54.3
         version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
-      '@mossxyz/simulator':
+      '@themoss/simulator':
         specifier: workspace:*
         version: link:../simulator
       tsup:

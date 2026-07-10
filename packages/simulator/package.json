@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/simulator",
+  "name": "@themoss/simulator",
   "version": "0.1.0",
   "description": "Moss verification engine: debug_traceCall simulation, effects extraction, expects reconciliation",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mossxyz/core": "workspace:*",
+    "@themoss/core": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {

@@ -10,8 +10,8 @@ export default defineConfig({
     // Tests run against core's source, not its dist, so a stale build can
     // never produce phantom failures.
     alias: {
-      "@mossxyz/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
-      "@mossxyz/simulator": fileURLToPath(new URL("../simulator/src/index.ts", import.meta.url)),
+      "@themoss/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
+      "@themoss/simulator": fileURLToPath(new URL("../simulator/src/index.ts", import.meta.url)),
     },
   },
 });

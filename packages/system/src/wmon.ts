@@ -1,6 +1,6 @@
 /**
  * WMON — canonical wrapped MON on Monad mainnet. A SYSTEM protocol: the
- * INTERFACE is the generic WETH9 standard (compiled ABI from @mossxyz/erc),
+ * INTERFACE is the generic WETH9 standard (compiled ABI from @themoss/erc),
  * but the ADDRESS is Monad instance data — which is exactly why the adapter
  * class lives in the system layer (ADR 0006: anything with a hardcoded
  * address lives in system or a protocol package).
@@ -31,8 +31,8 @@ import {
   Protocol,
   plan,
   Query,
-} from "@mossxyz/core";
-import { WETH9Abi } from "@mossxyz/erc";
+} from "@themoss/core";
+import { WETH9Abi } from "@themoss/erc";
 import { knownTokenAddress } from "./tokens.js";
 
 /** Canonical address comes from the system token data (single source of truth). */

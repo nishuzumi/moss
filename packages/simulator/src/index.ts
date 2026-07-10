@@ -1,5 +1,5 @@
-import type { Hex, MossRuntime, ObserverHook, Plan, PlanObservation } from "@mossxyz/core";
-import { computePlanHash } from "@mossxyz/core";
+import type { Hex, MossRuntime, ObserverHook, Plan, PlanObservation } from "@themoss/core";
+import { computePlanHash } from "@themoss/core";
 import { collectLogs, EffectsAccumulator, type EffectsSummary } from "./effects.js";
 import { mergeDiff } from "./overrides.js";
 import { reconcile, type Warning } from "./reconcile.js";

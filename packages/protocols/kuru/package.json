@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/protocol-kuru",
+  "name": "@themoss/protocol-kuru",
   "version": "0.1.0",
   "description": "Moss protocol adapter for Kuru — Monad-native on-chain CLOB DEX",
   "license": "MIT",
@@ -21,16 +21,16 @@
     "gen:abis": "tsx scripts/gen-abis.ts"
   },
   "dependencies": {
-    "@mossxyz/core": "workspace:*",
+    "@themoss/core": "workspace:*",
     "viem": "^2.54.3",
-    "@mossxyz/erc": "workspace:*",
-    "@mossxyz/system": "workspace:*"
+    "@themoss/erc": "workspace:*",
+    "@themoss/system": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
     "typescript": "~5.9.0",
     "vitest": "^3.2.6",
     "tsx": "^4.19.0",
-    "@mossxyz/simulator": "workspace:*"
+    "@themoss/simulator": "workspace:*"
   }
 }

@@ -1,6 +1,6 @@
 # erc is an interface layer; protocols compose via ABIs and steps, never via protocol instances
 
-The `@mossxyz/erc` package looked, at a glance, like a "token package". It is
+The `@themoss/erc` package looked, at a glance, like a "token package". It is
 not. It is the **interface layer**: everything in it is a standard *interface*
 — never an *instance*. Two kinds of exports, zero hardcoded addresses:
 

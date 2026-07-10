@@ -1,4 +1,4 @@
-# @mossxyz/mcp-server
+# @themoss/mcp-server
 
 ## 0.1.0
 
@@ -29,8 +29,8 @@
 ### Patch Changes
 
 - Updated dependencies
-  - @mossxyz/core@0.1.0
-  - @mossxyz/simulator@0.1.0
-  - @mossxyz/erc@0.1.0
-  - @mossxyz/system@0.1.0
-  - @mossxyz/protocol-kuru@0.1.0
+  - @themoss/core@0.1.0
+  - @themoss/simulator@0.1.0
+  - @themoss/erc@0.1.0
+  - @themoss/system@0.1.0
+  - @themoss/protocol-kuru@0.1.0

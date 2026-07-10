@@ -1,5 +1,5 @@
-import type { Address, KnownToken } from "@mossxyz/core";
-import { NATIVE, Token } from "@mossxyz/core";
+import type { Address, KnownToken } from "@themoss/core";
+import { NATIVE, Token } from "@themoss/core";
 
 /**
  * The Monad mainnet well-known token data — instances of the ERC-20 standard

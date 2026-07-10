@@ -20,7 +20,7 @@ import {
   plan,
   Query,
   uint,
-} from "@mossxyz/core";
+} from "@themoss/core";
 import { ierc721Abi } from "./abis/erc.js";
 
 @Protocol({

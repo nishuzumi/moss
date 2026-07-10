@@ -180,7 +180,7 @@ describe("plan", () => {
   } as const;
 
   // The approval-tag mechanism is core's; the ENCODING of approve lives in
-  // @mossxyz/erc. A hand-built tagged step exercises the mechanism alone.
+  // @themoss/erc. A hand-built tagged step exercises the mechanism alone.
   const approve: TxStep = {
     to: USDC,
     data: "0x095ea7b3",

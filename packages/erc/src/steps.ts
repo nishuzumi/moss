@@ -1,5 +1,5 @@
-import type { Address, TokenSource, TxStep } from "@mossxyz/core";
-import { Token } from "@mossxyz/core";
+import type { Address, TokenSource, TxStep } from "@themoss/core";
+import { Token } from "@themoss/core";
 import type { PublicClient } from "viem";
 import { encodeFunctionData } from "viem";
 import { ierc20Abi } from "./abis/erc.js";

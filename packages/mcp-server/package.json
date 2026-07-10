@@ -1,5 +1,5 @@
 {
-  "name": "@mossxyz/mcp-server",
+  "name": "@themoss/mcp-server",
   "version": "0.1.0",
   "description": "Moss MCP server: discover / load / action / simulate over stdio",
   "license": "MIT",
@@ -23,12 +23,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@mossxyz/core": "workspace:*",
-    "@mossxyz/protocol-kuru": "workspace:*",
+    "@themoss/core": "workspace:*",
+    "@themoss/protocol-kuru": "workspace:*",
     "zod": "^3.25.0",
-    "@mossxyz/erc": "workspace:*",
-    "@mossxyz/system": "workspace:*",
-    "@mossxyz/simulator": "workspace:*"
+    "@themoss/erc": "workspace:*",
+    "@themoss/system": "workspace:*",
+    "@themoss/simulator": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

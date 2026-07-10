@@ -1,4 +1,4 @@
-import { type MossRuntime, NATIVE, type Plan, Registry } from "@mossxyz/core";
+import { type MossRuntime, NATIVE, type Plan, Registry } from "@themoss/core";
 import { describe, expect, it } from "vitest";
 import { EXAMPLE_VAULT_ADDRESS, templateManifest } from "../src/index.js";
 
@@ -40,7 +40,7 @@ describe("template adapter (offline shape)", () => {
 //
 // describe.skipIf(!!process.env.MOSS_SKIP_E2E)("<protocol> (Monad mainnet e2e)", () => {
 //   it("happy path simulates with zero warnings", { timeout: 120_000 }, async () => {
-//     const runtime = monadRuntime(); // from @mossxyz/system
+//     const runtime = monadRuntime(); // from @themoss/system
 //     ...registry.use(...); const simulator = createTraceSimulator(runtime);
 //     const { results } = await simulator.simulate([plan]);
 //     expect(results[0]?.warnings).toEqual([]);

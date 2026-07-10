@@ -1,4 +1,4 @@
-import { type Expects, NATIVE } from "@mossxyz/core";
+import { type Expects, NATIVE } from "@themoss/core";
 import type { EffectsSummary } from "./effects.js";
 
 export type WarningCode =

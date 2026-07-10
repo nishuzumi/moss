@@ -31,7 +31,7 @@ import {
   Protocol,
   plan,
   Query,
-} from "@mossxyz/core";
+} from "@themoss/core";
 import { ExampleVaultAbi } from "./abis/example.js";
 
 // CHANGEME: verified on-chain how? (bytecode present, metadata matches, source?)
@@ -44,7 +44,7 @@ export const EXAMPLE_VAULT_ADDRESS: Address = "0x0000000000000000000000000000000
   contracts: {
     // Key must match the `declare` field below. For protocols that operate on
     // caller-supplied addresses, use `contracts: {}` and `declare runtime` —
-    // see the generic erc20 protocol in @mossxyz/erc.
+    // see the generic erc20 protocol in @themoss/erc.
     vault: { abi: ExampleVaultAbi, addr: EXAMPLE_VAULT_ADDRESS },
   },
 })

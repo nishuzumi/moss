@@ -85,7 +85,7 @@ function fillTemplate(template: string, raw: Record<string, unknown>): string {
 export interface RegistryOptions {
   /**
    * Resolves token ADDRESSES outside the table (symbols never fall through).
-   * Wire @mossxyz/erc's erc20MetadataSource(client) here; without it,
+   * Wire @themoss/erc's erc20MetadataSource(client) here; without it,
    * unknown addresses fail loudly with guidance — core reads no contracts.
    */
   tokenFallback?: TokenSource;
@@ -101,7 +101,7 @@ export class Registry {
   /**
    * A new Registry is EMPTY — no protocols, no tokens. Assemble it from
    * protocol packages with use(); nothing registers itself by import
-   * side effects (ADR 0006). The Monad defaults ship in @mossxyz/system's
+   * side effects (ADR 0006). The Monad defaults ship in @themoss/system's
    * `systemManifest`.
    */
   constructor(runtime: MossRuntime, opts: RegistryOptions = {}) {

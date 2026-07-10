@@ -44,14 +44,14 @@ The `moss-trader` subagent (defined in [`.claude/agents/moss-trader.md`](../../.
 wired to the `moss` MCP server declared in [`.mcp.json`](../../.mcp.json) —
 nothing to configure by hand) will:
 
-1. run `pnpm --filter @mossxyz/example-agent-swap fork` — idempotently starts
+1. run `pnpm --filter @themoss/example-agent-swap fork` — idempotently starts
    `anvil --fork-url https://rpc.monad.xyz` on `127.0.0.1:8545` and funds the
    demo wallet with 1,000,000 MON via `anvil_setBalance`;
 2. call `discover` / `load` / `action` to build the Plan for the wallet's
    address, then `simulate` it — **any warning stops the flow before a
    signature exists**;
 3. write the verified Plan to a temp file and run
-   `pnpm --filter @mossxyz/example-agent-swap wallet send <plan.json>`;
+   `pnpm --filter @themoss/example-agent-swap wallet send <plan.json>`;
 4. report transaction hashes and the wallet's balances before and after.
 
 ## The wallet, by hand
@@ -59,10 +59,10 @@ nothing to configure by hand) will:
 Everything the agent does you can do yourself:
 
 ```bash
-pnpm --filter @mossxyz/example-agent-swap fork      # start + fund (idempotent)
-pnpm --filter @mossxyz/example-agent-swap wallet address
-pnpm --filter @mossxyz/example-agent-swap wallet balance
-pnpm --filter @mossxyz/example-agent-swap wallet send /path/to/plan.json
+pnpm --filter @themoss/example-agent-swap fork      # start + fund (idempotent)
+pnpm --filter @themoss/example-agent-swap wallet address
+pnpm --filter @themoss/example-agent-swap wallet balance
+pnpm --filter @themoss/example-agent-swap wallet send /path/to/plan.json
 ```
 
 The key inside `src/dev-wallet.ts` is anvil's dev account #0 — publicly known

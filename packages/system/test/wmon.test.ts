@@ -1,6 +1,6 @@
-import { type MossRuntime, NATIVE, type Plan, Registry } from "@mossxyz/core";
-import { erc20MetadataSource, ercManifest } from "@mossxyz/erc";
-import { createTraceSimulator } from "@mossxyz/simulator";
+import { type MossRuntime, NATIVE, type Plan, Registry } from "@themoss/core";
+import { erc20MetadataSource, ercManifest } from "@themoss/erc";
+import { createTraceSimulator } from "@themoss/simulator";
 import { describe, expect, it } from "vitest";
 import { monadRuntime, systemManifest, WMON_ADDRESS } from "../src/index.js";
 

@@ -32,7 +32,7 @@ MOSS_SKIP_E2E=1 pnpm test
 ## 1. 先把整个流程跑一遍
 
 ```bash
-pnpm --filter @mossxyz/example-simple-flow wrap
+pnpm --filter @themoss/example-simple-flow wrap
 ```
 
 你刚刚看到的是标准四步流——把 1.5 MON 包装成 WMON：
@@ -50,14 +50,14 @@ pnpm --filter @mossxyz/example-simple-flow wrap
 
 现在把这四步拆开。建一个草稿文件跟着敲
 （`examples/simple-flow/src/play.ts`，用
-`pnpm --filter @mossxyz/example-simple-flow exec tsx src/play.ts` 运行）：
+`pnpm --filter @themoss/example-simple-flow exec tsx src/play.ts` 运行）：
 
 ```ts
-import { Registry } from "@mossxyz/core";
-import { ercManifest } from "@mossxyz/erc";
-import { kuruManifest } from "@mossxyz/protocol-kuru";
-import { createTraceSimulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { Registry } from "@themoss/core";
+import { ercManifest } from "@themoss/erc";
+import { kuruManifest } from "@themoss/protocol-kuru";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 
 const runtime = monadRuntime();
 const registry = new Registry(runtime);
@@ -157,7 +157,7 @@ wrapped 铸毁）、每一个授权、每一个收款方。然后把现实和计
 - **链式 Plan** —— 把 `[卖出Plan, 买回Plan]` 放进一次调用：Plan B 跑在
   Plan A 的模拟状态上，可以花掉账户只在模拟里才持有的 USDC。多步流程
   （claim → swap → supply）就是这样端到端验证的。跑
-  `pnpm --filter @mossxyz/example-simple-flow swap` 看一个
+  `pnpm --filter @themoss/example-simple-flow swap` 看一个
   MON → USDC → MON 往返实地做这件事。
 
 **深入阅读：** [mcp-tools.md](./mcp-tools.md#simulate) —— warning 码表 ·
@@ -242,12 +242,12 @@ vendored ABI、观察面）。
 
 | 层 | 包 | 一句话职责 |
 | --- | --- | --- |
-| 机器 | `@mossxyz/core` | 装饰器、Plan、Registry —— 零链数据 |
-| 验证 | `@mossxyz/simulator` | trace 模拟 + effects 对账 |
-| 接口 | `@mossxyz/erc` | 编译的标准 ABI + 无地址通用适配器（erc20、erc721） |
-| 实例 | `@mossxyz/system` | Monad token 表、链默认值、WMON |
-| 协议 | `@mossxyz/protocol-*` | 一个协议一个包 |
-| 产品 | `@mossxyz/mcp-server` | 四个工具，开箱即用 |
+| 机器 | `@themoss/core` | 装饰器、Plan、Registry —— 零链数据 |
+| 验证 | `@themoss/simulator` | trace 模拟 + effects 对账 |
+| 接口 | `@themoss/erc` | 编译的标准 ABI + 无地址通用适配器（erc20、erc721） |
+| 实例 | `@themoss/system` | Monad token 表、链默认值、WMON |
+| 协议 | `@themoss/protocol-*` | 一个协议一个包 |
+| 产品 | `@themoss/mcp-server` | 四个工具，开箱即用 |
 
 为什么这样分层：[ADR 0006](./adr/0006-protocol-packages-and-manifests.md)
 和 [ADR 0009](./adr/0009-erc-interface-layer-and-composition.md)。其余所有

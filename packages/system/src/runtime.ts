@@ -1,4 +1,4 @@
-import { createRuntime, type MossRuntime } from "@mossxyz/core";
+import { createRuntime, type MossRuntime } from "@themoss/core";
 
 /** Monad mainnet. */
 export const MONAD_CHAIN_ID = 143;

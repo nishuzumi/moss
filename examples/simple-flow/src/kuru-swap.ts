@@ -6,13 +6,13 @@
  * The USDC spent by plan 2 exists only inside the simulation: this is the
  * primitive that portfolio-rebalancing agents build on.
  *
- * Run:  pnpm --filter @mossxyz/example-simple-flow swap
+ * Run:  pnpm --filter @themoss/example-simple-flow swap
  */
-import { type Plan, type QueryResult, Registry } from "@mossxyz/core";
-import { ercManifest } from "@mossxyz/erc";
-import { kuruManifest } from "@mossxyz/protocol-kuru";
-import { createTraceSimulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { type Plan, type QueryResult, Registry } from "@themoss/core";
+import { ercManifest } from "@themoss/erc";
+import { kuruManifest } from "@themoss/protocol-kuru";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 import { formatUnits } from "viem";
 
 const ACCOUNT = (process.env.MOSS_ACCOUNT ??

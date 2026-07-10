@@ -42,10 +42,10 @@ Alpha. Monad mainnet (chain id 143). Moss builds and simulates transactions; it 
 
 | Protocol | Package | Capabilities | Queries |
 | --- | --- | --- | --- |
-| WMON (canonical wrapped MON) | `@mossxyz/system` | `wrap`, `unwrap` | `balanceOf` |
-| erc20 (generic — any token, native MON included) | `@mossxyz/erc` | `transfer` | `balanceOf`, `allowance` |
-| erc721 (generic — any NFT collection) | `@mossxyz/erc` | `transfer` | `ownerOf`, `balanceOf` |
-| [Kuru](https://kuru.io) (on-chain CLOB DEX) | `@mossxyz/protocol-kuru` | `swap` (market orders, MON/USDC & MON/AUSD) | `quote`, `markets` |
+| WMON (canonical wrapped MON) | `@themoss/system` | `wrap`, `unwrap` | `balanceOf` |
+| erc20 (generic — any token, native MON included) | `@themoss/erc` | `transfer` | `balanceOf`, `allowance` |
+| erc721 (generic — any NFT collection) | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
+| [Kuru](https://kuru.io) (on-chain CLOB DEX) | `@themoss/protocol-kuru` | `swap` (market orders, MON/USDC & MON/AUSD) | `quote`, `markets` |
 
 One protocol = one package. Registries assemble explicitly from package manifests — nothing registers itself by import; the MCP server lists its served catalog in one array in `server.ts` ([ADR 0006](./docs/adr/0006-protocol-packages-and-manifests.md)).
 
@@ -61,10 +61,10 @@ pnpm install
 pnpm build
 
 # the canonical flow: discover → load → action → simulate
-pnpm --filter @mossxyz/example-simple-flow wrap
+pnpm --filter @themoss/example-simple-flow wrap
 
 # cross-plan composition on a live orderbook: MON → USDC → MON
-pnpm --filter @mossxyz/example-simple-flow swap
+pnpm --filter @themoss/example-simple-flow swap
 ```
 
 Want to see a trade actually land? [examples/agent-swap](./examples/agent-swap)
@@ -97,11 +97,11 @@ The agent gets four tools: `discover`, `load`, `action`, `simulate` — full too
 ### Use as a library
 
 ```ts
-import { Registry } from "@mossxyz/core";
-import { erc20MetadataSource, ercManifest } from "@mossxyz/erc";
-import { kuruManifest } from "@mossxyz/protocol-kuru";
-import { createTraceSimulator } from "@mossxyz/simulator";
-import { monadRuntime, systemManifest } from "@mossxyz/system";
+import { Registry } from "@themoss/core";
+import { erc20MetadataSource, ercManifest } from "@themoss/erc";
+import { kuruManifest } from "@themoss/protocol-kuru";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime, systemManifest } from "@themoss/system";
 
 const runtime = monadRuntime();
 const registry = new Registry(runtime, { tokenFallback: erc20MetadataSource(runtime.client) });
@@ -120,12 +120,12 @@ Machinery at the bottom, standards above it, instances above that, the product s
 
 | Package | Role | Depends on |
 | --- | --- | --- |
-| `@mossxyz/core` | Pure machinery — zero chain data, zero ABIs. Only dependency: viem | — |
-| `@mossxyz/simulator` | The verification engine: `debug_traceCall` simulation, effects extraction, expects reconciliation | core |
-| `@mossxyz/erc` | The interface layer: compiled standard ABIs (`ERC20Abi`, `ERC721Abi`, `WETH9Abi`), address-free generic behavior (`erc20`/`erc721` protocols, `approveStep`) — [ADR 0009](./docs/adr/0009-erc-interface-layer-and-composition.md) | core |
-| `@mossxyz/system` | Monad instances: token data, chain defaults (`monadRuntime`), address-bearing system adapters (WMON) | core, erc |
-| `@mossxyz/protocol-*` | One package per protocol (`packages/protocols/*`; start from `_template`) | core (+ erc/system as needed) |
-| `@mossxyz/mcp-server` | The four MCP tools over stdio, batteries included — assembles the served catalog itself | all of the above |
+| `@themoss/core` | Pure machinery — zero chain data, zero ABIs. Only dependency: viem | — |
+| `@themoss/simulator` | The verification engine: `debug_traceCall` simulation, effects extraction, expects reconciliation | core |
+| `@themoss/erc` | The interface layer: compiled standard ABIs (`ERC20Abi`, `ERC721Abi`, `WETH9Abi`), address-free generic behavior (`erc20`/`erc721` protocols, `approveStep`) — [ADR 0009](./docs/adr/0009-erc-interface-layer-and-composition.md) | core |
+| `@themoss/system` | Monad instances: token data, chain defaults (`monadRuntime`), address-bearing system adapters (WMON) | core, erc |
+| `@themoss/protocol-*` | One package per protocol (`packages/protocols/*`; start from `_template`) | core (+ erc/system as needed) |
+| `@themoss/mcp-server` | The four MCP tools over stdio, batteries included — assembles the served catalog itself | all of the above |
 
 ## Documentation
 

@@ -5,8 +5,8 @@ import {
   type Plan,
   type QueryResult,
   Registry,
-} from "@mossxyz/core";
-import { createTraceSimulator } from "@mossxyz/simulator";
+} from "@themoss/core";
+import { createTraceSimulator } from "@themoss/simulator";
 import { getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { ercManifest } from "../src/index.js";
