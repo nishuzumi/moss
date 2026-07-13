@@ -152,3 +152,11 @@ Moss's guarantees, boundaries, and how to report vulnerabilities: [SECURITY.md](
 ## License
 
 [MIT](./LICENSE)
+## Beginner Tips
+
+If you are using Moss for the first time, it is recommended to:
+
+- Read the README completely before installation.
+- Prepare your API keys in advance.
+- Start with the simplest example before building your own Agent.
+- Refer to the official documentation when configuring models and tools.
