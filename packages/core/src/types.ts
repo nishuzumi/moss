@@ -56,13 +56,16 @@ export interface Expects {
   in?: { token: TokenRef; amountMin: string }[];
   /** Approvals that may be granted. */
   approvals?: { token: Address; spender: Address; amountMax: string }[];
-  /** NFT movements. `count` is token-id count; ERC-1155 may also cap units. */
+  /** NFT movements. `count` is a distinct-id maximum out or minimum in. */
   nfts?: {
     collection: Address;
     count: number;
     direction: "in" | "out";
-    /** Maximum ERC-1155 units that may leave, as uint256 decimal. */
-    amountMax?: string;
+    /**
+     * Known token ids. Required and exhaustive for outflows; an optional
+     * subset for inflows. `amountMax` is only valid on outflow items.
+     */
+    items?: { tokenId: string; amountMax?: string }[];
   }[];
 }
 

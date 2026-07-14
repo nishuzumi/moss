@@ -55,7 +55,7 @@ action(protocol, method, account, params) → QueryResult | Plan
     "out":       [{ "token": "native", "amountMax": "1000000000000000000" }],
     "in":        [{ "token": "0x…USDC", "amountMin": "23933" }],
     "approvals": [ /* {token, spender, amountMax} */ ],
-    "nfts":      [ /* {collection, count, direction, amountMax?} */ ]
+    "nfts":      [ /* out: items required, amountMax per id; in: items optional, no cap */ ]
   },
   "confirms": ["swapResult"],   // receipts this write must produce in simulation
   "txs": [ { "from": "0x…", "to": "0x…", "data": "0x…", "value": "0x0" } ],
@@ -77,7 +77,7 @@ Simulates plans **in order with state chained across them** — plan B sees plan
 
 Per-plan result:
 
-- `effects` — the structured summary for intent alignment: `assetsOut`, `assetsIn`, `approvals`, `nftApprovals`, `nftsOut/In`, `recipients`. Includes native MON flows, wrapped-native mints/burns, and ERC-1155 `TransferSingle`/`TransferBatch` movements. NFT `count` is the number of token ids; ERC-1155 entries additionally carry exact decimal-string `amount`/`amountMax` units so uint256 values never lose precision.
+- `effects` — the structured summary for intent alignment: `assetsOut`, `assetsIn`, `approvals`, `nftApprovals`, `nftsOut/In`, `recipients`. Includes native MON flows, wrapped-native mints/burns, and ERC-1155 `TransferSingle`/`TransferBatch` movements. Each NFT entry contains distinct token-id `items`; ERC-1155 items additionally carry their exact decimal-string `amount`, while outgoing `expects` bounds each id with `amountMax`, so uint256 values never lose precision or move between ids unnoticed. Incoming NFT expectations enforce their minimum distinct-id count and any ids known before simulation.
 - `warnings` — effects reconciliation output. Codes: `REVERTED`, `PLAN_TAMPERED`, `UNDECLARED_OUTFLOW`, `OUTFLOW_EXCEEDS_MAX`, `UNDECLARED_APPROVAL`, `APPROVAL_EXCEEDS_MAX`, `MIN_INFLOW_NOT_MET`, `UNDECLARED_NFT_OUT`, `NFT_OUT_EXCEEDS_MAX`, `NFT_OPERATOR_GRANTED`, `CONFIRMATION_MISSING` (a receipt the plan's `confirms` declared did not appear). Warnings fire only on **undeclared differences** — a declared outflow with nothing back (an unstake request, margin posting) is legitimate.
 - `observations` — protocol-authored receipts ([ADR 0008](./adr/0008-observation-plane.md)): `{ protocol, name, intent, data }`, where `intent` is a rendered human sentence ("Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)"). **Narrative, not law**: use them to enrich the summary shown to the user; they never override `warnings`, and reconciliation never reads them.
 - `gasPerTx` — via `eth_estimateGas`; `null` where the endpoint rejects override-based estimation.

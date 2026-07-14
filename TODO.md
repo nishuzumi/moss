@@ -92,7 +92,7 @@
 ## 双面制遗留（下轮优先）
 - [ ] **余额差审计层**：候选 token 的前后态 balanceOf（override eth_call），资产流完备性与事件词汇解耦；WETH9 特判退役（ADR 0008 已记录设计）
 - [x] onboarding「声明事件」章节（§4）+ _template 真实 @Event（Deposited 事件 + confirms，CI 保真）+ mcp-tools 补 observations/CONFIRMATION_MISSING/confirms 字段 + agent-skill 补「叙事 vs 法律」规则（7月8日）
-- [x] ERC-1155 接口层：编译 ABI + 通用 transfer/balanceOf；TransferSingle/Batch 进入审计面并按数量对账（7月14日）
+- [x] ERC-1155 接口层：编译 ABI + 通用 transfer/balanceOf；TransferSingle/Batch 进入审计面并按 token ID 与逐项数量对账（7月14日）
 
 ## 开源发布准备
 - [x] 推送 GitHub 仓库（github.com/nishuzumi/moss，首 commit `c2e14f0`，CI #1 全绿含主网 e2e）

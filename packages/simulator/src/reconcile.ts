@@ -42,11 +42,44 @@ export function reconcile(expects: Expects, effects: EffectsSummary): Warning[] 
     spender: a.spender.toLowerCase(),
     amountMax: BigInt(a.amountMax),
   }));
-  const declaredNftOut = new Map(
-    (expects.nfts ?? [])
-      .filter((n) => n.direction === "out")
-      .map((n) => [n.collection.toLowerCase(), n]),
-  );
+  const declaredNftOut = new Map<
+    string,
+    {
+      count: number;
+      items: Map<string, { tokenId: string; amountMax?: string }>;
+      missingItems: boolean;
+    }
+  >();
+  for (const nft of expects.nfts ?? []) {
+    if (nft.direction !== "out") continue;
+    const key = nft.collection.toLowerCase();
+    const merged = declaredNftOut.get(key) ?? {
+      count: 0,
+      items: new Map(),
+      missingItems: false,
+    };
+    merged.count += nft.count;
+    if (!nft.items) {
+      merged.missingItems = true;
+    } else {
+      for (const item of nft.items) {
+        const current = merged.items.get(item.tokenId);
+        if (!current) {
+          merged.items.set(item.tokenId, item);
+        } else if (current.amountMax !== undefined && item.amountMax !== undefined) {
+          merged.items.set(item.tokenId, {
+            tokenId: item.tokenId,
+            amountMax: (BigInt(current.amountMax) + BigInt(item.amountMax)).toString(),
+          });
+        } else {
+          // Any uncapped declaration keeps this id uncapped and therefore
+          // fail-closed if simulation identifies it as ERC-1155.
+          merged.items.set(item.tokenId, { tokenId: item.tokenId });
+        }
+      }
+    }
+    declaredNftOut.set(key, merged);
+  }
 
   for (const out of effects.assetsOut) {
     const max = declaredOut.get(out.token.toLowerCase());
@@ -93,22 +126,99 @@ export function reconcile(expects: Expects, effects: EffectsSummary): Warning[] 
     }
   }
 
+  const declaredNftIn = new Map<
+    string,
+    { collection: string; knownIds: Set<string>; unknownCount: number }
+  >();
+  for (const expected of (expects.nfts ?? []).filter((nft) => nft.direction === "in")) {
+    const key = expected.collection.toLowerCase();
+    const merged = declaredNftIn.get(key) ?? {
+      collection: expected.collection,
+      knownIds: new Set(),
+      unknownCount: 0,
+    };
+    const knownIds = expected.items?.map((item) => item.tokenId) ?? [];
+    for (const tokenId of knownIds) merged.knownIds.add(tokenId);
+    merged.unknownCount += Math.max(0, expected.count - knownIds.length);
+    declaredNftIn.set(key, merged);
+  }
+
+  for (const expected of declaredNftIn.values()) {
+    const actual = effects.nftsIn.find(
+      (nft) => nft.collection.toLowerCase() === expected.collection.toLowerCase(),
+    );
+    const minimumCount = expected.knownIds.size + expected.unknownCount;
+    if (!actual || actual.count < minimumCount) {
+      warnings.push({
+        code: "MIN_INFLOW_NOT_MET",
+        message: `plan declared at least ${minimumCount} distinct NFT token id(s) arriving from ${expected.collection}; simulation shows ${actual?.count ?? 0}`,
+      });
+      continue;
+    }
+    const actualIds = new Set(actual.items.map((item) => item.tokenId));
+    for (const tokenId of expected.knownIds) {
+      if (!actualIds.has(tokenId)) {
+        warnings.push({
+          code: "MIN_INFLOW_NOT_MET",
+          message: `plan declared NFT token id ${tokenId} arriving from ${expected.collection}, but simulation did not observe it`,
+        });
+      }
+    }
+  }
+
   for (const nft of effects.nftsOut) {
     const declared = declaredNftOut.get(nft.collection.toLowerCase());
-    if (!declared || nft.count > declared.count) {
+    if (!declared) {
       warnings.push({
         code: "UNDECLARED_NFT_OUT",
-        message: `${nft.count} NFT token id(s) from ${nft.collection} leave the account; declared: ${declared?.count ?? 0}`,
+        message: `${nft.count} NFT token id(s) from ${nft.collection} leave the account, but the plan declared none`,
       });
-    } else if (
-      nft.amount !== undefined &&
-      declared.amountMax !== undefined &&
-      BigInt(nft.amount) > BigInt(declared.amountMax)
-    ) {
+      continue;
+    }
+    if (nft.count > declared.count) {
       warnings.push({
-        code: "NFT_OUT_EXCEEDS_MAX",
-        message: `${nft.collection} ERC-1155 outflow ${nft.amount} exceeds the declared maximum ${declared.amountMax}`,
+        code: "UNDECLARED_NFT_OUT",
+        message: `${nft.count} distinct NFT token id(s) from ${nft.collection} leave the account; declared maximum: ${declared.count}`,
       });
+    }
+
+    if (declared.missingItems) {
+      warnings.push({
+        code: "UNDECLARED_NFT_OUT",
+        message: `NFT outflow from ${nft.collection} did not declare its token ids`,
+      });
+      continue;
+    }
+
+    for (const item of nft.items) {
+      const expected = declared.items.get(item.tokenId);
+      if (!expected) {
+        warnings.push({
+          code: "UNDECLARED_NFT_OUT",
+          message: `NFT token id ${item.tokenId} from ${nft.collection} leaves the account but was not declared`,
+        });
+        continue;
+      }
+      if (item.amount !== undefined && expected.amountMax === undefined) {
+        warnings.push({
+          code: "UNDECLARED_NFT_OUT",
+          message: `ERC-1155 token id ${item.tokenId} from ${nft.collection} moves ${item.amount} unit(s), but the plan declared no amount cap`,
+        });
+      } else if (
+        item.amount !== undefined &&
+        expected.amountMax !== undefined &&
+        BigInt(item.amount) > BigInt(expected.amountMax)
+      ) {
+        warnings.push({
+          code: "NFT_OUT_EXCEEDS_MAX",
+          message: `${nft.collection} token id ${item.tokenId} ERC-1155 outflow ${item.amount} exceeds the declared maximum ${expected.amountMax}`,
+        });
+      } else if (item.amount === undefined && expected.amountMax !== undefined) {
+        warnings.push({
+          code: "UNDECLARED_NFT_OUT",
+          message: `${nft.collection} token id ${item.tokenId} was declared as quantified ERC-1155 units, but simulation observed a non-quantified NFT transfer`,
+        });
+      }
     }
   }
 

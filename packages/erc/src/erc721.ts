@@ -58,7 +58,7 @@ export class ERC721 {
     // caller in calldata, hence ctx.account (simulation enforces ownership).
     const step = this.#handle(collection).safeTransferFrom([ctx.account, to, tokenId]);
     return plan([step], {
-      nfts: [{ collection, count: 1, direction: "out" }],
+      nfts: [{ collection, count: 1, direction: "out", items: [{ tokenId }] }],
     });
   }
 

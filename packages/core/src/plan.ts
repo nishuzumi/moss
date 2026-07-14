@@ -22,7 +22,7 @@ export interface DeclaredFlows {
     collection: Address;
     count: number;
     direction: "in" | "out";
-    amountMax?: bigint;
+    items?: { tokenId: bigint; amountMax?: bigint }[];
   }[];
 }
 
@@ -40,6 +40,35 @@ export interface PlanDraft {
  */
 export function plan(steps: TxStep[], flows: DeclaredFlows = {}): PlanDraft {
   if (steps.length === 0) throw new Error("a plan needs at least one step");
+  for (const nft of flows.nfts ?? []) {
+    if (!Number.isSafeInteger(nft.count) || nft.count < 0) {
+      throw new Error("NFT count must be a non-negative safe integer");
+    }
+    if (nft.direction === "out" && !nft.items) {
+      throw new Error("NFT outflows must declare their token ids");
+    }
+    if (nft.items) {
+      for (const item of nft.items) {
+        if (item.tokenId < 0n) throw new Error("NFT token ids must be uint256 values");
+        if (item.amountMax !== undefined && item.amountMax < 0n) {
+          throw new Error("NFT amount caps must be uint256 values");
+        }
+        if (nft.direction === "in" && item.amountMax !== undefined) {
+          throw new Error("NFT inflows cannot declare maximum amount caps");
+        }
+      }
+      const ids = nft.items.map((item) => item.tokenId.toString());
+      if (new Set(ids).size !== ids.length) {
+        throw new Error("NFT token ids must be distinct within one declaration");
+      }
+      if (nft.direction === "out" && nft.count !== ids.length) {
+        throw new Error("NFT count must equal the number of declared token ids");
+      }
+      if (nft.direction === "in" && ids.length > nft.count) {
+        throw new Error("Known NFT inflow ids cannot exceed the minimum count");
+      }
+    }
+  }
   return { kind: "planDraft", steps, flows };
 }
 
@@ -115,7 +144,14 @@ export function finalizePlan(draft: PlanDraft, meta: PlanMeta): Plan {
       collection: nft.collection,
       count: nft.count,
       direction: nft.direction,
-      ...(nft.amountMax === undefined ? {} : { amountMax: nft.amountMax.toString() }),
+      ...(nft.items === undefined
+        ? {}
+        : {
+            items: nft.items.map((item) => ({
+              tokenId: item.tokenId.toString(),
+              ...(item.amountMax === undefined ? {} : { amountMax: item.amountMax.toString() }),
+            })),
+          }),
     })),
   };
 

@@ -13,9 +13,9 @@
  *     types (tokenAmount("asset")) must come AFTER the param they reference.
  *   - Every capability returns plan(steps, flows) with QUANTIFIED expects —
  *     max out, min in. Approvals via Token.approveStep are auto-declared.
- *   - Writes with a meaningful on-chain receipt declare it: @Event renders
- *     a protocol-authored observation, and `confirms` makes simulation fail
- *     loudly (CONFIRMATION_MISSING) when the receipt doesn't appear.
+ *   - Protocol-specific write receipts use @Event + `confirms`. Canonical ERC
+ *     transfers already fully reconciled by the audit plane need no duplicate
+ *     observation. See ADR 0008 for the exact boundary.
  *   - Verify every address on-chain and note how in a comment.
  */
 import {

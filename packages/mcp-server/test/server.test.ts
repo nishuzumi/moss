@@ -6,14 +6,30 @@ import { createMossServer } from "../src/server.js";
 const ACCOUNT = "0xcccccccccccccccccccccccccccccccccccccccc";
 const RECIPIENT = "0x1111111111111111111111111111111111111111";
 const FIXTURE_COLLECTION = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-const LIVE_ERC1155_COLLECTION = "0x8f28E18039c37cdB4389E6dcb8703966fb9480A8";
-const LIVE_ERC1155_TOKEN_ID = "91801109843487528103748472202153632723215093328";
-const LIVE_ERC1155_HOLDER = "0xEf8BB725e1056317dBafD9B356E63c160e63dCdd";
+const LIVE_ERC1155_COLLECTION = "0xD2C7FD8e7Ab1527a2cb5A7177d1A29393F416A6d";
+const LIVE_ERC1155_TOKEN_ID = "4";
+const LIVE_ERC1155_HOLDER_CANDIDATES = [
+  "0x745098b2c028BA7490452b3A13049a7Fe10b6a87",
+  "0xBB78A151673FaC1A0A2162Abc7BEE3a39b3767b5",
+  "0xf26de9DD7D737243089648633d62641Ff238d51f",
+  "0xd4bF7BF399c752F4fD97b6976035DcA3FD2E012B",
+  "0xB350D7cb33dB07E00FF5074461Ab3ac9Aa989926",
+  "0x3D8250Ac679dcfd1E90c29E7a64AB5013645E579",
+  "0xc498067D0831e6Ae3Ea9f83c958f704521025CD2",
+  "0x747c63e713843117Ef99CE689D9F029E3F10da96",
+  "0x8b59Ba7533f0F451c58B6EAFfc1860C0B9034810",
+  "0x36B55a8C16bEc8CBe1Ec58cB190A8a25F32d2682",
+] as const;
 
 type NftPlan = {
   kind: string;
   expects: {
-    nfts?: { collection: string; count: number; direction: string; amountMax?: string }[];
+    nfts?: {
+      collection: string;
+      count: number;
+      direction: string;
+      items?: { tokenId: string; amountMax?: string }[];
+    }[];
   };
   [key: string]: unknown;
 };
@@ -21,7 +37,13 @@ type NftPlan = {
 type SimulateOutcome = {
   ok: boolean;
   results: {
-    effects: { nftsOut: { collection: string; count: number; amount?: string }[] };
+    effects: {
+      nftsOut: {
+        collection: string;
+        count: number;
+        items: { tokenId: string; amount?: string }[];
+      }[];
+    };
     warnings: { code: string }[];
   }[];
 };
@@ -37,6 +59,28 @@ async function connectedClient() {
 function parseText(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
   const content = result.content as { type: string; text: string }[];
   return JSON.parse(content[0]?.text ?? "null");
+}
+
+async function findLiveErc1155Holder(client: Client): Promise<string> {
+  for (const candidate of LIVE_ERC1155_HOLDER_CANDIDATES) {
+    const result = parseText(
+      await client.callTool({
+        name: "action",
+        arguments: {
+          protocol: "erc1155",
+          method: "balanceOf",
+          account: candidate,
+          params: {
+            collection: LIVE_ERC1155_COLLECTION,
+            tokenId: LIVE_ERC1155_TOKEN_ID,
+            owner: candidate,
+          },
+        },
+      }),
+    ) as { data: { balance: string } };
+    if (BigInt(result.data.balance) > 0n) return candidate;
+  }
+  throw new Error("no live ERC-1155 fixture holder has a positive balance");
 }
 
 describe("moss mcp server", () => {
@@ -83,8 +127,9 @@ describe("moss mcp server", () => {
     expect(content[0]?.text).toContain("unknown protocol");
   });
 
-  it("keeps a uint256 ERC-1155 amount exact across the action JSON boundary", async () => {
+  it("keeps uint256 ERC-1155 ids and amounts exact across the action JSON boundary", async () => {
     const client = await connectedClient();
+    const tokenId = (2n ** 256n - 1n).toString();
     const amount = (2n ** 255n + 17n).toString();
     const result = await client.callTool({
       name: "action",
@@ -94,7 +139,7 @@ describe("moss mcp server", () => {
         account: ACCOUNT,
         params: {
           collection: FIXTURE_COLLECTION,
-          tokenId: "42",
+          tokenId,
           amount,
           to: RECIPIENT,
         },
@@ -108,9 +153,76 @@ describe("moss mcp server", () => {
     expect(plan.expects.nfts?.[0]).toMatchObject({
       count: 1,
       direction: "out",
-      amountMax: amount,
+      items: [{ tokenId, amountMax: amount }],
     });
     expect(plan.expects.nfts?.[0]?.collection.toLowerCase()).toBe(FIXTURE_COLLECTION);
+  });
+
+  it("rejects malformed NFT expectations at the simulate boundary", async () => {
+    const client = await connectedClient();
+    const plan = parseText(
+      await client.callTool({
+        name: "action",
+        arguments: {
+          protocol: "erc1155",
+          method: "transfer",
+          account: ACCOUNT,
+          params: {
+            collection: FIXTURE_COLLECTION,
+            tokenId: "42",
+            amount: "3",
+            to: RECIPIENT,
+          },
+        },
+      }),
+    ) as NftPlan;
+
+    const missingItems = structuredClone(plan);
+    delete missingItems.expects.nfts?.[0]?.items;
+
+    const duplicateIds = structuredClone(plan);
+    const duplicateNft = duplicateIds.expects.nfts?.[0];
+    if (!duplicateNft) throw new Error("missing NFT expectation");
+    duplicateNft.count = 2;
+    duplicateNft.items = [
+      { tokenId: "42", amountMax: "1" },
+      { tokenId: "42", amountMax: "2" },
+    ];
+
+    const mismatchedCount = structuredClone(plan);
+    const mismatchedNft = mismatchedCount.expects.nfts?.[0];
+    if (!mismatchedNft) throw new Error("missing NFT expectation");
+    mismatchedNft.count = 2;
+
+    const unsafeCount = structuredClone(plan);
+    const unsafeNft = unsafeCount.expects.nfts?.[0];
+    if (!unsafeNft) throw new Error("missing NFT expectation");
+    unsafeNft.direction = "in";
+    unsafeNft.count = Number.MAX_SAFE_INTEGER + 1;
+    delete unsafeNft.items;
+
+    const cappedInflow = structuredClone(plan);
+    const cappedInflowNft = cappedInflow.expects.nfts?.[0];
+    if (!cappedInflowNft) throw new Error("missing NFT expectation");
+    cappedInflowNft.direction = "in";
+
+    const tooManyKnownInflows = structuredClone(plan);
+    const tooManyKnownInflowsNft = tooManyKnownInflows.expects.nfts?.[0];
+    if (!tooManyKnownInflowsNft) throw new Error("missing NFT expectation");
+    tooManyKnownInflowsNft.direction = "in";
+    tooManyKnownInflowsNft.items = [{ tokenId: "42" }, { tokenId: "43" }];
+
+    for (const malformed of [
+      missingItems,
+      duplicateIds,
+      mismatchedCount,
+      unsafeCount,
+      cappedInflow,
+      tooManyKnownInflows,
+    ]) {
+      const result = await client.callTool({ name: "simulate", arguments: { plans: [malformed] } });
+      expect(result.isError).toBe(true);
+    }
   });
 });
 
@@ -139,7 +251,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
     expect(outcome.results[0]?.warnings).toEqual([]);
   });
 
-  it("preserves ERC-1155 amountMax through simulate and detects tampering", {
+  it("preserves ERC-1155 item bounds through simulate and detects tampering", {
     timeout: 120_000,
   }, async () => {
     const client = await connectedClient();
@@ -164,22 +276,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
     ) as { params: Record<string, string> }[];
     expect(Object.keys(loaded[0]?.params ?? {})).toEqual(["collection", "tokenId", "amount", "to"]);
 
-    const balanceResult = parseText(
-      await client.callTool({
-        name: "action",
-        arguments: {
-          protocol: "erc1155",
-          method: "balanceOf",
-          account: LIVE_ERC1155_HOLDER,
-          params: {
-            collection: LIVE_ERC1155_COLLECTION,
-            tokenId: LIVE_ERC1155_TOKEN_ID,
-            owner: LIVE_ERC1155_HOLDER,
-          },
-        },
-      }),
-    ) as { data: { balance: string } };
-    expect(BigInt(balanceResult.data.balance)).toBeGreaterThan(0n);
+    const holder = await findLiveErc1155Holder(client);
 
     const plan = parseText(
       await client.callTool({
@@ -187,7 +284,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
         arguments: {
           protocol: "erc1155",
           method: "transfer",
-          account: LIVE_ERC1155_HOLDER,
+          account: holder,
           params: {
             collection: LIVE_ERC1155_COLLECTION,
             tokenId: LIVE_ERC1155_TOKEN_ID,
@@ -197,7 +294,9 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
         },
       }),
     ) as NftPlan;
-    expect(plan.expects.nfts?.[0]?.amountMax).toBe("1");
+    expect(plan.expects.nfts?.[0]?.items).toEqual([
+      { tokenId: LIVE_ERC1155_TOKEN_ID, amountMax: "1" },
+    ]);
 
     const outcome = parseText(
       await client.callTool({ name: "simulate", arguments: { plans: [plan] } }),
@@ -205,7 +304,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
     expect(outcome.ok).toBe(true);
     expect(outcome.results[0]?.warnings).toEqual([]);
     expect(outcome.results[0]?.effects.nftsOut).toHaveLength(1);
-    expect(outcome.results[0]?.effects.nftsOut[0]).toMatchObject({ count: 1, amount: "1" });
+    expect(outcome.results[0]?.effects.nftsOut[0]).toMatchObject({
+      count: 1,
+      items: [{ tokenId: LIVE_ERC1155_TOKEN_ID, amount: "1" }],
+    });
     expect(outcome.results[0]?.effects.nftsOut[0]?.collection.toLowerCase()).toBe(
       LIVE_ERC1155_COLLECTION.toLowerCase(),
     );
@@ -213,7 +315,9 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
     const tampered = structuredClone(plan);
     const declaredNft = tampered.expects.nfts?.[0];
     if (!declaredNft) throw new Error("missing ERC-1155 expectation");
-    declaredNft.amountMax = "2";
+    const declaredItem = declaredNft.items?.[0];
+    if (!declaredItem) throw new Error("missing ERC-1155 item expectation");
+    declaredItem.amountMax = "2";
     const tamperedOutcome = parseText(
       await client.callTool({ name: "simulate", arguments: { plans: [tampered] } }),
     ) as SimulateOutcome;

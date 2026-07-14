@@ -210,25 +210,130 @@ describe("plan", () => {
     expect(computePlanHash(tampered as any)).not.toBe(built.planHash);
   });
 
-  it("preserves uint256 NFT amounts and seals amountMax into the hash", () => {
+  it("preserves uint256 NFT ids and amounts and seals them into the hash", () => {
+    const tokenId = 2n ** 256n - 1n;
     const amount = 2n ** 255n + 17n;
     const draft = plan([{ to: USDC, data: "0xdead", value: 0n }], {
-      nfts: [{ collection: USDC, count: 1, direction: "out", amountMax: amount }],
+      nfts: [
+        {
+          collection: USDC,
+          count: 1,
+          direction: "out",
+          items: [{ tokenId, amountMax: amount }],
+        },
+      ],
     });
     const built = finalizePlan(draft, { ...meta, declaredRisk: [...meta.declaredRisk] });
 
     expect(built.expects.nfts).toEqual([
-      { collection: USDC, count: 1, direction: "out", amountMax: amount.toString() },
+      {
+        collection: USDC,
+        count: 1,
+        direction: "out",
+        items: [{ tokenId: tokenId.toString(), amountMax: amount.toString() }],
+      },
     ]);
     const tampered = {
       ...built,
       expects: {
         ...built.expects,
-        nfts: [{ ...built.expects.nfts?.[0], amountMax: (amount + 1n).toString() }],
+        nfts: [
+          {
+            ...built.expects.nfts?.[0],
+            items: [{ tokenId: (tokenId - 1n).toString(), amountMax: amount.toString() }],
+          },
+        ],
       },
     };
     // biome-ignore lint/suspicious/noExplicitAny: intentional structural tamper
     expect(computePlanHash(tampered as any)).not.toBe(built.planHash);
+  });
+
+  it("requires exact distinct token ids for NFT outflows but permits unknown mint ids", () => {
+    const step: TxStep = { to: USDC, data: "0xdead", value: 0n };
+    expect(() =>
+      plan([step], { nfts: [{ collection: USDC, count: 1, direction: "out" }] }),
+    ).toThrow(/token ids/);
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 2,
+            direction: "out",
+            items: [{ tokenId: 7n }, { tokenId: 7n }],
+          },
+        ],
+      }),
+    ).toThrow(/distinct/);
+    expect(() =>
+      plan([step], {
+        nfts: [{ collection: USDC, count: 2, direction: "out", items: [{ tokenId: 7n }] }],
+      }),
+    ).toThrow(/count/);
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 1,
+            direction: "out",
+            items: [{ tokenId: -1n }],
+          },
+        ],
+      }),
+    ).toThrow(/uint256/);
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 1,
+            direction: "out",
+            items: [{ tokenId: 1n, amountMax: -1n }],
+          },
+        ],
+      }),
+    ).toThrow(/uint256/);
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 1,
+            direction: "in",
+            items: [{ tokenId: 1n, amountMax: 1n }],
+          },
+        ],
+      }),
+    ).toThrow(/inflows/);
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 3,
+            direction: "in",
+            items: [{ tokenId: 1n }],
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 1,
+            direction: "in",
+            items: [{ tokenId: 1n }, { tokenId: 2n }],
+          },
+        ],
+      }),
+    ).toThrow(/minimum count/);
+    expect(() =>
+      plan([step], { nfts: [{ collection: USDC, count: 1, direction: "in" }] }),
+    ).not.toThrow();
   });
 
   it("rejects empty plans", () => {

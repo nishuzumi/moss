@@ -41,7 +41,7 @@ One protocol = one package: copy [`packages/protocols/_template`](./packages/pro
 - [ ] Every ABI lives in `src/abis/` with an **ABI origin** header — compiled / explorer / vendored ([ADR 0007](./docs/adr/0007-abi-origin.md)).
 - [ ] Capabilities/queries are declared with `@Capability`/`@Query`: intent template, semantic params, risk labels, tags. Verbs are user-perspective fund semantics from the closed set — never protocol function names ([ADR 0003](./docs/adr/0003-two-tier-capability-taxonomy.md)).
 - [ ] Every capability returns `plan(steps, flows)` with **quantified expects** — what may leave (max), what must arrive (min). Approvals built via `approveStep` (from `@themoss/erc`) are auto-declared ([ADR 0004](./docs/adr/0004-quantified-expects-in-plans.md)).
-- [ ] Writes with a meaningful on-chain receipt declare it with `@Event` and gate on it via `confirms`; observations narrate, never overrule the audit plane ([ADR 0008](./docs/adr/0008-observation-plane.md)).
+- [ ] Protocol-specific write receipts are declared with `@Event` and gated via `confirms`; canonical standard events already parsed and fully reconciled by the audit plane do not need a duplicate observation ([ADR 0008](./docs/adr/0008-observation-plane.md)).
 - [ ] Tokens the protocol introduces are listed in `src/tokens.ts`, verified on-chain (collisions with existing symbols are rejected at registration).
 - [ ] Discoverable & loadable: shows up in `discover`/`load` output (unit test).
 - [ ] A live e2e test simulates the happy path against Monad mainnet and asserts **zero warnings**.

@@ -75,6 +75,87 @@ describe("reconcile", () => {
         effects({ assetsIn: [{ token: TOKEN, amount: "4" }] }),
       )[0]?.code,
     ).toBe("MIN_INFLOW_NOT_MET");
+    expect(
+      reconcile(
+        {
+          nfts: [
+            { collection: TOKEN, count: 1, direction: "in" },
+            { collection: TOKEN, count: 1, direction: "in" },
+          ],
+        },
+        effects({
+          nftsIn: [{ collection: TOKEN, count: 1, items: [{ tokenId: "7" }] }],
+        }),
+      )[0]?.code,
+    ).toBe("MIN_INFLOW_NOT_MET");
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 3,
+              direction: "in",
+              items: [{ tokenId: "7" }],
+            },
+          ],
+        },
+        effects({
+          nftsIn: [
+            {
+              collection: TOKEN,
+              count: 3,
+              items: [{ tokenId: "7" }, { tokenId: "8" }, { tokenId: "9" }],
+            },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("requires declared NFT inflow counts and known token ids", () => {
+    const actual = effects({
+      nftsIn: [
+        {
+          collection: TOKEN,
+          count: 2,
+          items: [{ tokenId: "7" }, { tokenId: "8", amount: "3" }],
+        },
+      ],
+    });
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 2,
+              direction: "in",
+              items: [{ tokenId: "7" }, { tokenId: "8" }],
+            },
+          ],
+        },
+        actual,
+      ),
+    ).toEqual([]);
+    expect(
+      reconcile({ nfts: [{ collection: TOKEN, count: 3, direction: "in" }] }, actual)[0]?.code,
+    ).toBe("MIN_INFLOW_NOT_MET");
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 2,
+              direction: "in",
+              items: [{ tokenId: "7" }, { tokenId: "9" }],
+            },
+          ],
+        },
+        actual,
+      )[0]?.code,
+    ).toBe("MIN_INFLOW_NOT_MET");
   });
 });
 
@@ -121,7 +202,7 @@ describe("effects accumulator", () => {
     expect(warnings.map((w) => w.code)).toContain("NFT_OPERATOR_GRANTED");
   });
 
-  it("extracts and reconciles ERC-1155 single and batch transfers", () => {
+  it("extracts distinct ERC-1155 ids and reconciles each id's exact units", () => {
     const huge = 2n ** 255n;
     const acc = new EffectsAccumulator(A);
     acc.addFrame({
@@ -160,8 +241,8 @@ describe("effects accumulator", () => {
           data: encodeAbiParameters(
             [{ type: "uint256[]" }, { type: "uint256[]" }],
             [
-              [1n, 2n],
-              [2n, 3n],
+              [1n, 1n, 2n],
+              [2n, 4n, 3n],
             ],
           ),
         },
@@ -169,9 +250,25 @@ describe("effects accumulator", () => {
     });
     const summary = acc.summary();
     expect(summary.nftsOut).toEqual([
-      { collection: TOKEN, count: 2, amount: (huge + 7n).toString() },
+      {
+        collection: TOKEN,
+        count: 2,
+        items: [
+          { tokenId: "42", amount: huge.toString() },
+          { tokenId: "43", amount: "7" },
+        ],
+      },
     ]);
-    expect(summary.nftsIn).toEqual([{ collection: TOKEN, count: 2, amount: "5" }]);
+    expect(summary.nftsIn).toEqual([
+      {
+        collection: TOKEN,
+        count: 2,
+        items: [
+          { tokenId: "1", amount: "6" },
+          { tokenId: "2", amount: "3" },
+        ],
+      },
+    ]);
     expect(
       reconcile(
         {
@@ -180,7 +277,10 @@ describe("effects accumulator", () => {
               collection: TOKEN,
               count: 2,
               direction: "out",
-              amountMax: (huge + 7n).toString(),
+              items: [
+                { tokenId: "42", amountMax: huge.toString() },
+                { tokenId: "43", amountMax: "7" },
+              ],
             },
           ],
         },
@@ -193,15 +293,196 @@ describe("effects accumulator", () => {
           nfts: [
             {
               collection: TOKEN,
+              count: 1,
+              direction: "out",
+              items: [{ tokenId: "42", amountMax: huge.toString() }],
+            },
+            {
+              collection: TOKEN,
+              count: 1,
+              direction: "out",
+              items: [{ tokenId: "43", amountMax: "7" }],
+            },
+          ],
+        },
+        summary,
+      ),
+    ).toEqual([]);
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 1,
+              direction: "out",
+              items: [{ tokenId: "42", amountMax: (huge / 2n).toString() }],
+            },
+            {
+              collection: TOKEN,
+              count: 1,
+              direction: "out",
+              items: [{ tokenId: "42", amountMax: (huge / 2n).toString() }],
+            },
+          ],
+        },
+        {
+          ...summary,
+          nftsOut: [
+            {
+              collection: TOKEN,
+              count: 1,
+              items: [{ tokenId: "42", amount: huge.toString() }],
+            },
+          ],
+        },
+      ),
+    ).toEqual([]);
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
               count: 2,
               direction: "out",
-              amountMax: (huge + 6n).toString(),
+              items: [
+                { tokenId: "42", amountMax: huge.toString() },
+                { tokenId: "43", amountMax: "6" },
+              ],
             },
           ],
         },
         summary,
       )[0]?.code,
     ).toBe("NFT_OUT_EXCEEDS_MAX");
+
+    const missingCap = reconcile(
+      {
+        nfts: [
+          {
+            collection: TOKEN,
+            count: 2,
+            direction: "out",
+            items: [{ tokenId: "42" }, { tokenId: "43", amountMax: "7" }],
+          },
+        ],
+      },
+      summary,
+    );
+    expect(missingCap.map((warning) => warning.code)).toContain("UNDECLARED_NFT_OUT");
+    expect(missingCap[0]?.message).toMatch(/amount cap/);
+
+    const wrongId = reconcile(
+      {
+        nfts: [
+          {
+            collection: TOKEN,
+            count: 2,
+            direction: "out",
+            items: [
+              { tokenId: "42", amountMax: huge.toString() },
+              { tokenId: "44", amountMax: "7" },
+            ],
+          },
+        ],
+      },
+      summary,
+    );
+    expect(wrongId.map((warning) => warning.code)).toContain("UNDECLARED_NFT_OUT");
+    expect(wrongId.some((warning) => warning.message.includes("token id 43"))).toBe(true);
+  });
+
+  it("extracts and reconciles the ERC-721 token id", () => {
+    const acc = new EffectsAccumulator(A);
+    acc.addFrame({
+      type: "CALL",
+      from: A,
+      to: TOKEN,
+      logs: [
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_TOPIC,
+            padHex(A, { size: 32 }),
+            padHex(B, { size: 32 }),
+            padHex(toHex(99n), { size: 32 }),
+          ],
+          data: "0x",
+        },
+      ],
+    });
+    const summary = acc.summary();
+    expect(summary.nftsOut).toEqual([{ collection: TOKEN, count: 1, items: [{ tokenId: "99" }] }]);
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 1,
+              direction: "out",
+              items: [{ tokenId: "99" }],
+            },
+          ],
+        },
+        summary,
+      ),
+    ).toEqual([]);
+  });
+
+  it("ignores NFT self-transfers and zero-unit ERC-1155 events", () => {
+    const acc = new EffectsAccumulator(A);
+    acc.addFrame({
+      type: "CALL",
+      from: A,
+      to: TOKEN,
+      logs: [
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_TOPIC,
+            padHex(A, { size: 32 }),
+            padHex(A, { size: 32 }),
+            padHex(toHex(7n), { size: 32 }),
+          ],
+          data: "0x",
+        },
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_SINGLE_TOPIC,
+            padHex(B, { size: 32 }),
+            padHex(A, { size: 32 }),
+            padHex(A, { size: 32 }),
+          ],
+          data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [8n, 2n]),
+        },
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_BATCH_TOPIC,
+            padHex(B, { size: 32 }),
+            padHex(A, { size: 32 }),
+            padHex(A, { size: 32 }),
+          ],
+          data: encodeAbiParameters([{ type: "uint256[]" }, { type: "uint256[]" }], [[9n], [3n]]),
+        },
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_SINGLE_TOPIC,
+            padHex(A, { size: 32 }),
+            padHex(A, { size: 32 }),
+            padHex(B, { size: 32 }),
+          ],
+          data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [10n, 0n]),
+        },
+      ],
+    });
+
+    expect(acc.summary().nftsOut).toEqual([]);
+    expect(acc.summary().nftsIn).toEqual([]);
   });
 });
 

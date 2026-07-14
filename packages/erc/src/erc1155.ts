@@ -44,6 +44,9 @@ export class ERC1155 {
     risk: ["fundOut"],
     tags: ["nft", "multi-token", "payment"],
   })
+  // TransferSingle/TransferBatch are canonical audit-plane events: simulation
+  // binds their token ids and per-id amounts to expects, so no duplicate
+  // protocol-authored @Event is required (ADR 0008).
   async transfer(
     {
       collection,
@@ -62,7 +65,14 @@ export class ERC1155 {
       "0x",
     ]);
     return plan([step], {
-      nfts: [{ collection, count: 1, direction: "out", amountMax: amount }],
+      nfts: [
+        {
+          collection,
+          count: 1,
+          direction: "out",
+          items: [{ tokenId, amountMax: amount }],
+        },
+      ],
     });
   }
 

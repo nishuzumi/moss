@@ -16,6 +16,64 @@ const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byt
 
 const hexSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, "expected 0x hex data");
 
+const uintStringSchema = z.string().regex(/^(0|[1-9][0-9]*)$/, "expected a uint decimal string");
+
+const nftExpectationSchema = z
+  .object({
+    collection: z.string(),
+    count: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    direction: z.enum(["in", "out"]),
+    items: z
+      .array(
+        z.object({
+          tokenId: uintStringSchema,
+          amountMax: uintStringSchema.optional(),
+        }),
+      )
+      .optional(),
+  })
+  .superRefine((nft, ctx) => {
+    if (nft.direction === "out" && !nft.items) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["items"],
+        message: "NFT outflows must declare their token ids",
+      });
+      return;
+    }
+    if (nft.items) {
+      if (nft.direction === "in" && nft.items.some((item) => item.amountMax !== undefined)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items"],
+          message: "NFT inflows cannot declare maximum amount caps",
+        });
+      }
+      const ids = nft.items.map((item) => item.tokenId);
+      if (new Set(ids).size !== ids.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items"],
+          message: "NFT token ids must be distinct",
+        });
+      }
+      if (nft.direction === "out" && nft.count !== ids.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["count"],
+          message: "NFT count must equal the number of declared token ids",
+        });
+      }
+      if (nft.direction === "in" && ids.length > nft.count) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items"],
+          message: "Known NFT inflow ids cannot exceed the minimum count",
+        });
+      }
+    }
+  });
+
 // The Plan travels agent-side between action and simulate (the server is
 // stateless), so simulate revalidates its whole shape here and its integrity
 // via planHash inside the simulator.
@@ -34,16 +92,7 @@ const planSchema = z.object({
     approvals: z
       .array(z.object({ token: z.string(), spender: z.string(), amountMax: z.string() }))
       .optional(),
-    nfts: z
-      .array(
-        z.object({
-          collection: z.string(),
-          count: z.number().int(),
-          direction: z.enum(["in", "out"]),
-          amountMax: z.string().optional(),
-        }),
-      )
-      .optional(),
+    nfts: z.array(nftExpectationSchema).optional(),
   }),
   confirms: z.array(z.string()),
   txs: z

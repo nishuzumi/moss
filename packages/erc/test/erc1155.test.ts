@@ -53,7 +53,12 @@ describe("erc1155 generic protocol (offline)", () => {
     expect(decoded.functionName).toBe("safeTransferFrom");
     expect(decoded.args).toEqual([ACCOUNT, RECIPIENT, 42n, 3n, "0x"]);
     expect(built.expects.nfts).toEqual([
-      { collection: FIXTURE_COLLECTION, count: 1, direction: "out", amountMax: "3" },
+      {
+        collection: FIXTURE_COLLECTION,
+        count: 1,
+        direction: "out",
+        items: [{ tokenId: "42", amountMax: "3" }],
+      },
     ]);
     expect(built.intent).toBe(`Transfer 3 of ${FIXTURE_COLLECTION} #42 to ${RECIPIENT}`);
   });
@@ -72,29 +77,47 @@ describe("erc1155 generic protocol (offline)", () => {
 });
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("erc1155 generic protocol (Monad mainnet e2e)", () => {
-  // Lumiterra Game Item on Monad mainnet — test data verified independently
-  // on 2026-07-14: Monad's official App Hub lists Lumiterra as a first-wave
-  // mainnet app (https://app.monad.xyz/), while MonadScan identifies this
-  // exact collection/item as ERC-1155 and records its mint + current holder:
-  // https://monadscan.com/nft/0x8f28e18039c37cdb4389e6dcb8703966fb9480a8/91801109843487528103748472202153632723215093328
-  // On-chain supportsInterface(0xd9b67a26) is true. The balance is checked at
+  // LootGO Looties Logs on Monad mainnet. The canonical Monad protocol
+  // registry records this exact address, and MonadScan identifies item #4 as
+  // ERC-1155 with a broad holder set:
+  // https://github.com/monad-developers/protocols/blob/main/mainnet/lootgo.jsonc
+  // https://monadscan.com/nft/0xd2c7fd8e7ab1527a2cb5a7177d1a29393f416a6d/4
+  // On-chain supportsInterface(0xd9b67a26) is true. Candidates are checked at
   // runtime; the test holds no keys, signs nothing, and sends nothing.
-  const COLLECTION = "0x8f28E18039c37cdB4389E6dcb8703966fb9480A8";
-  const TOKEN_ID = "91801109843487528103748472202153632723215093328";
-  const HOLDER = "0xEf8BB725e1056317dBafD9B356E63c160e63dCdd";
+  const COLLECTION = "0xD2C7FD8e7Ab1527a2cb5A7177d1A29393F416A6d";
+  const TOKEN_ID = "4";
+  const HOLDER_CANDIDATES = [
+    "0x745098b2c028BA7490452b3A13049a7Fe10b6a87",
+    "0xBB78A151673FaC1A0A2162Abc7BEE3a39b3767b5",
+    "0xf26de9DD7D737243089648633d62641Ff238d51f",
+    "0xd4bF7BF399c752F4fD97b6976035DcA3FD2E012B",
+    "0xB350D7cb33dB07E00FF5074461Ab3ac9Aa989926",
+    "0x3D8250Ac679dcfd1E90c29E7a64AB5013645E579",
+    "0xc498067D0831e6Ae3Ea9f83c958f704521025CD2",
+    "0x747c63e713843117Ef99CE689D9F029E3F10da96",
+    "0x8b59Ba7533f0F451c58B6EAFfc1860C0B9034810",
+    "0x36B55a8C16bEc8CBe1Ec58cB190A8a25F32d2682",
+  ] as const;
   const runtime = createRuntime({ rpcUrl: "https://rpc.monad.xyz", chainId: 143 });
   const registry = new Registry(runtime);
   registry.use(ercManifest);
 
   it("transfers one live multi-token unit with zero warnings", { timeout: 120_000 }, async () => {
-    const balance = (await registry.action("erc1155", "balanceOf", HOLDER, {
-      collection: COLLECTION,
-      tokenId: TOKEN_ID,
-      owner: HOLDER,
-    })) as QueryResult;
-    expect(BigInt((balance.data as { balance: string }).balance)).toBeGreaterThan(0n);
+    let holder: (typeof HOLDER_CANDIDATES)[number] | undefined;
+    for (const candidate of HOLDER_CANDIDATES) {
+      const balance = (await registry.action("erc1155", "balanceOf", candidate, {
+        collection: COLLECTION,
+        tokenId: TOKEN_ID,
+        owner: candidate,
+      })) as QueryResult;
+      if (BigInt((balance.data as { balance: string }).balance) > 0n) {
+        holder = candidate;
+        break;
+      }
+    }
+    if (!holder) throw new Error("no live ERC-1155 fixture holder has a positive balance");
 
-    const transfer = (await registry.action("erc1155", "transfer", HOLDER, {
+    const transfer = (await registry.action("erc1155", "transfer", holder, {
       collection: COLLECTION,
       tokenId: TOKEN_ID,
       amount: "1",
@@ -104,7 +127,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("erc1155 generic protocol (Monad ma
     expect(results[0]?.reverted).toBe(false);
     expect(results[0]?.warnings).toEqual([]);
     expect(results[0]?.effects.nftsOut).toHaveLength(1);
-    expect(results[0]?.effects.nftsOut[0]).toMatchObject({ count: 1, amount: "1" });
+    expect(results[0]?.effects.nftsOut[0]).toMatchObject({
+      count: 1,
+      items: [{ tokenId: TOKEN_ID, amount: "1" }],
+    });
     expect(results[0]?.effects.nftsOut[0]?.collection.toLowerCase()).toBe(COLLECTION.toLowerCase());
   });
 });

@@ -76,7 +76,7 @@ Rules that make or break review:
 
 ## 4. Declare on-chain receipts — `@Event`
 
-`expects`/warnings are the closed **audit plane**; `@Event` is the open **observation plane** ([ADR 0008](./adr/0008-observation-plane.md)): a protocol-authored, human-rendered statement of what happened *in protocol terms* — "Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)". Declare one for every write with a meaningful receipt. It can also gate the flow: a capability that lists `confirms: ["swapResult"]` fails simulation with a `CONFIRMATION_MISSING` warning when the receipt does not appear.
+`expects`/warnings are the closed **audit plane**; `@Event` is the open **observation plane** ([ADR 0008](./adr/0008-observation-plane.md)): a protocol-authored, human-rendered statement of what happened *in protocol terms* — "Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)". Declare protocol-specific write receipts here. A capability that lists `confirms: ["swapResult"]` fails simulation with a `CONFIRMATION_MISSING` warning when the receipt does not appear. Canonical standard events that the audit plane already parses and fully reconciles against quantified `expects` — ERC-20/721/1155 Transfer families — do not need a duplicate authored observation.
 
 ```ts
 @Capability({ /* … */, confirms: ["swapResult"] })  // this write must produce the receipt
@@ -140,7 +140,7 @@ registry.use(myProtoManifest);
 ```
 
 1. **Offline**: discover/load shape and the built Plan's txs + expects for a known input.
-2. **Live e2e** (`describe.skipIf(!!process.env.MOSS_SKIP_E2E)`): simulate the happy path against Monad mainnet asserting **zero warnings** — free, no funds, no keys. Wire the observer (`createTraceSimulator(runtime, { observer: registry.observer() })`) and assert your receipt renders (see the Kuru round-trip's `swapResult` check). If your flow needs tokens the account lacks, chain plans: acquire in plan 1, spend in plan 2.
+2. **Live e2e** (`describe.skipIf(!!process.env.MOSS_SKIP_E2E)`): simulate the happy path against Monad mainnet asserting **zero warnings** — free, no funds, no keys. For protocol-specific receipts, wire the observer (`createTraceSimulator(runtime, { observer: registry.observer() })`) and assert the receipt renders (see Kuru's `swapResult`). Canonical ERC transfer flows instead assert the reconciled effect ids and amounts. If your flow needs tokens the account lacks, chain plans: acquire in plan 1, spend in plan 2.
 
 ## 8. Document and submit
 

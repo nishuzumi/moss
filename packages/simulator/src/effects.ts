@@ -34,9 +34,17 @@ export interface EffectsSummary {
   approvals: { token: Address; spender: Address; amount: string }[];
   /** ERC-721 approvals / operator grants — always surfaced, never declarable. */
   nftApprovals: { collection: Address; operator: Address }[];
-  /** NFT token-id movements; ERC-1155 entries also report exact uint256 units. */
-  nftsOut: { collection: Address; count: number; amount?: string }[];
-  nftsIn: { collection: Address; count: number; amount?: string }[];
+  /** NFT movements grouped by collection and distinct token id. */
+  nftsOut: {
+    collection: Address;
+    count: number;
+    items: { tokenId: string; amount?: string }[];
+  }[];
+  nftsIn: {
+    collection: Address;
+    count: number;
+    items: { tokenId: string; amount?: string }[];
+  }[];
   /** Every address that received value from the account (informational). */
   recipients: Address[];
 }
@@ -48,8 +56,8 @@ export class EffectsAccumulator {
   #in = new Map<string, bigint>();
   #approvals = new Map<string, { token: Address; spender: Address; amount: bigint }>();
   #nftApprovals = new Map<string, { collection: Address; operator: Address }>();
-  #nftsOut = new Map<string, { count: number; amount?: bigint }>();
-  #nftsIn = new Map<string, { count: number; amount?: bigint }>();
+  #nftsOut = new Map<string, Map<string, bigint | undefined>>();
+  #nftsIn = new Map<string, Map<string, bigint | undefined>>();
   #recipients = new Set<string>();
 
   constructor(account: Address) {
@@ -97,19 +105,28 @@ export class EffectsAccumulator {
       // ERC-721 Transfer(from indexed, to indexed, tokenId indexed)
       const from = topicAddress(log.topics[1]);
       const to = topicAddress(log.topics[2]);
-      if (from === this.#account) bumpNft(this.#nftsOut, contract);
-      if (to === this.#account) bumpNft(this.#nftsIn, contract);
+      const tokenId = BigInt(log.topics[3] ?? "0x0");
+      if (from === this.#account && to !== this.#account) {
+        bumpNft(this.#nftsOut, contract, tokenId);
+      }
+      if (to === this.#account && from !== this.#account) {
+        bumpNft(this.#nftsIn, contract, tokenId);
+      }
     } else if (topic0 === TRANSFER_SINGLE_TOPIC && log.topics.length === 4) {
       // ERC-1155 TransferSingle(operator indexed, from indexed, to indexed,
-      // id, value). `count` tracks ids; `amount` retains exact uint256 units.
+      // id, value). Repeated movements of one id aggregate exact uint256 units.
       const from = topicAddress(log.topics[2]);
       const to = topicAddress(log.topics[3]);
-      const [, value] = decodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], log.data);
-      if (from === this.#account) bumpNft(this.#nftsOut, contract, 1, value);
-      if (to === this.#account) bumpNft(this.#nftsIn, contract, 1, value);
+      const [id, value] = decodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], log.data);
+      if (from === this.#account && to !== this.#account) {
+        bumpNft(this.#nftsOut, contract, id, value);
+      }
+      if (to === this.#account && from !== this.#account) {
+        bumpNft(this.#nftsIn, contract, id, value);
+      }
     } else if (topic0 === TRANSFER_BATCH_TOPIC && log.topics.length === 4) {
-      // ERC-1155 TransferBatch encodes parallel id/value arrays. Effects are
-      // collection-level today, so retain id count and aggregate exact units.
+      // ERC-1155 TransferBatch encodes parallel id/value arrays. Duplicate ids
+      // are one distinct token id and their quantities aggregate.
       const from = topicAddress(log.topics[2]);
       const to = topicAddress(log.topics[3]);
       const [ids, values] = decodeAbiParameters(
@@ -117,9 +134,16 @@ export class EffectsAccumulator {
         log.data,
       );
       if (ids.length !== values.length) throw new Error("malformed ERC-1155 TransferBatch event");
-      const total = values.reduce((sum, value) => sum + value, 0n);
-      if (from === this.#account) bumpNft(this.#nftsOut, contract, ids.length, total);
-      if (to === this.#account) bumpNft(this.#nftsIn, contract, ids.length, total);
+      for (const [index, id] of ids.entries()) {
+        const value = values[index];
+        if (value === undefined) throw new Error("malformed ERC-1155 TransferBatch event");
+        if (from === this.#account && to !== this.#account) {
+          bumpNft(this.#nftsOut, contract, id, value);
+        }
+        if (to === this.#account && from !== this.#account) {
+          bumpNft(this.#nftsIn, contract, id, value);
+        }
+      }
     } else if (topic0 === APPROVAL_TOPIC && log.topics.length === 3) {
       // ERC-20 Approval(owner indexed, spender indexed, amount in data)
       const owner = topicAddress(log.topics[1]);
@@ -161,16 +185,8 @@ export class EffectsAccumulator {
         .filter((a) => a.amount > 0n)
         .map((a) => ({ token: a.token, spender: a.spender, amount: a.amount.toString() })),
       nftApprovals: [...this.#nftApprovals.values()],
-      nftsOut: [...this.#nftsOut.entries()].map(([collection, nft]) => ({
-        collection: collection as Address,
-        count: nft.count,
-        ...(nft.amount === undefined ? {} : { amount: nft.amount.toString() }),
-      })),
-      nftsIn: [...this.#nftsIn.entries()].map(([collection, nft]) => ({
-        collection: collection as Address,
-        count: nft.count,
-        ...(nft.amount === undefined ? {} : { amount: nft.amount.toString() }),
-      })),
+      nftsOut: summarizeNfts(this.#nftsOut),
+      nftsIn: summarizeNfts(this.#nftsIn),
       recipients: [...this.#recipients] as Address[],
     };
   }
@@ -191,15 +207,31 @@ function bump(map: Map<string, bigint>, key: string, amount: bigint): void {
 }
 
 function bumpNft(
-  map: Map<string, { count: number; amount?: bigint }>,
-  key: string,
-  count = 1,
+  map: Map<string, Map<string, bigint | undefined>>,
+  collection: string,
+  tokenId: bigint,
   amount?: bigint,
 ): void {
-  const current = map.get(key) ?? { count: 0 };
-  const nextAmount = amount === undefined ? current.amount : (current.amount ?? 0n) + amount;
-  map.set(key, {
-    count: current.count + count,
-    ...(nextAmount === undefined ? {} : { amount: nextAmount }),
+  if (amount === 0n) return;
+  let items = map.get(collection);
+  if (!items) {
+    items = new Map();
+    map.set(collection, items);
+  }
+  const id = tokenId.toString();
+  if (amount === undefined) {
+    if (!items.has(id)) items.set(id, undefined);
+    return;
+  }
+  items.set(id, (items.get(id) ?? 0n) + amount);
+}
+
+function summarizeNfts(map: Map<string, Map<string, bigint | undefined>>) {
+  return [...map.entries()].map(([collection, amounts]) => {
+    const items = [...amounts.entries()].map(([tokenId, amount]) => ({
+      tokenId,
+      ...(amount === undefined ? {} : { amount: amount.toString() }),
+    }));
+    return { collection: collection as Address, count: items.length, items };
   });
 }

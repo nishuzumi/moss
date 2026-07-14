@@ -55,7 +55,12 @@ describe("erc721 generic protocol (offline)", () => {
     // ERC-721 needs the owner in CALLDATA, not just as tx sender (ActionCtx).
     expect(data.toLowerCase()).toContain(ACCOUNT.slice(2).toLowerCase());
     expect(built.expects.nfts).toEqual([
-      { collection: FIXTURE_COLLECTION, count: 1, direction: "out" },
+      {
+        collection: FIXTURE_COLLECTION,
+        count: 1,
+        direction: "out",
+        items: [{ tokenId: "42" }],
+      },
     ]);
     expect(built.intent).toBe(`Transfer ${FIXTURE_COLLECTION} #42 to ${RECIPIENT}`);
   });
@@ -119,6 +124,8 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("erc721 generic protocol (Monad mai
     const { results } = await simulator.simulate([plan]);
     expect(results[0]?.reverted).toBe(false);
     expect(results[0]?.warnings).toEqual([]);
-    expect(results[0]?.effects.nftsOut).toEqual([{ collection: POSM, count: 1 }]);
+    expect(results[0]?.effects.nftsOut).toEqual([
+      { collection: POSM, count: 1, items: [{ tokenId: tokenId.toString() }] },
+    ]);
   });
 });
