@@ -49,6 +49,31 @@ The last line is the point of the whole system:
 ```
 ✓ No warnings — the unsigned txs may be handed to a wallet for review.
 ```
+## Draft FAQ content
+
+### Can I run the first example without funds or a private key?
+
+Yes. The examples build and simulate unsigned transactions. Simulation is free, Moss never signs or sends, and the first run uses an address placeholder. A wallet is only involved later if a user voluntarily chooses to review and sign a transaction.
+
+### Why does `MOSS_SKIP_E2E=1 pnpm test` exist?
+
+It runs the offline test suite without live mainnet end-to-end checks. This is useful for checking the local toolchain without depending on an RPC endpoint. Removing the variable includes live e2e tests, which require an RPC endpoint that supports `debug_traceCall`.
+
+### What does `✓ No warnings` mean?
+
+It means the simulator did not find a difference between the Plan's declared expectations and the effects observed during simulation. It does not mean that the transaction is guaranteed to execute identically later; chain state, prices, liquidity, and contract state can change before signing.
+
+### Why did simulation fail even though the protocol transaction may work on-chain?
+
+Simulation depends on the RPC's tracing support and the simulator's execution limits. A failure should be reported rather than bypassed. Switch to a supported endpoint only when the documentation or error message indicates that the endpoint lacks `debug_traceCall`; never silently skip the verification step.
+
+### What is the difference between a Plan and a signed transaction?
+
+An action returns an unsigned Plan containing encoded transactions, intent, risk labels, expected effects, confirmations, and an integrity hash. It is not yet a transaction sent to the network. The wallet and user remain responsible for final review and signing.
+
+### Why do examples have lightweight `test` and `build` scripts?
+
+The `simple-flow` package states that examples are exercised by e2e tests in the packages. The example scripts are entry points for running the flow; package-level tests provide the broader verification.
 
 Now let's take those four steps apart. Create a scratch file to follow along
 (`examples/simple-flow/src/play.ts`, run with
