@@ -49,7 +49,7 @@ The last line is the point of the whole system:
 ```
 ✓ No warnings — the unsigned txs may be handed to a wallet for review.
 ```
-## Draft FAQ content
+## Troubleshooting and FAQ
 
 ### Can I run the first example without funds or a private key?
 
@@ -61,11 +61,11 @@ It runs the offline test suite without live mainnet end-to-end checks. This is u
 
 ### What does `✓ No warnings` mean?
 
-It means the simulator did not find a difference between the Plan's declared expectations and the effects observed during simulation. It does not mean that the transaction is guaranteed to execute identically later; chain state, prices, liquidity, and contract state can change before signing.
+It means the simulator did not find a difference between the Plan's declared expectations and the effects observed during simulation. It does not mean that the transaction is guaranteed to execute identically later; chain state, prices, liquidity, and contract state can change before signing. See the [Security Model](../SECURITY.md) before using real decisions or funds.
 
 ### Why did simulation fail even though the protocol transaction may work on-chain?
 
-Simulation depends on the RPC's tracing support and the simulator's execution limits. A failure should be reported rather than bypassed. Switch to a supported endpoint only when the documentation or error message indicates that the endpoint lacks `debug_traceCall`; never silently skip the verification step.
+Simulation depends on the RPC's tracing support and the simulator's execution limits. A failure should be reported rather than bypassed. Switch to a supported endpoint only when the documentation or error message indicates that the endpoint lacks `debug_traceCall`; never silently skip the verification step. The [MCP Tools Reference](./mcp-tools.md) and [Agent Skill Guide](./agent-skill.md) describe the mandatory verification flow.
 
 ### What is the difference between a Plan and a signed transaction?
 
