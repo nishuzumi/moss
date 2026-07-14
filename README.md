@@ -1,6 +1,6 @@
 # Moss
 
-**English** | [中文](./README.zh-CN.md)
+**English** | [中文](./README.zh-CN.md) | [中文繁體](./README.zh-HK.md)
 
 Moss turns complex DApp/protocol interactions on [Monad](https://monad.xyz) into uniform, agent-callable capabilities — `discover → load → action → simulate` — with the system, not the agent, responsible for assembling correct transactions.
 
