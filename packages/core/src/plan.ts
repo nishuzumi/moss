@@ -18,7 +18,12 @@ import type {
 export interface DeclaredFlows {
   out?: { token: TokenRef; amountMax: bigint }[];
   in?: { token: TokenRef; amountMin: bigint }[];
-  nfts?: { collection: Address; count: number; direction: "in" | "out" }[];
+  nfts?: {
+    collection: Address;
+    count: number;
+    direction: "in" | "out";
+    amountMax?: bigint;
+  }[];
 }
 
 /** The value a Capability method returns; core finalizes it into a Plan. */
@@ -106,7 +111,12 @@ export function finalizePlan(draft: PlanDraft, meta: PlanMeta): Plan {
     })),
     in: (draft.flows.in ?? []).map((f) => ({ token: f.token, amountMin: f.amountMin.toString() })),
     approvals,
-    nfts: draft.flows.nfts ?? [],
+    nfts: (draft.flows.nfts ?? []).map((nft) => ({
+      collection: nft.collection,
+      count: nft.count,
+      direction: nft.direction,
+      ...(nft.amountMax === undefined ? {} : { amountMax: nft.amountMax.toString() }),
+    })),
   };
 
   const base = {

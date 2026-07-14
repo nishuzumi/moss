@@ -6,12 +6,14 @@ import {
   NATIVE,
   plan,
 } from "@themoss/core";
-import { padHex, toHex } from "viem";
+import { encodeAbiParameters, padHex, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import {
   APPROVAL_FOR_ALL_TOPIC,
   APPROVAL_TOPIC,
   EffectsAccumulator,
+  TRANSFER_BATCH_TOPIC,
+  TRANSFER_SINGLE_TOPIC,
   TRANSFER_TOPIC,
   WETH_DEPOSIT_TOPIC,
   WETH_WITHDRAWAL_TOPIC,
@@ -118,6 +120,89 @@ describe("effects accumulator", () => {
     const warnings = reconcile({}, summary);
     expect(warnings.map((w) => w.code)).toContain("NFT_OPERATOR_GRANTED");
   });
+
+  it("extracts and reconciles ERC-1155 single and batch transfers", () => {
+    const huge = 2n ** 255n;
+    const acc = new EffectsAccumulator(A);
+    acc.addFrame({
+      type: "CALL",
+      from: A,
+      to: TOKEN,
+      logs: [
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_SINGLE_TOPIC,
+            padHex(A, { size: 32 }),
+            padHex(A, { size: 32 }),
+            padHex(B, { size: 32 }),
+          ],
+          data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [42n, huge]),
+        },
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_SINGLE_TOPIC,
+            padHex(A, { size: 32 }),
+            padHex(A, { size: 32 }),
+            padHex(B, { size: 32 }),
+          ],
+          data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [43n, 7n]),
+        },
+        {
+          address: TOKEN,
+          topics: [
+            TRANSFER_BATCH_TOPIC,
+            padHex(B, { size: 32 }),
+            padHex(B, { size: 32 }),
+            padHex(A, { size: 32 }),
+          ],
+          data: encodeAbiParameters(
+            [{ type: "uint256[]" }, { type: "uint256[]" }],
+            [
+              [1n, 2n],
+              [2n, 3n],
+            ],
+          ),
+        },
+      ],
+    });
+    const summary = acc.summary();
+    expect(summary.nftsOut).toEqual([
+      { collection: TOKEN, count: 2, amount: (huge + 7n).toString() },
+    ]);
+    expect(summary.nftsIn).toEqual([{ collection: TOKEN, count: 2, amount: "5" }]);
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 2,
+              direction: "out",
+              amountMax: (huge + 7n).toString(),
+            },
+          ],
+        },
+        summary,
+      ),
+    ).toEqual([]);
+    expect(
+      reconcile(
+        {
+          nfts: [
+            {
+              collection: TOKEN,
+              count: 2,
+              direction: "out",
+              amountMax: (huge + 6n).toString(),
+            },
+          ],
+        },
+        summary,
+      )[0]?.code,
+    ).toBe("NFT_OUT_EXCEEDS_MAX");
+  });
 });
 
 // The selectors are DERIVED from signatures at module load; these pins are
@@ -133,6 +218,12 @@ describe("event topic derivation", () => {
     );
     expect(APPROVAL_FOR_ALL_TOPIC).toBe(
       "0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31",
+    );
+    expect(TRANSFER_SINGLE_TOPIC).toBe(
+      "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62",
+    );
+    expect(TRANSFER_BATCH_TOPIC).toBe(
+      "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb",
     );
     expect(WETH_DEPOSIT_TOPIC).toBe(
       "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",

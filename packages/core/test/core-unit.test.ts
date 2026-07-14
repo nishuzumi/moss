@@ -210,6 +210,27 @@ describe("plan", () => {
     expect(computePlanHash(tampered as any)).not.toBe(built.planHash);
   });
 
+  it("preserves uint256 NFT amounts and seals amountMax into the hash", () => {
+    const amount = 2n ** 255n + 17n;
+    const draft = plan([{ to: USDC, data: "0xdead", value: 0n }], {
+      nfts: [{ collection: USDC, count: 1, direction: "out", amountMax: amount }],
+    });
+    const built = finalizePlan(draft, { ...meta, declaredRisk: [...meta.declaredRisk] });
+
+    expect(built.expects.nfts).toEqual([
+      { collection: USDC, count: 1, direction: "out", amountMax: amount.toString() },
+    ]);
+    const tampered = {
+      ...built,
+      expects: {
+        ...built.expects,
+        nfts: [{ ...built.expects.nfts?.[0], amountMax: (amount + 1n).toString() }],
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: intentional structural tamper
+    expect(computePlanHash(tampered as any)).not.toBe(built.planHash);
+  });
+
   it("rejects empty plans", () => {
     expect(() => plan([])).toThrow("at least one step");
   });

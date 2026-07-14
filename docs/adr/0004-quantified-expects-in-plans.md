@@ -1,6 +1,6 @@
 # Plans carry quantified expectations (`expects`) alongside risk labels
 
-Effects reconciliation must detect *undeclared* approvals and fund flows, which requires a machine-comparable declaration of what was expected. Risk labels (`fundOut`, `approval`) are unquantified — they can say a Plan involves an approval, but not to whom or how much, so a rogue 10× approval to an unknown spender would pass a label-only check. Every Plan therefore carries an `expects` block: fungible flows `{token, amountMax | amountMin}`, approvals `{token, spender, amountMax}`, and NFTs `{collection, count}` (token ids are unknowable before mint).
+Effects reconciliation must detect *undeclared* approvals and fund flows, which requires a machine-comparable declaration of what was expected. Risk labels (`fundOut`, `approval`) are unquantified — they can say a Plan involves an approval, but not to whom or how much, so a rogue 10× approval to an unknown spender would pass a label-only check. Every Plan therefore carries an `expects` block: fungible flows `{token, amountMax | amountMin}`, approvals `{token, spender, amountMax}`, and NFTs `{collection, count, direction, amountMax?}`. `count` bounds the number of token ids; ERC-1155 outflows additionally use decimal-string `amountMax` to bound the exact number of units without losing uint256 precision. Token ids themselves remain omitted because they may be unknowable before mint.
 
 ## Consequences
 

@@ -4,16 +4,17 @@ The `@themoss/erc` package looked, at a glance, like a "token package". It is
 not. It is the **interface layer**: everything in it is a standard *interface*
 — never an *instance*. Two kinds of exports, zero hardcoded addresses:
 
-1. **Compiled standard ABIs** — `ERC20Abi`, `WETH9Abi` (from `IERC20.sol` /
-   `IWETH9.sol` via forge + wagmi, ADR 0007). Pure data describing the
+1. **Compiled standard ABIs** — `ERC20Abi`, `ERC721Abi`, `ERC1155Abi`,
+   `WETH9Abi` (from the corresponding Solidity interfaces via forge + wagmi,
+   ADR 0007). Pure data describing the
    interface; the currency that `contracts:` declarations and `createHandle`
    consume.
-2. **Address-free generic adapters** — the `ERC20` and `ERC721` protocol
+2. **Address-free generic adapters** — the `ERC20`, `ERC721`, and `ERC1155` protocol
    classes (`contracts: {}`): capabilities whose contract address is
    *naturally a call-time parameter* (erc20's `token` accepts a well-known
    symbol, an explicit 0x address, or `native`, with unknown addresses
-   resolving metadata via `RegistryOptions.tokenFallback`; erc721's
-   `collection` is an explicit address — NFT collections are not table
+   resolving metadata via `RegistryOptions.tokenFallback`; erc721 and
+   erc1155 take `collection` as an explicit address — NFT collections are not table
    material, the catalog is fungible-only).
 
 Where an address goes decides the layer: call-time parameter → generic
@@ -59,7 +60,7 @@ hand-written adapter is simpler.
 ## Naming
 
 Interface data carries the `Abi` suffix with standards-cased acronyms:
-`ERC20Abi`, `WETH9Abi`. Adapter classes take the bare name of what they
+`ERC20Abi`, `ERC721Abi`, `ERC1155Abi`, `WETH9Abi`. Adapter classes take the bare name of what they
 adapt: `ERC20` (the generic standard adapter), `WMON` (the instance adapter).
 The suffix is load-bearing: at a use site, `abi: ERC20Abi` reads as interface
 data, `protocols: [ERC20]` reads as a registrable protocol. wagmi's generated

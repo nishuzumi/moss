@@ -56,8 +56,14 @@ export interface Expects {
   in?: { token: TokenRef; amountMin: string }[];
   /** Approvals that may be granted. */
   approvals?: { token: Address; spender: Address; amountMax: string }[];
-  /** NFT movements. Token ids are unknowable before mint, so only counts. */
-  nfts?: { collection: Address; count: number; direction: "in" | "out" }[];
+  /** NFT movements. `count` is token-id count; ERC-1155 may also cap units. */
+  nfts?: {
+    collection: Address;
+    count: number;
+    direction: "in" | "out";
+    /** Maximum ERC-1155 units that may leave, as uint256 decimal. */
+    amountMax?: string;
+  }[];
 }
 
 /**

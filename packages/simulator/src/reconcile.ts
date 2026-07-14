@@ -11,6 +11,7 @@ export type WarningCode =
   | "APPROVAL_EXCEEDS_MAX"
   | "MIN_INFLOW_NOT_MET"
   | "UNDECLARED_NFT_OUT"
+  | "NFT_OUT_EXCEEDS_MAX"
   | "NFT_OPERATOR_GRANTED";
 
 export interface Warning {
@@ -44,7 +45,7 @@ export function reconcile(expects: Expects, effects: EffectsSummary): Warning[] 
   const declaredNftOut = new Map(
     (expects.nfts ?? [])
       .filter((n) => n.direction === "out")
-      .map((n) => [n.collection.toLowerCase(), n.count]),
+      .map((n) => [n.collection.toLowerCase(), n]),
   );
 
   for (const out of effects.assetsOut) {
@@ -93,11 +94,20 @@ export function reconcile(expects: Expects, effects: EffectsSummary): Warning[] 
   }
 
   for (const nft of effects.nftsOut) {
-    const declared = declaredNftOut.get(nft.collection.toLowerCase()) ?? 0;
-    if (nft.count > declared) {
+    const declared = declaredNftOut.get(nft.collection.toLowerCase());
+    if (!declared || nft.count > declared.count) {
       warnings.push({
         code: "UNDECLARED_NFT_OUT",
-        message: `${nft.count} NFT(s) from ${nft.collection} leave the account; declared: ${declared}`,
+        message: `${nft.count} NFT token id(s) from ${nft.collection} leave the account; declared: ${declared?.count ?? 0}`,
+      });
+    } else if (
+      nft.amount !== undefined &&
+      declared.amountMax !== undefined &&
+      BigInt(nft.amount) > BigInt(declared.amountMax)
+    ) {
+      warnings.push({
+        code: "NFT_OUT_EXCEEDS_MAX",
+        message: `${nft.collection} ERC-1155 outflow ${nft.amount} exceeds the declared maximum ${declared.amountMax}`,
       });
     }
   }

@@ -51,7 +51,7 @@ describe("erc20 generic protocol (offline)", () => {
   it("fills the transfer verb and loads with symbol-aware params", () => {
     const registry = offlineRegistry();
     const transfers = registry.discover({ verb: "transfer" });
-    expect(transfers).toHaveLength(2); // fungible (erc20) + NFT (erc721)
+    expect(transfers).toHaveLength(3); // fungible + ERC-721 + ERC-1155
     expect(transfers).toContainEqual(
       expect.objectContaining({ protocol: "erc20", method: "transfer" }),
     );

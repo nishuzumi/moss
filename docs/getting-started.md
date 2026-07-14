@@ -88,8 +88,9 @@ Two vocabularies are at work:
 - **tags** — free-form long-tail semantics (`clob` tells you this DEX is an
   orderbook, not an AMM).
 
-Try `discover({ verb: "transfer" })` — served twice, by the generic `erc20`
-protocol (any token) and the generic `erc721` protocol (any NFT collection).
+Try `discover({ verb: "transfer" })` — served three times, by the generic `erc20`
+protocol (any token), the generic `erc721` protocol (any NFT collection), and
+the generic `erc1155` protocol (any multi-token collection).
 Try `discover({})` to see the whole catalog.
 
 **Go deeper:** [mcp-tools.md](./mcp-tools.md#discover) · verb/category design:
@@ -253,7 +254,7 @@ Definition of Done your PR is reviewed against
 | --- | --- | --- |
 | machinery | `@themoss/core` | decorators, Plans, Registry — zero chain data |
 | verification | `@themoss/simulator` | trace simulation + effects reconciliation |
-| interfaces | `@themoss/erc` | compiled standard ABIs + address-free generic adapters (erc20, erc721) |
+| interfaces | `@themoss/erc` | compiled standard ABIs + address-free generic adapters (erc20, erc721, erc1155) |
 | instances | `@themoss/system` | Monad token table, chain defaults, WMON |
 | protocols | `@themoss/protocol-*` | one package per protocol |
 | product | `@themoss/mcp-server` | the four tools, batteries included |

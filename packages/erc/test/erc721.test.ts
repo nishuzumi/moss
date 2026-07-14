@@ -34,7 +34,7 @@ describe("erc721 generic protocol (offline)", () => {
   it("fills the nft category with a transfer and ownership queries", () => {
     const registry = offlineRegistry();
     const nft = registry.discover({ category: "nft" });
-    expect(nft).toHaveLength(3); // transfer + ownerOf + balanceOf
+    expect(nft).toHaveLength(5); // erc721: 3; erc1155: 2
     expect(nft).toContainEqual(
       expect.objectContaining({ protocol: "erc721", method: "transfer", verb: "transfer" }),
     );

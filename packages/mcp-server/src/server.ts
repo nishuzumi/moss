@@ -40,6 +40,7 @@ const planSchema = z.object({
           collection: z.string(),
           count: z.number().int(),
           direction: z.enum(["in", "out"]),
+          amountMax: z.string().optional(),
         }),
       )
       .optional(),

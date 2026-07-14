@@ -71,7 +71,7 @@ Rules that make or break review:
 - **Params are human-readable.** Amounts arrive as decimal strings and are scaled by semantic types. A contextual type (`tokenAmount("asset")`) must be declared **after** the parameter it references — decoding runs in declaration order.
 - **`expects` is the safety contract** ([ADR 0004](./adr/0004-quantified-expects-in-plans.md)). Declare the maximum that may leave and the minimum that must arrive. Approvals built with `approveStep` (from `@themoss/erc`) are declared automatically; never approve more than the plan spends. Simulation warns on every undeclared difference — an honest, tight `expects` is what makes your capability trustworthy.
 - **Build-time reads are fine.** Capabilities are async: read the orderbook, check allowances, compute minOut — then encode. Plans must stand alone once built.
-- **Methods receive `(params, ctx)`.** `ctx.account` (`ActionCtx`) is the caller — the sender of every plan transaction. Reach for it when the standard wants the caller *inside calldata* (ERC-721's `safeTransferFrom(from, …)` — see the generic erc721 protocol); everything else ignores the second argument.
+- **Methods receive `(params, ctx)`.** `ctx.account` (`ActionCtx`) is the caller — the sender of every plan transaction. Reach for it when the standard wants the caller *inside calldata* (ERC-721/1155's `safeTransferFrom(from, …)` — see the generic erc721 and erc1155 protocols); everything else ignores the second argument.
 - **Cleanup steps matter.** Refund/unwrap/sweep calls belong in the same plan — a missing cleanup step is exactly the class of bug simulation catches.
 
 ## 4. Declare on-chain receipts — `@Event`

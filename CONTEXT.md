@@ -31,7 +31,7 @@ A plain exported function producing a TxStep plus its expects fragment (e.g. `ap
 _Avoid_: helper, mixin
 
 **Expects**:
-A Plan's quantified declaration of what may move: assets out (with a max), assets in (with a min), approvals (token, spender, cap), NFTs (collection, count). Risk labels say what *kind* of danger; expects say exactly *how much* — the machine-comparable side of effects reconciliation.
+A Plan's quantified declaration of what may move: assets out (with a max), assets in (with a min), approvals (token, spender, cap), NFTs (collection, token-id count, direction, and an optional ERC-1155 unit cap). Risk labels say what *kind* of danger; expects say exactly *how much* — the machine-comparable side of effects reconciliation.
 
 **Semantic type**:
 A parameter type that carries two faces: a human/agent-readable description (`describe`) and a runtime decoder (`decode`) that turns agent-supplied values into on-chain values (e.g. human decimals → base units).

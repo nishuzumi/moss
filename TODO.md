@@ -26,7 +26,7 @@
 ### M2 Simulator ✅
 - [x] `Simulator` 接口 + `debug_traceCall` 双 tracer 实现（callTracer+withLog / prestateTracer+diffMode）
 - [x] diff → stateOverrides 合并（balance/nonce/storage/code + slot 清零）
-- [x] effects 提取：ERC-20/721 Transfer、Approval、ApprovalForAll、**原生 MON 流（调用帧 value）**、**WETH9 Deposit/Withdrawal（wrapped 铸毁不发 Transfer）**
+- [x] effects 提取：ERC-20/721 Transfer、ERC-1155 TransferSingle/TransferBatch、Approval、ApprovalForAll、**原生 MON 流（调用帧 value）**、**WETH9 Deposit/Withdrawal（wrapped 铸毁不发 Transfer）**
 - [x] reconciliation：只告警未声明差异；「已声明只出不进」合法
 - [x] 显式 gas；`eth_estimateGas`（带 override 第三参，拒绝则 null）
 - [x] 无 debug 端点明确报错 + 推荐列表
@@ -92,7 +92,7 @@
 ## 双面制遗留（下轮优先）
 - [ ] **余额差审计层**：候选 token 的前后态 balanceOf（override eth_call），资产流完备性与事件词汇解耦；WETH9 特判退役（ADR 0008 已记录设计）
 - [x] onboarding「声明事件」章节（§4）+ _template 真实 @Event（Deposited 事件 + confirms，CI 保真）+ mcp-tools 补 observations/CONFIRMATION_MISSING/confirms 字段 + agent-skill 补「叙事 vs 法律」规则（7月8日）
-- [ ] ERC-1155 词汇（TransferSingle/Batch）待 nft 协议接入时进审计面
+- [x] ERC-1155 接口层：编译 ABI + 通用 transfer/balanceOf；TransferSingle/Batch 进入审计面并按数量对账（7月14日）
 
 ## 开源发布准备
 - [x] 推送 GitHub 仓库（github.com/nishuzumi/moss，首 commit `c2e14f0`，CI #1 全绿含主网 e2e）
