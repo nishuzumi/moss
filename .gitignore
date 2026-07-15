@@ -12,3 +12,4 @@ coverage/
 # .claude/agents ships with the repo (the agent-swap example); the rest is local.
 .claude/*
 !.claude/agents/
+/docs/research/

@@ -11,6 +11,9 @@
 - **Accepted architecture is the requirement.** ADRs, the glossary, public
   docs, Agent rules, and the package template must describe it consistently.
   Never teach a superseded contract as a supported alternative.
+- **Research files are temporary.** Never retain or commit `docs/research/`
+  notes. Move durable conclusions into the relevant ADR or maintained docs,
+  then delete the research file.
 
 ## Repo facts
 
