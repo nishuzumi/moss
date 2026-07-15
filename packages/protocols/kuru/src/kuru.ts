@@ -32,6 +32,7 @@ import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 export const KURU_ROUTER_ADDRESS = "0xd651346d7c789536ebf06dc72aE3C8502cd695CC" as const;
 const KURU_API_URL = "https://api.kuru.io";
 const KURU_NATIVE = "0x0000000000000000000000000000000000000000" as const;
+const DEFAULT_SLIPPAGE_BPS = 50;
 
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
@@ -49,16 +50,17 @@ const swapParams = {
     description: "Minimum output quantity; omit when amountIn is supplied.",
   },
   slippage: {
-    type: BasisPoints.default(50),
+    type: BasisPoints.default(DEFAULT_SLIPPAGE_BPS),
     description: "Maximum adverse movement allowed between quoting and execution.",
   },
 } satisfies ParamsSpec;
 
 type InferredSwapParams = InferParams<typeof swapParams>;
-type SwapParams = Omit<InferredSwapParams, "amountIn" | "amountOut"> &
-  Partial<Pick<InferredSwapParams, "amountIn" | "amountOut">>;
-type KuruSwapParams = Pick<SwapParams, "tokenIn" | "tokenOut" | "slippage"> &
-  ({ amountIn: string; amountOut?: never } | { amountIn?: never; amountOut: string });
+type SwapParams = Omit<InferredSwapParams, "amountIn" | "amountOut" | "slippage"> &
+  Partial<Pick<InferredSwapParams, "amountIn" | "amountOut" | "slippage">>;
+type KuruSwapParams = Pick<SwapParams, "tokenIn" | "tokenOut"> & {
+  slippage?: InferredSwapParams["slippage"];
+} & ({ amountIn: string; amountOut?: never } | { amountIn?: never; amountOut: string });
 
 type KuruQuote =
   | {
@@ -205,7 +207,7 @@ export class Kuru {
 
   @Receipt()
   swapReceipt(changes: readonly Change[]): ReceiptResult<KuruSwapOutcome> {
-    let routerSwap: Omit<KuruSwapOutcome, "fills"> | undefined;
+    let routerSwap: KuruSwapOutcome | undefined;
     let tradeEvents = 0;
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
@@ -281,6 +283,7 @@ export class Kuru {
     if (!firstLeg || !lastLeg) throw new Error("no verified Kuru market path for this token pair");
     const inputDecimals = firstLeg.inputDecimals;
     const outputDecimals = lastLeg.outputDecimals;
+    const slippage = BigInt(params.slippage ?? DEFAULT_SLIPPAGE_BPS);
     for (const route of routes) {
       if (
         route[0]?.inputDecimals !== inputDecimals ||
@@ -293,7 +296,7 @@ export class Kuru {
     if (side.kind === "amountIn") {
       const amountIn = parseUnits(side.amount, inputDecimals);
       const quoted = await this.#quoteExactInput(routes, amountIn);
-      const minimumAmountOut = (quoted.amountOut * (10_000n - BigInt(params.slippage))) / 10_000n;
+      const minimumAmountOut = (quoted.amountOut * (10_000n - slippage)) / 10_000n;
       return {
         side: side.kind,
         route: quoted.route,
@@ -313,8 +316,7 @@ export class Kuru {
       inputDecimals,
       outputDecimals,
     );
-    const executionAmountIn =
-      (quoted.amountIn * (10_000n + BigInt(params.slippage)) + 9_999n) / 10_000n;
+    const executionAmountIn = (quoted.amountIn * (10_000n + slippage) + 9_999n) / 10_000n;
     return {
       side: side.kind,
       route: quoted.route,

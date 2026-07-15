@@ -56,6 +56,17 @@ class ValidDependencyFixture {
 })
 class InvalidDependencyFixture {}
 
+// @ts-expect-error Protocol classes cannot require constructor arguments; Registry owns construction.
+@Protocol({
+  name: "invalid-constructor-fixture",
+  category: "token",
+  description: "Compile-time constructor fixture.",
+  contracts: {},
+})
+class InvalidConstructorFixture {
+  constructor(_required: string) {}
+}
+
 class ReceiptNameFixture extends ExampleProtocol {
   @Capability<ReceiptNameFixture, typeof fixtureParams>({
     intent: "Compile-time fixture",
@@ -125,4 +136,5 @@ void invalidParams;
 void handleFixture;
 void ValidDependencyFixture;
 void InvalidDependencyFixture;
+void InvalidConstructorFixture;
 void ReceiptNameFixture;

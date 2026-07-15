@@ -23,14 +23,14 @@
   "dependencies": {
     "@themoss/core": "workspace:*",
     "viem": "^2.54.3",
-    "@themoss/erc": "workspace:*",
-    "@themoss/system": "workspace:*"
+    "@themoss/erc": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
     "typescript": "~5.9.0",
     "vitest": "^3.2.6",
     "tsx": "^4.19.0",
-    "@themoss/simulator": "workspace:*"
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*"
   }
 }

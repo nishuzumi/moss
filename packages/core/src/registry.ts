@@ -10,7 +10,7 @@ import {
 } from "./decorators.js";
 import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
 import type { MossRuntime } from "./runtime.js";
-import { describeParams, parseParams } from "./semantics.js";
+import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
 import type {
   Address,
   CapabilityNode,
@@ -174,6 +174,10 @@ export class Registry {
         if (!field.type || typeof field.type.safeParseAsync !== "function") {
           throw new Error(`parameter "${config.name}.${name}.${param}" has an invalid type`);
         }
+        requireMetadataText(
+          parameterTypeDescription(field.type),
+          `parameter "${config.name}.${name}.${param}" type description`,
+        );
       }
       if (meta.kind !== "capability") continue;
       if (!VERBS.includes(meta.spec.verb)) {

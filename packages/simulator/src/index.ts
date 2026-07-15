@@ -3,6 +3,7 @@ import {
   type Change,
   flattenCapabilityTree,
   type MossRuntime,
+  ReceiptCoverageError,
   type ReceiptResult,
   type UnsignedTx,
   verifyReceiptCoverage,
@@ -64,11 +65,6 @@ export interface SimulatorOptions {
 }
 
 const DEFAULT_PREFUND_WEI = 10n ** 24n;
-
-function coverageFailure(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /covered|original object|retain every|in order/i.test(message);
-}
 
 export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOptions): Simulator {
   const gasBudget = options.gasPerTx ?? DEFAULT_SIMULATION_GAS;
@@ -148,7 +144,10 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             changes,
             warnings: [
               {
-                code: coverageFailure(error) ? "CHANGE_COVERAGE_MISMATCH" : "RECEIPT_FAILED",
+                code:
+                  error instanceof ReceiptCoverageError
+                    ? "CHANGE_COVERAGE_MISMATCH"
+                    : "RECEIPT_FAILED",
                 message: reason,
               },
             ],

@@ -1,5 +1,6 @@
 import { parseAbi, parseUnits } from "viem";
 import { describe, expect, it } from "vitest";
+import { z } from "zod/v4";
 import {
   type AddressValue,
   Capability,
@@ -280,6 +281,23 @@ class InvalidMetadataProtocol {
   }
 }
 
+const undescribedParams = {
+  value: { type: z.string(), description: "Fixture value." },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "undescribed-parameter",
+  category: "token",
+  description: "Fixture with an undescribed Parameter type.",
+  contracts: {},
+})
+class UndescribedParameterProtocol {
+  @Query({ intent: "Inspect the fixture", params: undescribedParams })
+  async inspect(params: InferParams<typeof undescribedParams>) {
+    return params.value;
+  }
+}
+
 function receiptFor<T extends "approve" | "swap">(
   operation: T,
   changes: readonly Change[],
@@ -378,6 +396,9 @@ describe("framework core seam", () => {
       "cannot extend another decorated Protocol",
     );
     expect(() => new Registry(runtime).use(InvalidMetadataProtocol)).toThrow("non-empty string");
+    expect(() => new Registry(runtime).use(UndescribedParameterProtocol)).toThrow(
+      "type description",
+    );
   });
 
   it("requires exactly one direct transaction per Capability", () => {

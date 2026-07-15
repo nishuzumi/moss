@@ -19,7 +19,7 @@ export interface ContractConfig {
   addr: Address;
 }
 
-export type ProtocolCtor = new (...args: never[]) => object;
+export type ProtocolCtor = new () => object;
 export type ProtocolDependencies = Record<string, ProtocolCtor>;
 type InjectedProtocols<Dependencies extends ProtocolDependencies> = {
   [K in keyof Dependencies]: ProtocolRef<InstanceType<Dependencies[K]>>;
@@ -70,17 +70,15 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
   if (!/^[a-z][a-z0-9-]*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
   }
-  // biome-ignore lint/suspicious/noExplicitAny: standard class-decorator mixin
-  return <T extends new (...args: any[]) => object & InjectedProtocols<Dependencies>>(
+  return <T extends new () => object & InjectedProtocols<Dependencies>>(
     target: T,
     context: ClassDecoratorContext<T>,
   ): T => {
     if (context.kind !== "class") throw new Error("@Protocol decorates classes");
-    // biome-ignore lint/suspicious/noExplicitAny: standard class-decorator mixin
-    const injected = class extends (target as new (...args: any[]) => object) {
-      // biome-ignore lint/suspicious/noExplicitAny: standard class-decorator mixin
-      constructor(...args: any[]) {
-        super(...args);
+    const Base = target as new () => object;
+    const injected = class extends Base {
+      constructor(...args: unknown[]) {
+        super();
         const [runtime, account, dependencies = {}] = args as [
           MossRuntime,
           Address,

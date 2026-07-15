@@ -78,3 +78,8 @@ export function describeParams(
     ]),
   );
 }
+
+export function parameterTypeDescription(type: z.ZodType): string | undefined {
+  const description = z.toJSONSchema(type).description;
+  return typeof description === "string" ? description : undefined;
+}

@@ -105,4 +105,23 @@ describe("Capability simulation", () => {
     ]);
     expect(outcome.halted?.transactionIndex).toBe(0);
   });
+
+  it("classifies exact Change coverage failures without matching error text", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          logs: [{ address: B, topics: ["0x01"], data: "0x02" }],
+        },
+      ]),
+      { receipt: () => coveringReceipt([]) },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.warnings[0]).toEqual({
+      code: "CHANGE_COVERAGE_MISMATCH",
+      message: "Receipt covered 0 Changes; expected 1",
+    });
+  });
 });

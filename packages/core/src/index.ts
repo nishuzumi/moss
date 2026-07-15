@@ -12,6 +12,7 @@ export {
 export {
   type ExecutableCapability,
   flattenCapabilityTree,
+  ReceiptCoverageError,
   toJsonSafe,
   verifyReceiptCoverage,
 } from "./framework.js";

@@ -33,6 +33,13 @@ export interface ExecutableCapability {
   transaction: UnsignedTx;
 }
 
+export class ReceiptCoverageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReceiptCoverageError";
+  }
+}
+
 function requireText(value: unknown, path: string): asserts value is string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${path} must be a non-empty string`);
@@ -150,11 +157,15 @@ function flattenReceipt(
 export function verifyReceiptCoverage(changes: readonly Change[], receipt: Receipt): void {
   const leaves = flattenReceipt(receipt);
   if (leaves.length !== changes.length) {
-    throw new Error(`Receipt covered ${leaves.length} Changes; expected ${changes.length}`);
+    throw new ReceiptCoverageError(
+      `Receipt covered ${leaves.length} Changes; expected ${changes.length}`,
+    );
   }
   for (const [index, change] of changes.entries()) {
     if (leaves[index]?.change !== change) {
-      throw new Error(`Receipt Change ${index} does not retain the original object in order`);
+      throw new ReceiptCoverageError(
+        `Receipt Change ${index} does not retain the original object in order`,
+      );
     }
   }
 }

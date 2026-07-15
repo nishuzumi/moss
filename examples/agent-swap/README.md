@@ -55,7 +55,7 @@ Open Claude Code at the repository root after starting the fork, then ask:
 
 The [`moss-trader`](../../.claude/agents/moss-trader.md) procedure obtains the wallet address, records balances, and calls the four Moss tools.
 
-It stops on every Warning, compares structured Outcomes with the request, and writes the exact Capability JSON.
+It stops on every Warning, compares every ordered Receipt text with the request, and writes the exact Capability JSON.
 
 The Agent must not hand-edit, reconstruct, or reorder the Capability tree. If parameters change, it must call `action` and `simulate` again.
 

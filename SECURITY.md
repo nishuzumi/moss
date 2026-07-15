@@ -9,11 +9,11 @@ Moss builds and verifies unsigned transactions. It never signs, sends, stores ke
 3. Each successful transaction produces an immutable ordered Change array containing every raw Event and native MON transfer, including positive value moved by `CALL`, `CREATE`, `CREATE2`, or `SELFDESTRUCT`.
 4. The owning Protocol parses those Changes into a structured Receipt. Nested Receipts may interpret continuous intervals through another Protocol.
 5. Core recursively flattens Receipt leaves and requires exact original-object identity, length, and order. Missing, duplicated, replaced, or reordered Changes halt the flow.
-6. The Agent compares structured Outcomes with the user's original intent before handing transactions to a signer.
+6. An MCP Agent compares every ordered Receipt leaf text with the user's original intent; SDK consumers may compare the complete structured Outcomes.
 
 A reverted transaction has no Receipt. Simulation preserves Receipts from earlier successful transactions, records revert diagnostics, and does not execute later transactions. A failed internal frame is excluded with its entire subtree, even when an RPC returns logs for that frame.
 
-Any Warning is terminal. Receipt text never overrides structured evidence.
+Any Warning is terminal. MCP exposes text only after the complete structured Receipt passes exact coverage verification.
 
 ## Trust boundaries
 
