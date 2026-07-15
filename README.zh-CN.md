@@ -34,7 +34,7 @@ simulate(plans[])            → 实际 effects + warnings（声明 vs 实际的
 
 ## 当前状态
 
-Alpha。Monad 主网（chain id 143）。已支持协议：WMON（wrap/unwrap/balanceOf）、erc20 通用协议（任意代币转账/余额/授权查询，含原生 MON）、erc721 通用协议（任意 NFT 转账/归属查询）、Kuru（市价单 swap、报价、市场列表）。
+Alpha。Monad 主网（chain id 143）。已支持协议：WMON（wrap/unwrap/balanceOf）、erc20 通用协议（任意代币转账/余额/授权查询，含原生 MON）、erc721 通用协议（任意 NFT 转账/归属查询）、Kuru（市价单 swap、报价、市场列表）、Morpho（精选 AUSD MetaMorpho 金库的 position 查询）。
 
 设计上暂不支持：Permit 类签名流、跨链桥、闪电贷原子组合。详见 [SECURITY.md](./SECURITY.md)。
 

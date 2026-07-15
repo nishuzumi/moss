@@ -44,6 +44,14 @@ describe("moss mcp server", () => {
     expect(result[0]?.params.amount).toContain("human-decimal");
   });
 
+  it("serves the Morpho position query", () => {
+    const { registry } = createMossServer();
+
+    expect(registry.discover({ protocol: "morpho" })).toEqual([
+      expect.objectContaining({ protocol: "morpho", method: "position", kind: "query" }),
+    ]);
+  });
+
   it("action rejects unknown coordinates with a helpful error", async () => {
     const client = await connectedClient();
     const result = await client.callTool({

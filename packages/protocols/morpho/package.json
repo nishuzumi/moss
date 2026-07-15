@@ -1,0 +1,30 @@
+{
+  "name": "@themoss/protocol-morpho",
+  "version": "0.0.0",
+  "description": "Moss protocol adapter for a curated Morpho vault on Monad",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "@themoss/system": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}

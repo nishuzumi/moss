@@ -46,6 +46,7 @@ Alpha. Monad mainnet (chain id 143). Moss builds and simulates transactions; it 
 | erc20 (generic — any token, native MON included) | `@themoss/erc` | `transfer` | `balanceOf`, `allowance` |
 | erc721 (generic — any NFT collection) | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
 | [Kuru](https://kuru.io) (on-chain CLOB DEX) | `@themoss/protocol-kuru` | `swap` (market orders, MON/USDC & MON/AUSD) | `quote`, `markets` |
+| [Morpho](https://morpho.org) (MetaMorpho vaults) | `@themoss/protocol-morpho` | — | `position` (curated AUSD vault) |
 
 One protocol = one package. Registries assemble explicitly from package manifests — nothing registers itself by import; the MCP server lists its served catalog in one array in `server.ts` ([ADR 0006](./docs/adr/0006-protocol-packages-and-manifests.md)).
 
@@ -100,12 +101,13 @@ The agent gets four tools: `discover`, `load`, `action`, `simulate` — full too
 import { Registry } from "@themoss/core";
 import { erc20MetadataSource, ercManifest } from "@themoss/erc";
 import { kuruManifest } from "@themoss/protocol-kuru";
+import { morphoManifest } from "@themoss/protocol-morpho";
 import { createTraceSimulator } from "@themoss/simulator";
 import { monadRuntime, systemManifest } from "@themoss/system";
 
 const runtime = monadRuntime();
 const registry = new Registry(runtime, { tokenFallback: erc20MetadataSource(runtime.client) });
-for (const m of [systemManifest, ercManifest, kuruManifest]) registry.use(m); // only what you want
+for (const m of [systemManifest, ercManifest, kuruManifest, morphoManifest]) registry.use(m);
 
 const plan = await registry.action("kuru", "swap", account, {
   tokenIn: "MON", tokenOut: "USDC", amount: "1",  // symbols resolve via the curated catalog
