@@ -226,7 +226,7 @@ cp -r packages/protocols/_template packages/protocols/<yourprotocol>
 1. **ABI**，带可查证的来源（compiled / explorer / vendored）
 2. **`@Protocol`** —— 合约 + 链上验证过的地址
 3. **`@Capability`** —— 语义参数、量化 expects、诚实的风险标签
-4. **`@Event`** —— 协议特有回执，用 `confirms` 门控（标准 ERC 转账已由审计面核对）
+4. **`@Event`** —— 协议特有回执，用 `confirms` 门控（已声明的 ERC-721/1155 转账由审计面要求其标准回执）
 5. **测试** —— 离线形状测试 + 一个零警告的主网 live e2e
 
 参考实现，按阅读顺序：

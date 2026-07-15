@@ -235,8 +235,8 @@ its README is a checklist. The shape you'll fill in:
 1. **ABIs** with a documented origin (compiled / explorer / vendored)
 2. **`@Protocol`** — contracts + verified addresses
 3. **`@Capability`** — semantic params, quantified expects, honest risk labels
-4. **`@Event`** — protocol-specific receipts, gated by `confirms` (canonical
-   ERC transfers are already reconciled by the audit plane)
+4. **`@Event`** — protocol-specific receipts, gated by `confirms` (declared
+   ERC-721/1155 outflows already require their canonical audit-plane receipt)
 5. **Tests** — offline shapes + a live zero-warning e2e
 
 Reference implementations, in reading order:

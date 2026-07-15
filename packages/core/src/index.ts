@@ -27,6 +27,7 @@ export {
   type PlanDraft,
   plan,
   stableStringify,
+  validateExpects,
 } from "./plan.js";
 export {
   type ActionCtx,
@@ -57,6 +58,8 @@ export { type KnownToken, TokenTable } from "./tokens.js";
 export {
   type Address,
   CATEGORIES,
+  type CanonicalNftTransfer,
+  type CanonicalNftTransferItem,
   type Category,
   type Expects,
   type Hex,

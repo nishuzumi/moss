@@ -48,7 +48,40 @@ export interface UnsignedTx {
   value: Hex;
 }
 
-/** What a Plan declares may move. Reconciliation warns on anything undeclared. */
+/** One item inside a canonical ERC-1155 TransferBatch receipt. */
+export interface CanonicalNftTransferItem {
+  tokenId: string;
+  amount: string;
+}
+
+/** A lossless canonical ERC-721/1155 receipt, including zero and self-transfers. */
+export type CanonicalNftTransfer =
+  | {
+      kind: "erc721";
+      collection: Address;
+      from: Address;
+      to: Address;
+      tokenId: string;
+    }
+  | {
+      kind: "erc1155-single";
+      collection: Address;
+      operator: Address;
+      from: Address;
+      to: Address;
+      tokenId: string;
+      amount: string;
+    }
+  | {
+      kind: "erc1155-batch";
+      collection: Address;
+      operator: Address;
+      from: Address;
+      to: Address;
+      items: CanonicalNftTransferItem[];
+    };
+
+/** Quantified movement bounds plus exact receipts required from simulation. */
 export interface Expects {
   /** Assets that may leave the account, with upper bounds. */
   out?: { token: TokenRef; amountMax: string }[];
@@ -67,6 +100,8 @@ export interface Expects {
      */
     items?: { tokenId: string; amountMax?: string }[];
   }[];
+  /** Exact canonical ERC-721/1155 receipts that simulation must observe. */
+  nftTransfers?: CanonicalNftTransfer[];
 }
 
 /**

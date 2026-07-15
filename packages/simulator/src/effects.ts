@@ -1,4 +1,4 @@
-import { type Address, NATIVE, type TokenRef } from "@themoss/core";
+import { type Address, type CanonicalNftTransfer, NATIVE, type TokenRef } from "@themoss/core";
 import { decodeAbiParameters, toEventSelector } from "viem";
 import type { CallFrame, TraceLog } from "./trace.js";
 
@@ -34,6 +34,8 @@ export interface EffectsSummary {
   approvals: { token: Address; spender: Address; amount: string }[];
   /** ERC-721 approvals / operator grants — always surfaced, never declarable. */
   nftApprovals: { collection: Address; operator: Address }[];
+  /** Canonical ERC-721/1155 receipts, including zero-value and self-transfers. */
+  nftTransfers: CanonicalNftTransfer[];
   /** NFT movements grouped by collection and distinct token id. */
   nftsOut: {
     collection: Address;
@@ -56,6 +58,7 @@ export class EffectsAccumulator {
   #in = new Map<string, bigint>();
   #approvals = new Map<string, { token: Address; spender: Address; amount: bigint }>();
   #nftApprovals = new Map<string, { collection: Address; operator: Address }>();
+  #nftTransfers: CanonicalNftTransfer[] = [];
   #nftsOut = new Map<string, Map<string, bigint | undefined>>();
   #nftsIn = new Map<string, Map<string, bigint | undefined>>();
   #recipients = new Set<string>();
@@ -106,6 +109,13 @@ export class EffectsAccumulator {
       const from = topicAddress(log.topics[1]);
       const to = topicAddress(log.topics[2]);
       const tokenId = BigInt(log.topics[3] ?? "0x0");
+      this.#recordNftTransfer({
+        kind: "erc721",
+        collection: contract,
+        from: from as Address,
+        to: to as Address,
+        tokenId: tokenId.toString(),
+      });
       if (from === this.#account && to !== this.#account) {
         bumpNft(this.#nftsOut, contract, tokenId);
       }
@@ -115,9 +125,19 @@ export class EffectsAccumulator {
     } else if (topic0 === TRANSFER_SINGLE_TOPIC && log.topics.length === 4) {
       // ERC-1155 TransferSingle(operator indexed, from indexed, to indexed,
       // id, value). Repeated movements of one id aggregate exact uint256 units.
+      const operator = topicAddress(log.topics[1]);
       const from = topicAddress(log.topics[2]);
       const to = topicAddress(log.topics[3]);
       const [id, value] = decodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], log.data);
+      this.#recordNftTransfer({
+        kind: "erc1155-single",
+        collection: contract,
+        operator: operator as Address,
+        from: from as Address,
+        to: to as Address,
+        tokenId: id.toString(),
+        amount: value.toString(),
+      });
       if (from === this.#account && to !== this.#account) {
         bumpNft(this.#nftsOut, contract, id, value);
       }
@@ -127,6 +147,7 @@ export class EffectsAccumulator {
     } else if (topic0 === TRANSFER_BATCH_TOPIC && log.topics.length === 4) {
       // ERC-1155 TransferBatch encodes parallel id/value arrays. Duplicate ids
       // are one distinct token id and their quantities aggregate.
+      const operator = topicAddress(log.topics[1]);
       const from = topicAddress(log.topics[2]);
       const to = topicAddress(log.topics[3]);
       const [ids, values] = decodeAbiParameters(
@@ -134,6 +155,17 @@ export class EffectsAccumulator {
         log.data,
       );
       if (ids.length !== values.length) throw new Error("malformed ERC-1155 TransferBatch event");
+      this.#recordNftTransfer({
+        kind: "erc1155-batch",
+        collection: contract,
+        operator: operator as Address,
+        from: from as Address,
+        to: to as Address,
+        items: ids.map((id, index) => ({
+          tokenId: id.toString(),
+          amount: (values[index] as bigint).toString(),
+        })),
+      });
       for (const [index, id] of ids.entries()) {
         const value = values[index];
         if (value === undefined) throw new Error("malformed ERC-1155 TransferBatch event");
@@ -171,6 +203,16 @@ export class EffectsAccumulator {
     }
   }
 
+  #recordNftTransfer(transfer: CanonicalNftTransfer): void {
+    if (
+      transfer.from.toLowerCase() !== this.#account &&
+      transfer.to.toLowerCase() !== this.#account
+    ) {
+      return;
+    }
+    this.#nftTransfers.push(transfer);
+  }
+
   summary(): EffectsSummary {
     return {
       assetsOut: [...this.#out.entries()].map(([token, amount]) => ({
@@ -185,6 +227,7 @@ export class EffectsAccumulator {
         .filter((a) => a.amount > 0n)
         .map((a) => ({ token: a.token, spender: a.spender, amount: a.amount.toString() })),
       nftApprovals: [...this.#nftApprovals.values()],
+      nftTransfers: [...this.#nftTransfers],
       nftsOut: summarizeNfts(this.#nftsOut),
       nftsIn: summarizeNfts(this.#nftsIn),
       recipients: [...this.#recipients] as Address[],

@@ -1,6 +1,14 @@
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type Address, CATEGORIES, type Plan, Registry, VERBS } from "@themoss/core";
+import {
+  type Address,
+  CATEGORIES,
+  type Plan,
+  Registry,
+  RISK_LABELS,
+  VERBS,
+  validateExpects,
+} from "@themoss/core";
 import { erc20MetadataSource, ercManifest } from "@themoss/erc";
 import { kuruManifest } from "@themoss/protocol-kuru";
 import { createTraceSimulator, type Simulator } from "@themoss/simulator";
@@ -12,94 +20,140 @@ export interface MossServerOptions {
   chainId?: number;
 }
 
+const MAX_PLANS = 16;
+const MAX_TXS_PER_PLAN = 32;
+const MAX_EXPECTATION_ENTRIES = 256;
+const MAX_CALLDATA_HEX_CHARS = 2 + 256 * 1024 * 2;
+
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte 0x address");
 
-const hexSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, "expected 0x hex data");
+const calldataSchema = z
+  .string()
+  .max(MAX_CALLDATA_HEX_CHARS, "calldata exceeds 256 KiB")
+  .regex(/^0x(?:[0-9a-fA-F]{2})*$/, "expected byte-aligned 0x hex data");
 
-const uintStringSchema = z.string().regex(/^(0|[1-9][0-9]*)$/, "expected a uint decimal string");
+const valueSchema = z
+  .string()
+  .max(66, "transaction value exceeds uint256")
+  .regex(/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/, "expected a canonical 0x quantity");
+
+const uintStringSchema = z
+  .string()
+  .max(78, "uint256 decimal strings are at most 78 digits")
+  .regex(/^(0|[1-9][0-9]*)$/, "expected a uint decimal string");
+
+const tokenRefSchema = z.union([z.literal("native"), addressSchema]);
 
 const nftExpectationSchema = z
   .object({
-    collection: z.string(),
+    collection: addressSchema,
     count: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     direction: z.enum(["in", "out"]),
     items: z
       .array(
-        z.object({
-          tokenId: uintStringSchema,
-          amountMax: uintStringSchema.optional(),
-        }),
+        z
+          .object({
+            tokenId: uintStringSchema,
+            amountMax: uintStringSchema.optional(),
+          })
+          .strict(),
       )
+      .max(MAX_EXPECTATION_ENTRIES)
       .optional(),
   })
-  .superRefine((nft, ctx) => {
-    if (nft.direction === "out" && !nft.items) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["items"],
-        message: "NFT outflows must declare their token ids",
-      });
-      return;
-    }
-    if (nft.items) {
-      if (nft.direction === "in" && nft.items.some((item) => item.amountMax !== undefined)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items"],
-          message: "NFT inflows cannot declare maximum amount caps",
-        });
-      }
-      const ids = nft.items.map((item) => item.tokenId);
-      if (new Set(ids).size !== ids.length) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items"],
-          message: "NFT token ids must be distinct",
-        });
-      }
-      if (nft.direction === "out" && nft.count !== ids.length) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["count"],
-          message: "NFT count must equal the number of declared token ids",
-        });
-      }
-      if (nft.direction === "in" && ids.length > nft.count) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items"],
-          message: "Known NFT inflow ids cannot exceed the minimum count",
-        });
-      }
-    }
-  });
+  .strict();
+
+const nftTransferSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("erc721"),
+      collection: addressSchema,
+      from: addressSchema,
+      to: addressSchema,
+      tokenId: uintStringSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("erc1155-single"),
+      collection: addressSchema,
+      operator: addressSchema,
+      from: addressSchema,
+      to: addressSchema,
+      tokenId: uintStringSchema,
+      amount: uintStringSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("erc1155-batch"),
+      collection: addressSchema,
+      operator: addressSchema,
+      from: addressSchema,
+      to: addressSchema,
+      items: z
+        .array(z.object({ tokenId: uintStringSchema, amount: uintStringSchema }).strict())
+        .max(MAX_EXPECTATION_ENTRIES),
+    })
+    .strict(),
+]);
 
 // The Plan travels agent-side between action and simulate (the server is
 // stateless), so simulate revalidates its whole shape here and its integrity
 // via planHash inside the simulator.
-const planSchema = z.object({
-  kind: z.literal("plan"),
-  protocol: z.string(),
-  method: z.string(),
-  verb: z.string(),
-  chainId: z.number().int(),
-  account: addressSchema,
-  intent: z.string(),
-  declaredRisk: z.array(z.string()),
-  expects: z.object({
-    out: z.array(z.object({ token: z.string(), amountMax: z.string() })).optional(),
-    in: z.array(z.object({ token: z.string(), amountMin: z.string() })).optional(),
-    approvals: z
-      .array(z.object({ token: z.string(), spender: z.string(), amountMax: z.string() }))
-      .optional(),
-    nfts: z.array(nftExpectationSchema).optional(),
-  }),
-  confirms: z.array(z.string()),
-  txs: z
-    .array(z.object({ from: addressSchema, to: addressSchema, data: hexSchema, value: hexSchema }))
-    .min(1),
-  planHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-});
+const planSchema = z
+  .object({
+    kind: z.literal("plan"),
+    protocol: z.string(),
+    method: z.string(),
+    verb: z.enum(VERBS),
+    chainId: z.number().int().positive().safe(),
+    account: addressSchema,
+    intent: z.string(),
+    declaredRisk: z.array(z.enum(RISK_LABELS)).max(RISK_LABELS.length),
+    expects: z
+      .object({
+        out: z
+          .array(z.object({ token: tokenRefSchema, amountMax: uintStringSchema }).strict())
+          .max(MAX_EXPECTATION_ENTRIES)
+          .optional(),
+        in: z
+          .array(z.object({ token: tokenRefSchema, amountMin: uintStringSchema }).strict())
+          .max(MAX_EXPECTATION_ENTRIES)
+          .optional(),
+        approvals: z
+          .array(
+            z
+              .object({
+                token: addressSchema,
+                spender: addressSchema,
+                amountMax: uintStringSchema,
+              })
+              .strict(),
+          )
+          .max(MAX_EXPECTATION_ENTRIES)
+          .optional(),
+        nfts: z.array(nftExpectationSchema).max(MAX_EXPECTATION_ENTRIES).optional(),
+        nftTransfers: z.array(nftTransferSchema).max(MAX_EXPECTATION_ENTRIES).optional(),
+      })
+      .strict(),
+    confirms: z.array(z.string()).max(64),
+    txs: z
+      .array(
+        z
+          .object({
+            from: addressSchema,
+            to: addressSchema,
+            data: calldataSchema,
+            value: valueSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(MAX_TXS_PER_PLAN),
+    planHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+  })
+  .strict();
 
 function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -228,11 +282,18 @@ export function createMossServer(opts: MossServerOptions = {}): {
         "the effects summary against what the user actually asked for (intent " +
         "alignment) before proceeding.",
       inputSchema: {
-        plans: z.array(planSchema).min(1).describe("Plans exactly as returned by action"),
+        plans: z
+          .array(planSchema)
+          .min(1)
+          .max(MAX_PLANS)
+          .describe("Plans exactly as returned by action"),
       },
     },
     async ({ plans }) => {
       try {
+        // Zod has checked the JSON shape; core owns the Plan-domain semantics
+        // and narrows the address-bearing expectation contract from here.
+        for (const plan of plans) validateExpects(plan.expects as Plan["expects"]);
         const outcome = await simulator.simulate(plans as Plan[]);
         const ok = outcome.results.every((r) => r.warnings.length === 0);
         return json({

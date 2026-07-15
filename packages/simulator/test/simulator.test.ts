@@ -3,6 +3,7 @@ import {
   createRuntime,
   type Expects,
   finalizePlan,
+  type MossRuntime,
   NATIVE,
   plan,
 } from "@themoss/core";
@@ -33,6 +34,7 @@ describe("reconcile", () => {
     assetsIn: [],
     approvals: [],
     nftApprovals: [],
+    nftTransfers: [],
     nftsOut: [],
     nftsIn: [],
     recipients: [],
@@ -157,6 +159,63 @@ describe("reconcile", () => {
       )[0]?.code,
     ).toBe("MIN_INFLOW_NOT_MET");
   });
+
+  it("requires exact canonical NFT receipts as a multiset", () => {
+    const receipt = {
+      kind: "erc1155-single" as const,
+      collection: TOKEN,
+      operator: A,
+      from: A,
+      to: B,
+      tokenId: "7",
+      amount: "3",
+    };
+    const expects: Expects = { nftTransfers: [receipt] };
+
+    expect(reconcile(expects, effects({}))[0]?.code).toBe("REQUIRED_NFT_TRANSFER_MISSING");
+    expect(reconcile(expects, effects({ nftTransfers: [receipt] }))).toEqual([]);
+    expect(
+      reconcile(expects, effects({ nftTransfers: [{ ...receipt, amount: "1" }] }))[0]?.code,
+    ).toBe("REQUIRED_NFT_TRANSFER_MISSING");
+    expect(reconcile(expects, effects({ nftTransfers: [{ ...receipt, to: A }] }))[0]?.code).toBe(
+      "REQUIRED_NFT_TRANSFER_MISSING",
+    );
+    expect(
+      reconcile({ nftTransfers: [receipt, receipt] }, effects({ nftTransfers: [receipt] })).filter(
+        (warning) => warning.code === "REQUIRED_NFT_TRANSFER_MISSING",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("validates direct simulator Plans before making RPC calls", async () => {
+    const built = finalizePlan(plan([{ to: B, data: "0x", value: 0n }]), {
+      protocol: "test",
+      method: "send",
+      verb: "transfer",
+      chainId: 143,
+      account: A,
+      intent: "test",
+      declaredRisk: ["fundOut"],
+    });
+    const malformed = {
+      ...built,
+      expects: { ...built.expects, out: [{ token: NATIVE, amountMax: "-1" }] },
+    };
+    let rpcCalls = 0;
+    const runtime: MossRuntime = {
+      chainId: 143,
+      rpcUrl: "http://must-not-be-called",
+      client: {
+        request: async () => {
+          rpcCalls += 1;
+        },
+      } as unknown as MossRuntime["client"],
+    };
+    await expect(createTraceSimulator(runtime).simulate([built, malformed])).rejects.toThrow(
+      /uint256/,
+    );
+    expect(rpcCalls).toBe(0);
+  });
 });
 
 describe("effects accumulator", () => {
@@ -265,6 +324,38 @@ describe("effects accumulator", () => {
         count: 2,
         items: [
           { tokenId: "1", amount: "6" },
+          { tokenId: "2", amount: "3" },
+        ],
+      },
+    ]);
+    expect(summary.nftTransfers).toEqual([
+      {
+        kind: "erc1155-single",
+        collection: TOKEN,
+        operator: A,
+        from: A,
+        to: B,
+        tokenId: "42",
+        amount: huge.toString(),
+      },
+      {
+        kind: "erc1155-single",
+        collection: TOKEN,
+        operator: A,
+        from: A,
+        to: B,
+        tokenId: "43",
+        amount: "7",
+      },
+      {
+        kind: "erc1155-batch",
+        collection: TOKEN,
+        operator: B,
+        from: B,
+        to: A,
+        items: [
+          { tokenId: "1", amount: "2" },
+          { tokenId: "1", amount: "4" },
           { tokenId: "2", amount: "3" },
         ],
       },
@@ -414,6 +505,9 @@ describe("effects accumulator", () => {
     });
     const summary = acc.summary();
     expect(summary.nftsOut).toEqual([{ collection: TOKEN, count: 1, items: [{ tokenId: "99" }] }]);
+    expect(summary.nftTransfers).toEqual([
+      { kind: "erc721", collection: TOKEN, from: A, to: B, tokenId: "99" },
+    ]);
     expect(
       reconcile(
         {
@@ -431,7 +525,7 @@ describe("effects accumulator", () => {
     ).toEqual([]);
   });
 
-  it("ignores NFT self-transfers and zero-unit ERC-1155 events", () => {
+  it("keeps self and zero canonical receipts without treating them as asset movement", () => {
     const acc = new EffectsAccumulator(A);
     acc.addFrame({
       type: "CALL",
@@ -481,8 +575,39 @@ describe("effects accumulator", () => {
       ],
     });
 
-    expect(acc.summary().nftsOut).toEqual([]);
-    expect(acc.summary().nftsIn).toEqual([]);
+    const summary = acc.summary();
+    expect(summary.nftsOut).toEqual([]);
+    expect(summary.nftsIn).toEqual([]);
+    expect(summary.nftTransfers).toEqual([
+      { kind: "erc721", collection: TOKEN, from: A, to: A, tokenId: "7" },
+      {
+        kind: "erc1155-single",
+        collection: TOKEN,
+        operator: B,
+        from: A,
+        to: A,
+        tokenId: "8",
+        amount: "2",
+      },
+      {
+        kind: "erc1155-batch",
+        collection: TOKEN,
+        operator: B,
+        from: A,
+        to: A,
+        items: [{ tokenId: "9", amount: "3" }],
+      },
+      {
+        kind: "erc1155-single",
+        collection: TOKEN,
+        operator: A,
+        from: A,
+        to: B,
+        tokenId: "10",
+        amount: "0",
+      },
+    ]);
+    expect(reconcile({ nftTransfers: summary.nftTransfers }, summary)).toEqual([]);
   });
 });
 

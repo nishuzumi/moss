@@ -60,19 +60,62 @@ describe("erc1155 generic protocol (offline)", () => {
         items: [{ tokenId: "42", amountMax: "3" }],
       },
     ]);
+    expect(built.expects.nftTransfers).toEqual([
+      {
+        kind: "erc1155-single",
+        collection: FIXTURE_COLLECTION,
+        operator: ACCOUNT,
+        from: ACCOUNT,
+        to: RECIPIENT,
+        tokenId: "42",
+        amount: "3",
+      },
+    ]);
     expect(built.intent).toBe(`Transfer 3 of ${FIXTURE_COLLECTION} #42 to ${RECIPIENT}`);
   });
 
-  it("rejects zero transfer amounts", async () => {
+  it("allows zero-value transfers without declaring an asset outflow", async () => {
     const registry = offlineRegistry();
-    await expect(
-      registry.action("erc1155", "transfer", ACCOUNT, {
+    const built = (await registry.action("erc1155", "transfer", ACCOUNT, {
+      collection: FIXTURE_COLLECTION,
+      tokenId: "42",
+      amount: "0",
+      to: RECIPIENT,
+    })) as Plan;
+    expect(built.expects.nfts).toEqual([]);
+    expect(built.expects.nftTransfers).toEqual([
+      {
+        kind: "erc1155-single",
         collection: FIXTURE_COLLECTION,
+        operator: ACCOUNT,
+        from: ACCOUNT,
+        to: RECIPIENT,
         tokenId: "42",
         amount: "0",
-        to: RECIPIENT,
-      }),
-    ).rejects.toThrow(/amount/);
+      },
+    ]);
+  });
+
+  it("requires a self-transfer receipt without declaring an asset outflow", async () => {
+    const registry = offlineRegistry();
+    const built = (await registry.action("erc1155", "transfer", ACCOUNT, {
+      collection: FIXTURE_COLLECTION,
+      tokenId: "42",
+      amount: "3",
+      to: ACCOUNT,
+    })) as Plan;
+    expect(built.expects.nfts).toEqual([]);
+    expect(built.expects.nftTransfers).toEqual([
+      {
+        kind: "erc1155-single",
+        collection: FIXTURE_COLLECTION,
+        operator: ACCOUNT,
+        from: ACCOUNT,
+        to: ACCOUNT,
+        tokenId: "42",
+        amount: "3",
+      },
+    ]);
   });
 });
 
@@ -132,5 +175,16 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("erc1155 generic protocol (Monad ma
       items: [{ tokenId: TOKEN_ID, amount: "1" }],
     });
     expect(results[0]?.effects.nftsOut[0]?.collection.toLowerCase()).toBe(COLLECTION.toLowerCase());
+    expect(results[0]?.effects.nftTransfers[0]).toMatchObject({
+      kind: "erc1155-single",
+      operator: holder.toLowerCase(),
+      from: holder.toLowerCase(),
+      to: RECIPIENT,
+      tokenId: TOKEN_ID,
+      amount: "1",
+    });
+    expect(results[0]?.effects.nftTransfers[0]?.collection.toLowerCase()).toBe(
+      COLLECTION.toLowerCase(),
+    );
   });
 });

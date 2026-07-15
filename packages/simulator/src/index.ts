@@ -1,5 +1,5 @@
 import type { Hex, MossRuntime, ObserverHook, Plan, PlanObservation } from "@themoss/core";
-import { computePlanHash } from "@themoss/core";
+import { computePlanHash, validateExpects } from "@themoss/core";
 import { collectLogs, EffectsAccumulator, type EffectsSummary } from "./effects.js";
 import { mergeDiff } from "./overrides.js";
 import { reconcile, type Warning } from "./reconcile.js";
@@ -79,6 +79,9 @@ export function createTraceSimulator(
   const prefund: `0x${string}` = `0x${(options.prefundWei ?? DEFAULT_PREFUND_WEI).toString(16)}`;
   return {
     async simulate(plans: Plan[]): Promise<SimulateOutcome> {
+      // Validate the complete batch before the first RPC so a malformed later
+      // Plan cannot consume trace work for earlier Plans.
+      for (const plan of plans) validateExpects(plan.expects);
       const overrides: StateOverrides = {};
       const results: PlanSimResult[] = [];
       let halted: SimulateOutcome["halted"];

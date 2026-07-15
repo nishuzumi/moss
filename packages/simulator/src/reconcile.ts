@@ -1,4 +1,4 @@
-import { type Expects, NATIVE } from "@themoss/core";
+import { type CanonicalNftTransfer, type Expects, NATIVE } from "@themoss/core";
 import type { EffectsSummary } from "./effects.js";
 
 export type WarningCode =
@@ -12,6 +12,7 @@ export type WarningCode =
   | "MIN_INFLOW_NOT_MET"
   | "UNDECLARED_NFT_OUT"
   | "NFT_OUT_EXCEEDS_MAX"
+  | "REQUIRED_NFT_TRANSFER_MISSING"
   | "NFT_OPERATOR_GRANTED";
 
 export interface Warning {
@@ -23,11 +24,37 @@ function label(token: string): string {
   return token === NATIVE ? "native MON" : token;
 }
 
+function canonicalNftTransferKey(transfer: CanonicalNftTransfer): string {
+  const base = [
+    transfer.kind,
+    transfer.collection.toLowerCase(),
+    transfer.from.toLowerCase(),
+    transfer.to.toLowerCase(),
+  ];
+  if (transfer.kind === "erc721") {
+    return JSON.stringify([...base, transfer.tokenId]);
+  }
+  if (transfer.kind === "erc1155-single") {
+    return JSON.stringify([
+      ...base,
+      transfer.operator.toLowerCase(),
+      transfer.tokenId,
+      transfer.amount,
+    ]);
+  }
+  return JSON.stringify([
+    ...base,
+    transfer.operator.toLowerCase(),
+    transfer.items.map((item) => [item.tokenId, item.amount]),
+  ]);
+}
+
 /**
  * Effects reconciliation: the mechanical, server-side comparison between what
- * a Plan declared (expects) and what simulation actually showed. Warns only
- * on UNDECLARED differences — a declared outflow with nothing coming back is
- * legitimate (perp margin, unstake cooldown requests). See ADR 0004.
+ * a Plan declared (expects) and what simulation actually showed. It warns on
+ * undeclared differences and on missing exact canonical NFT receipts. A
+ * declared fungible outflow with nothing coming back remains legitimate (perp
+ * margin, unstake cooldown requests). See ADR 0004.
  *
  * Recipient-level analysis (funds to unknown addresses) needs per-protocol
  * contract allowlists and is deferred; recipients are surfaced in the summary.
@@ -219,6 +246,25 @@ export function reconcile(expects: Expects, effects: EffectsSummary): Warning[] 
           message: `${nft.collection} token id ${item.tokenId} was declared as quantified ERC-1155 units, but simulation observed a non-quantified NFT transfer`,
         });
       }
+    }
+  }
+
+  // Required canonical receipts are a multiset, separate from net asset
+  // movement. This preserves zero-value and self-transfer events and requires
+  // exact ERC-1155 values rather than treating amountMax as the receipt.
+  const unmatchedTransfers = [...effects.nftTransfers];
+  for (const expected of expects.nftTransfers ?? []) {
+    const expectedKey = canonicalNftTransferKey(expected);
+    const index = unmatchedTransfers.findIndex(
+      (actual) => canonicalNftTransferKey(actual) === expectedKey,
+    );
+    if (index >= 0) {
+      unmatchedTransfers.splice(index, 1);
+    } else {
+      warnings.push({
+        code: "REQUIRED_NFT_TRANSFER_MISSING",
+        message: `required canonical ${expected.kind} receipt from ${expected.collection} did not appear in simulation`,
+      });
     }
   }
 

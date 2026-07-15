@@ -1,7 +1,7 @@
 import { getAddress, parseAbi } from "viem";
 import { describe, expect, it } from "vitest";
 import { createHandle, type TxStep } from "../src/handle.js";
-import { computePlanHash, finalizePlan, plan } from "../src/plan.js";
+import { computePlanHash, finalizePlan, plan, validateExpects } from "../src/plan.js";
 import {
   address,
   decodeParams,
@@ -9,10 +9,11 @@ import {
   slippageBps,
   token,
   tokenAmount,
+  uint,
 } from "../src/semantics.js";
 import { Token } from "../src/token.js";
 import { type KnownToken, TokenTable } from "../src/tokens.js";
-import { NATIVE } from "../src/types.js";
+import { type Address, NATIVE } from "../src/types.js";
 
 // Core is pure machinery: its tests know no real chain data — only fixtures.
 const USDC = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
@@ -70,6 +71,15 @@ describe("semantic types", () => {
     expect((await decodeParams(spec, {}, ctx)).s).toBe(50);
     expect((await decodeParams(spec, { s: 100 }, ctx)).s).toBe(100);
     await expect(decodeParams(spec, { s: 20_000 }, ctx)).rejects.toThrow();
+  });
+
+  it("bounds uint semantics to canonical uint256 values", async () => {
+    const max = (2n ** 256n - 1n).toString();
+    expect((await decodeParams({ n: uint }, { n: max }, ctx)).n).toBe(BigInt(max));
+    await expect(decodeParams({ n: uint }, { n: `${max}0` }, ctx)).rejects.toThrow(/uint256/);
+    await expect(
+      decodeParams({ n: uint }, { n: Number.MAX_SAFE_INTEGER + 1 }, ctx),
+    ).rejects.toThrow(/safe integer/);
   });
 });
 
@@ -222,6 +232,17 @@ describe("plan", () => {
           items: [{ tokenId, amountMax: amount }],
         },
       ],
+      nftTransfers: [
+        {
+          kind: "erc1155-single",
+          collection: USDC,
+          operator: ACCOUNT,
+          from: ACCOUNT,
+          to: SPENDER,
+          tokenId,
+          amount,
+        },
+      ],
     });
     const built = finalizePlan(draft, { ...meta, declaredRisk: [...meta.declaredRisk] });
 
@@ -231,6 +252,17 @@ describe("plan", () => {
         count: 1,
         direction: "out",
         items: [{ tokenId: tokenId.toString(), amountMax: amount.toString() }],
+      },
+    ]);
+    expect(built.expects.nftTransfers).toEqual([
+      {
+        kind: "erc1155-single",
+        collection: USDC,
+        operator: ACCOUNT,
+        from: ACCOUNT,
+        to: SPENDER,
+        tokenId: tokenId.toString(),
+        amount: amount.toString(),
       },
     ]);
     const tampered = {
@@ -247,6 +279,16 @@ describe("plan", () => {
     };
     // biome-ignore lint/suspicious/noExplicitAny: intentional structural tamper
     expect(computePlanHash(tampered as any)).not.toBe(built.planHash);
+    const receiptTampered = {
+      ...built,
+      expects: {
+        ...built.expects,
+        nftTransfers: built.expects.nftTransfers?.map((transfer) =>
+          transfer.kind === "erc1155-single" ? { ...transfer, amount: "0" } : transfer,
+        ),
+      },
+    };
+    expect(computePlanHash(receiptTampered)).not.toBe(built.planHash);
   });
 
   it("requires exact distinct token ids for NFT outflows but permits unknown mint ids", () => {
@@ -279,6 +321,18 @@ describe("plan", () => {
             count: 1,
             direction: "out",
             items: [{ tokenId: -1n }],
+          },
+        ],
+      }),
+    ).toThrow(/uint256/);
+    expect(() =>
+      plan([step], {
+        nfts: [
+          {
+            collection: USDC,
+            count: 1,
+            direction: "out",
+            items: [{ tokenId: 2n ** 256n }],
           },
         ],
       }),
@@ -338,5 +392,62 @@ describe("plan", () => {
 
   it("rejects empty plans", () => {
     expect(() => plan([])).toThrow("at least one step");
+  });
+
+  it("validates every transported expects field without unbounded bigint parsing", () => {
+    const max = (2n ** 256n - 1n).toString();
+    expect(() =>
+      validateExpects({
+        out: [{ token: NATIVE, amountMax: max }],
+        in: [{ token: USDC, amountMin: "0" }],
+        approvals: [{ token: USDC, spender: SPENDER, amountMax: max }],
+        nftTransfers: [
+          {
+            kind: "erc721",
+            collection: USDC,
+            from: ACCOUNT,
+            to: SPENDER,
+            tokenId: max,
+          },
+          {
+            kind: "erc1155-batch",
+            collection: USDC,
+            operator: ACCOUNT,
+            from: ACCOUNT,
+            to: SPENDER,
+            items: [{ tokenId: "1", amount: "0" }],
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateExpects({ out: [{ token: "not-a-token" as Address, amountMax: "1" }] }),
+    ).toThrow(/address/);
+    expect(() =>
+      validateExpects({ approvals: [{ token: USDC, spender: SPENDER, amountMax: "-1" }] }),
+    ).toThrow(/uint256/);
+    expect(() =>
+      validateExpects({
+        out: [
+          { token: USDC, amountMax: "1" },
+          { token: USDC.toLowerCase() as Address, amountMax: "2" },
+        ],
+      }),
+    ).toThrow(/distinct/);
+    expect(() =>
+      validateExpects({
+        nftTransfers: [
+          {
+            kind: "erc1155-single",
+            collection: USDC,
+            operator: ACCOUNT,
+            from: ACCOUNT,
+            to: SPENDER,
+            tokenId: "1",
+            amount: `${max}0`,
+          },
+        ],
+      }),
+    ).toThrow(/uint256/);
   });
 });

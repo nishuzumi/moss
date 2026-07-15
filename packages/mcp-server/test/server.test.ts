@@ -30,6 +30,15 @@ type NftPlan = {
       direction: string;
       items?: { tokenId: string; amountMax?: string }[];
     }[];
+    nftTransfers?: {
+      kind: "erc1155-single";
+      collection: string;
+      operator: string;
+      from: string;
+      to: string;
+      tokenId: string;
+      amount: string;
+    }[];
   };
   [key: string]: unknown;
 };
@@ -38,6 +47,15 @@ type SimulateOutcome = {
   ok: boolean;
   results: {
     effects: {
+      nftTransfers: {
+        kind: string;
+        collection: string;
+        operator?: string;
+        from: string;
+        to: string;
+        tokenId?: string;
+        amount?: string;
+      }[];
       nftsOut: {
         collection: string;
         count: number;
@@ -156,6 +174,15 @@ describe("moss mcp server", () => {
       items: [{ tokenId, amountMax: amount }],
     });
     expect(plan.expects.nfts?.[0]?.collection.toLowerCase()).toBe(FIXTURE_COLLECTION);
+    expect(plan.expects.nftTransfers?.[0]).toMatchObject({
+      kind: "erc1155-single",
+      operator: ACCOUNT,
+      from: ACCOUNT,
+      to: RECIPIENT,
+      tokenId,
+      amount,
+    });
+    expect(plan.expects.nftTransfers?.[0]?.collection.toLowerCase()).toBe(FIXTURE_COLLECTION);
   });
 
   it("rejects malformed NFT expectations at the simulate boundary", async () => {
@@ -212,6 +239,26 @@ describe("moss mcp server", () => {
     tooManyKnownInflowsNft.direction = "in";
     tooManyKnownInflowsNft.items = [{ tokenId: "42" }, { tokenId: "43" }];
 
+    const invalidCollection = structuredClone(plan);
+    const invalidCollectionNft = invalidCollection.expects.nfts?.[0];
+    if (!invalidCollectionNft) throw new Error("missing NFT expectation");
+    invalidCollectionNft.collection = "not-an-address";
+
+    const oversizedUint = structuredClone(plan);
+    const oversizedUintNft = oversizedUint.expects.nfts?.[0];
+    if (!oversizedUintNft?.items?.[0]) throw new Error("missing NFT expectation item");
+    oversizedUintNft.items[0].tokenId = (2n ** 256n).toString();
+
+    const invalidReceiptAddress = structuredClone(plan);
+    const invalidReceipt = invalidReceiptAddress.expects.nftTransfers?.[0];
+    if (!invalidReceipt) throw new Error("missing NFT transfer receipt");
+    invalidReceipt.to = "not-an-address";
+
+    const oversizedReceiptAmount = structuredClone(plan);
+    const oversizedReceipt = oversizedReceiptAmount.expects.nftTransfers?.[0];
+    if (!oversizedReceipt) throw new Error("missing NFT transfer receipt");
+    oversizedReceipt.amount = (2n ** 256n).toString();
+
     for (const malformed of [
       missingItems,
       duplicateIds,
@@ -219,6 +266,10 @@ describe("moss mcp server", () => {
       unsafeCount,
       cappedInflow,
       tooManyKnownInflows,
+      invalidCollection,
+      oversizedUint,
+      invalidReceiptAddress,
+      oversizedReceiptAmount,
     ]) {
       const result = await client.callTool({ name: "simulate", arguments: { plans: [malformed] } });
       expect(result.isError).toBe(true);
@@ -297,6 +348,12 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
     expect(plan.expects.nfts?.[0]?.items).toEqual([
       { tokenId: LIVE_ERC1155_TOKEN_ID, amountMax: "1" },
     ]);
+    expect(plan.expects.nftTransfers?.[0]).toMatchObject({
+      kind: "erc1155-single",
+      tokenId: LIVE_ERC1155_TOKEN_ID,
+      amount: "1",
+      to: RECIPIENT,
+    });
 
     const outcome = parseText(
       await client.callTool({ name: "simulate", arguments: { plans: [plan] } }),
@@ -311,19 +368,29 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e
     expect(outcome.results[0]?.effects.nftsOut[0]?.collection.toLowerCase()).toBe(
       LIVE_ERC1155_COLLECTION.toLowerCase(),
     );
+    expect(outcome.results[0]?.effects.nftTransfers[0]).toMatchObject({
+      kind: "erc1155-single",
+      tokenId: LIVE_ERC1155_TOKEN_ID,
+      amount: "1",
+      to: RECIPIENT,
+    });
+    expect(outcome.results[0]?.effects.nftTransfers[0]?.collection.toLowerCase()).toBe(
+      LIVE_ERC1155_COLLECTION.toLowerCase(),
+    );
 
     const tampered = structuredClone(plan);
-    const declaredNft = tampered.expects.nfts?.[0];
-    if (!declaredNft) throw new Error("missing ERC-1155 expectation");
-    const declaredItem = declaredNft.items?.[0];
-    if (!declaredItem) throw new Error("missing ERC-1155 item expectation");
-    declaredItem.amountMax = "2";
+    const declaredTransfer = tampered.expects.nftTransfers?.[0];
+    if (!declaredTransfer) throw new Error("missing ERC-1155 transfer receipt");
+    declaredTransfer.amount = "2";
     const tamperedOutcome = parseText(
       await client.callTool({ name: "simulate", arguments: { plans: [tampered] } }),
     ) as SimulateOutcome;
     expect(tamperedOutcome.ok).toBe(false);
     expect(tamperedOutcome.results[0]?.warnings.map((warning) => warning.code)).toContain(
       "PLAN_TAMPERED",
+    );
+    expect(tamperedOutcome.results[0]?.warnings.map((warning) => warning.code)).toContain(
+      "REQUIRED_NFT_TRANSFER_MISSING",
     );
   });
 });

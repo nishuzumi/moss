@@ -57,8 +57,10 @@ export class ERC721 {
     // the mistake a bare transferFrom would let through. `from` must be the
     // caller in calldata, hence ctx.account (simulation enforces ownership).
     const step = this.#handle(collection).safeTransferFrom([ctx.account, to, tokenId]);
+    const movesAsset = to.toLowerCase() !== ctx.account.toLowerCase();
     return plan([step], {
-      nfts: [{ collection, count: 1, direction: "out", items: [{ tokenId }] }],
+      nfts: movesAsset ? [{ collection, count: 1, direction: "out", items: [{ tokenId }] }] : [],
+      nftTransfers: [{ kind: "erc721", collection, from: ctx.account, to, tokenId }],
     });
   }
 

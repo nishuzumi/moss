@@ -44,9 +44,9 @@ export class ERC1155 {
     risk: ["fundOut"],
     tags: ["nft", "multi-token", "payment"],
   })
-  // TransferSingle/TransferBatch are canonical audit-plane events: simulation
-  // binds their token ids and per-id amounts to expects, so no duplicate
-  // protocol-authored @Event is required (ADR 0008).
+  // Every call declares its exact canonical receipt, including zero-value and
+  // self-transfers. Only positive transfers to another account are asset
+  // outflows; the simulator keeps those two audit concepts separate.
   async transfer(
     {
       collection,
@@ -56,7 +56,6 @@ export class ERC1155 {
     }: { collection: Address; tokenId: bigint; amount: bigint; to: Address },
     ctx: ActionCtx,
   ) {
-    if (amount === 0n) throw new Error("ERC-1155 transfer amount must be greater than zero");
     const step = this.#handle(collection).safeTransferFrom([
       ctx.account,
       to,
@@ -64,13 +63,27 @@ export class ERC1155 {
       amount,
       "0x",
     ]);
+    const movesAsset = amount > 0n && to.toLowerCase() !== ctx.account.toLowerCase();
     return plan([step], {
-      nfts: [
+      nfts: movesAsset
+        ? [
+            {
+              collection,
+              count: 1,
+              direction: "out",
+              items: [{ tokenId, amountMax: amount }],
+            },
+          ]
+        : [],
+      nftTransfers: [
         {
+          kind: "erc1155-single",
           collection,
-          count: 1,
-          direction: "out",
-          items: [{ tokenId, amountMax: amount }],
+          operator: ctx.account,
+          from: ctx.account,
+          to,
+          tokenId,
+          amount,
         },
       ],
     });

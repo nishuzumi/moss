@@ -1,6 +1,7 @@
 import { getAddress, parseUnits } from "viem";
 import { Token, type TokenSource } from "./token.js";
 import { type Address, NATIVE, type TokenRef } from "./types.js";
+import { parseUint256Decimal } from "./uint.js";
 
 /**
  * Context available to a semantic type while decoding one parameter.
@@ -86,14 +87,10 @@ export const uint: SemanticType<bigint> = {
     if (typeof value !== "string" && typeof value !== "number") {
       throw new Error(`expected an integer, got ${typeof value}`);
     }
-    let n: bigint;
-    try {
-      n = BigInt(value);
-    } catch {
-      throw new Error(`expected an integer, got "${value}"`);
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value < 0)) {
+      throw new Error(`expected a non-negative safe integer, got "${value}"`);
     }
-    if (n < 0n) throw new Error("must be non-negative");
-    return n;
+    return parseUint256Decimal(String(value), "value");
   },
 };
 

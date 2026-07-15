@@ -62,7 +62,35 @@ describe("erc721 generic protocol (offline)", () => {
         items: [{ tokenId: "42" }],
       },
     ]);
+    expect(built.expects.nftTransfers).toEqual([
+      {
+        kind: "erc721",
+        collection: FIXTURE_COLLECTION,
+        from: ACCOUNT,
+        to: RECIPIENT,
+        tokenId: "42",
+      },
+    ]);
     expect(built.intent).toBe(`Transfer ${FIXTURE_COLLECTION} #42 to ${RECIPIENT}`);
+  });
+
+  it("requires a self-transfer receipt without declaring an asset outflow", async () => {
+    const registry = offlineRegistry();
+    const built = (await registry.action("erc721", "transfer", ACCOUNT, {
+      collection: FIXTURE_COLLECTION,
+      tokenId: "42",
+      to: ACCOUNT,
+    })) as Plan;
+    expect(built.expects.nfts).toEqual([]);
+    expect(built.expects.nftTransfers).toEqual([
+      {
+        kind: "erc721",
+        collection: FIXTURE_COLLECTION,
+        from: ACCOUNT,
+        to: ACCOUNT,
+        tokenId: "42",
+      },
+    ]);
   });
 
   it("rejects fractional and negative token ids loudly", async () => {
@@ -127,5 +155,12 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("erc721 generic protocol (Monad mai
     expect(results[0]?.effects.nftsOut).toEqual([
       { collection: POSM, count: 1, items: [{ tokenId: tokenId.toString() }] },
     ]);
+    expect(results[0]?.effects.nftTransfers[0]).toMatchObject({
+      kind: "erc721",
+      from: owner.toLowerCase(),
+      to: RECIPIENT,
+      tokenId: tokenId.toString(),
+    });
+    expect(results[0]?.effects.nftTransfers[0]?.collection.toLowerCase()).toBe(POSM.toLowerCase());
   });
 });
