@@ -9,5 +9,5 @@
 
 ## Consequences
 
-- The verb set is deliberately tiny (12 at launch: swap, wrap, unwrap, supply, withdraw, borrow, repay, stake, unstake, claim, mint, transfer) because intent alignment anchors on it — "user asked to swap, Plan's verb is supply" must be a hard, mechanical mismatch.
+- The verb set is deliberately tiny (12 at launch: swap, wrap, unwrap, supply, withdraw, borrow, repay, stake, unstake, claim, mint, transfer) because intent alignment anchors on it — "user asked to swap, Capability's verb is supply" must be a hard, mechanical mismatch.
 - Orderbook DEXes do not get their own verb: a market order is `swap` from the user's perspective; `clob`/`orderbook` go in tags.

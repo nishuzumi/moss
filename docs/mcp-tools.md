@@ -1,92 +1,74 @@
-# MCP tools reference
+# MCP tool contracts
 
-The Moss MCP server exposes exactly four tools. It is **stateless**: everything `simulate` needs travels inside the Plan object `action` returned. Nothing in this server signs or sends transactions.
+This document describes the accepted Moss MCP contract. The TypeScript server is still being migrated to it.
 
-Server binary: `packages/mcp-server` → `moss-mcp` (stdio). Configuration via env: `MOSS_RPC_URL` (default `https://rpc.monad.xyz`), `MOSS_CHAIN_ID` (default `143`).
+The server exposes exactly four tools and never signs or sends. Its composition root receives one Monad Runtime and the selected Protocol module namespaces. `MOSS_RPC_URL` may choose the endpoint; chain ID is not configurable and must resolve to `143`.
+
+All values crossing MCP are JSON-safe. Chain quantities use decimal strings.
 
 ## discover
 
-```
-discover(verb?, category?, protocol?) → Coordinate[]
-```
-
-Finds capabilities (writes) and queries (reads) across registered protocols.
-
-- `verb` — user-perspective fund semantic, closed set: `swap wrap unwrap supply withdraw borrow repay stake unstake claim mint transfer`. Verbs never mirror protocol function names (WMON's `deposit()` is verb `wrap`).
-- `category` — protocol domain, closed set: `dex lending staking rewards token nft`.
-- Long-tail semantics (`clob`, `lst`, …) appear in each coordinate's free-form `tags`.
-
-Returns coordinates: `{ protocol, method, kind: "capability"|"query", verb?, category, tags, summary }`.
+Find Protocol methods by optional verb, category, tags, or coordinates. Results identify the Protocol, method, whether it is a Capability or Query, and enough metadata to choose what to load.
 
 ## load
 
-```
-load(items: {protocol, method}[]) → Stub[]
-```
+Return intent, risk labels, and the parameter contract for selected coordinates. Every parameter keeps two descriptions:
 
-Fetches the calling contract for coordinates: the intent template, per-parameter semantics, and risk labels.
+- `type`: generated JSON Schema plus a context-free description of representation, units, conversion, constraints, and examples;
+- `description`: the field's purpose in this specific Capability or Query.
 
-Parameter descriptions are written for agents. Two conventions matter most:
-
-- **Amounts are human-readable decimals** ("1.5"), never pre-scaled base units — the runtime applies token decimals. Contextual parameters (an amount whose token is another parameter) resolve automatically.
-- **Tokens go by well-known symbol** ("MON", "WMON", "USDC", "AUSD") wherever possible; symbols resolve only through the curated catalog, never from on-chain names (spoofable). An address is accepted for tokens outside the catalog; unknown symbols error loudly with the catalog list.
+Zod objects remain inside the process and never cross MCP.
 
 ## action
 
-```
-action(protocol, method, account, params) → QueryResult | Plan
-```
+Execute a Query or return one root CapabilityNode for a write. A write result has no independent transaction list.
 
-- `account` — the user's address; it becomes the sender of every transaction in a Plan. Standardized here so no protocol invents its own `user`/`recipient`/`owner` parameter.
-- Queries return data immediately: `{ kind: "query", data }`.
-- Capabilities return a **Plan**:
+```ts
+type CapabilityNode = {
+  kind: "capability";
+  protocol: string;
+  method: string;
+  params: JsonSafeValue;
+  receipt: string;
+  children: readonly (CapabilityNode | TransactionNode)[];
+};
 
-```jsonc
-{
-  "kind": "plan",
-  "protocol": "kuru",
-  "method": "swap",
-  "verb": "swap",
-  "chainId": 143,
-  "account": "0x…",
-  "intent": "Swap 1 native into 0x…USDC at market on Kuru, tolerating 100 bps slippage",
-  "declaredRisk": ["fundOut", "approval", "priceImpact"],
-  "expects": {
-    "out":       [{ "token": "native", "amountMax": "1000000000000000000" }],
-    "in":        [{ "token": "0x…USDC", "amountMin": "23933" }],
-    "approvals": [ /* {token, spender, amountMax} */ ],
-    "nfts":      [ /* {collection, count, direction} */ ]
-  },
-  "confirms": ["swapResult"],   // receipts this write must produce in simulation
-  "txs": [ { "from": "0x…", "to": "0x…", "data": "0x…", "value": "0x0" } ],
-  "planHash": "0x…"   // keccak256 over {chainId, account, txs, expects, confirms}
-}
+type TransactionNode = {
+  kind: "transaction";
+  transaction: UnsignedTx;
+};
 ```
 
-The Plan is self-contained by design — pass it around freely; `simulate` re-derives `planHash` and flags tampering.
-
-**Rule: a Plan must go through `simulate` before it is shown to a user or signer.**
+Each CapabilityNode must contain exactly one direct TransactionNode. Every other child is a nested CapabilityNode with its own direct transaction and Receipt parser. Core validates the tree and derives execution order by depth-first traversal.
 
 ## simulate
 
+Run one root Capability tree against chained Monad state. Successful transactions return top-level Receipts in transaction execution order.
+
+```ts
+type Change =
+  | { kind: "event"; address: Address; topics: readonly Hex[]; data: Hex }
+  | { kind: "nativeTransfer"; from: Address; to: Address; value: string };
+
+interface ReceiptChange {
+  kind: "change";
+  change: Change;
+  data: JsonSafeValue;
+  text: string;
+}
+
+interface Receipt<TOutcome extends JsonSafeValue> {
+  kind: "receipt";
+  outcome: TOutcome;
+  text: string;
+  changes: readonly (ReceiptChange | Receipt<JsonSafeValue>)[];
+}
 ```
-simulate(plans: Plan[]) → { ok, guidance, results: PlanSimResult[], halted? }
-```
 
-Simulates plans **in order with state chained across them** — plan B sees plan A's effects. Use one call for multi-step flows (claim → swap → supply); each plan is still reconciled against its own `expects`.
+The simulator extracts every successful Change in provable execution order, invokes the Receipt parser named by the owning Capability, then recursively verifies exact Change object identity, length, and order. Protocol parsers may nest Receipts but may not mutate, replace, duplicate, omit, or reorder evidence.
 
-Per-plan result:
+A reverted transaction returns no Receipt. Earlier Receipts remain available, the response records a terminal Warning and diagnostics, and later transactions do not execute.
 
-- `effects` — the structured summary for intent alignment: `assetsOut`, `assetsIn`, `approvals`, `nftApprovals`, `nftsOut/In`, `recipients`. Includes native MON flows and wrapped-native mints/burns, which emit no Transfer events.
-- `warnings` — effects reconciliation output. Codes: `REVERTED`, `PLAN_TAMPERED`, `UNDECLARED_OUTFLOW`, `OUTFLOW_EXCEEDS_MAX`, `UNDECLARED_APPROVAL`, `APPROVAL_EXCEEDS_MAX`, `MIN_INFLOW_NOT_MET`, `UNDECLARED_NFT_OUT`, `NFT_OPERATOR_GRANTED`, `CONFIRMATION_MISSING` (a receipt the plan's `confirms` declared did not appear). Warnings fire only on **undeclared differences** — a declared outflow with nothing back (an unstake request, margin posting) is legitimate.
-- `observations` — protocol-authored receipts ([ADR 0008](./adr/0008-observation-plane.md)): `{ protocol, name, intent, data }`, where `intent` is a rendered human sentence ("Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)"). **Narrative, not law**: use them to enrich the summary shown to the user; they never override `warnings`, and reconciliation never reads them.
-- `gasPerTx` — via `eth_estimateGas`; `null` where the endpoint rejects override-based estimation.
-- `planHashValid` — false means the plan was modified after `action` built it.
+## Warnings
 
-Top level: `ok` is true iff every plan has zero warnings; `halted` reports where a revert stopped the chain.
-
-**Rules: any warning → stop, report, never sign. Zero warnings → still perform intent alignment (compare `effects` with what the user actually asked for) before proceeding.**
-
-## Endpoint requirements
-
-Simulation needs `debug_traceCall` with `callTracer` (+`withLog`) and `prestateTracer` (+`diffMode`), honoring `stateOverrides`. Verified working: `rpc.monad.xyz`, `rpc4.monad.xyz`, `rpc-mainnet.monadinfra.com`, `monad-rpc.huginn.tech`. Several third-party free tiers block the `debug` namespace; Moss fails loudly with this list rather than skipping simulation. Details and evidence: [ADR 0002](./adr/0002-simulation-via-debug-tracecall.md).
+Warnings include transaction reverts, unavailable or unordered trace evidence, Receipt parse failures, missing Outcomes, and incomplete or reordered Change coverage. Every Warning halts the flow; there is no warning-suppression or semantic-matcher stage.

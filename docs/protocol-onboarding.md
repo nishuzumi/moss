@@ -1,153 +1,141 @@
-# Protocol onboarding — writing a Moss adapter
+# Protocol onboarding for the new Moss framework
 
-One protocol = one package ([ADR 0006](./adr/0006-protocol-packages-and-manifests.md)). An adapter package turns a protocol's contracts into capabilities (writes that build Plans) and queries (reads), and exports one **manifest** for registries to assemble.
+One Protocol package owns its ABIs, Capabilities, Queries, declared Protocol dependencies, and Receipt parsers. The architecture is accepted; exact exported helper names may still move while the TypeScript migration lands.
 
-## 0. Start from the template
+## 1. Establish ABI and address provenance
 
-```bash
-cp -r packages/protocols/_template packages/protocols/<yourprotocol>
-```
+Every ABI under `src/abis/` declares one origin:
 
-The template is a real CI-built package — if you copied it, it compiles. Work through the checklist in its README. Reference implementations: the system WMON adapter ([`packages/system/src/wmon.ts`](../packages/system/src/wmon.ts), deliberately over-commented), a real-world adapter with reads-before-build and precision quirks ([`packages/protocols/kuru`](../packages/protocols/kuru)), and a dynamic-address protocol ([`packages/erc`](../packages/erc)).
+- `compiled`: generated from committed contract source;
+- `explorer`: retrieved from a verified-contract page with URL and date;
+- `vendored`: generated deterministically from committed full upstream artifacts with package version and tarball digest.
 
-## 1. ABIs — `src/abis/` with an origin header
+Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset.
 
-Every ABI file declares exactly one **ABI origin** ([ADR 0007](./adr/0007-abi-origin.md)):
+Every fixed address cites a canonical source and has an on-chain bytecode check. Fixed token constants additionally verify expected metadata. Dynamic pools and tokens come from chain state and do not become global constants.
 
-- `compiled` — from contract source in the package: foundry in `contracts/` + the @wagmi/cli foundry plugin (copy `wagmi.config.ts` and the `gen:abis` script from `packages/erc`). Monorepo rule: **no git submodules — `forge init`/`forge install` must use `--no-git`** (CI fails on any submodule). For external Solidity dependencies prefer npm packages + `remappings.txt`, then `forge soldeer`, then `forge install --no-git` (ADR 0007).
-- `explorer` — from a block explorer's **verified** contract page; record URL + date.
-- `vendored` — from an official SDK/repo, mechanically: upstream files verbatim in `abis-src/` + an `update:abis` script (pinned version, tarball sha256, allowlist-based generation — copy Kuru's `scripts/update-abis.ts`). Never hand-transcribe an ABI.
+## 2. Export a self-describing Protocol
 
-Keep ABIs as `parseAbi` string arrays or generated `as const` TS — both preserve abitype's inference, which is what keeps Handles fully typed. Raw JSON imports do not.
-
-## 2. Declare the protocol
+A package exports its public `@Protocol` classes directly from its entry point. Registry registers either one class or every top-level Protocol export in a selected module namespace; ABIs and helpers are ignored.
 
 ```ts
 @Protocol({
-  name: "myproto",                 // unique lowercase slug — the discover coordinate
-  category: "lending",             // closed set: dex lending staking rewards token nft
-  description: "One line an agent can understand.",
+  name: "myprotocol",
+  category: "dex",
+  description: "One sentence an Agent can use to choose this Protocol.",
   contracts: {
-    pool: { abi: PoolAbi, addr: "0x…" },   // Monad mainnet — Moss v1 is single-chain
+    router: { abi: RouterAbi, addr: ROUTER_ADDRESS },
+  },
+  protocols: {
+    erc20: ERC20,
   },
 })
-export class MyProto {
-  declare pool: Handle<typeof PoolAbi>;   // key must match contracts key
+export class MyProtocol {
+  declare router: Handle<typeof RouterAbi>;
+  declare erc20: ERC20;
 }
 ```
 
-- **Verify every address on-chain** (bytecode exists; metadata matches) and note how in a comment.
-- `declare pool` is type-only; the `@Protocol` wrapper injects the Handle at construction.
-- A Handle has three faces, none of which can sign or send: `handle.fn([args], { value? })` encodes calldata locally; `handle.read.fn([args])` is a view call; `handle.call.fn([args], { value?, from? })` eth_call-simulates a *write* (how orderbook quoting works).
-- Protocols that operate on caller-supplied addresses use `contracts: {}` and `declare runtime: MossRuntime`, building handles per call with `createHandle` — see the generic erc20 protocol.
+Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
 
-## 3. Write capabilities
+## 3. Define parameter contracts
+
+Each field pairs a reusable Zod value contract with a description of that field's role.
 
 ```ts
-@Capability({
-  intent: "Supply {amount} of {asset}",   // {param} placeholders filled from agent input
-  verb: "supply",                          // user-perspective fund semantic — closed set
-  params: {
-    asset: token,                          // symbols/addresses/"native", table-resolved
-    amount: tokenAmount("asset"),          // scaled by asset's decimals
-    slippage: slippageBps(100),            // optional with default
+const swapParams = {
+  user: {
+    type: Address,
+    description: "Account whose assets the swap may spend.",
   },
-  risk: ["fundOut", "approval"],           // danger classification (≥1 required)
-  tags: ["isolated-market"],               // free-form long-tail semantics
+  tokenIn: {
+    type: TokenReference,
+    description: "Token provided to the swap.",
+  },
+  tokenOut: {
+    type: TokenReference,
+    description: "Token requested from the swap.",
+  },
+  amountIn: {
+    type: PositiveDecimalString,
+    description: "Amount of tokenIn to spend.",
+  },
+  slippageBps: {
+    type: BasisPoints.default(50),
+    description: "Maximum allowed slippage for this swap.",
+  },
+} satisfies ParamsSpec;
+
+type SwapParams = InferParams<typeof swapParams>;
+```
+
+`BasisPoints` describes only the value: an integer basis-point count, `1 bps = 0.01%`, valid range, and examples. It does not mention swaps or slippage. The field description supplies that purpose. A default of `50` means `0.5%`.
+
+Registry parses action input with the composed schemas. `load` returns JSON-safe generated schemas and both descriptions; Zod objects never cross MCP.
+
+## 4. Author one transaction per Capability
+
+Every Capability owns exactly one direct transaction and one named Receipt parser. More transactions require nested Capabilities.
+
+```ts
+@Capability<MyProtocol>({
+  intent: "Swap {amountIn} of {tokenIn} into {tokenOut}",
+  verb: "swap",
+  params: swapParams,
+  receipt: "swapReceipt",
+  risk: ["fundOut", "approval", "priceImpact"],
 })
-async supply({ asset, amount }: { asset: TokenRef; amount: bigint }) {
-  const approve = approveStep(asset, this.pool.address, amount); // from @themoss/erc
-  const main = this.pool.supply([asset, amount]);
-  return plan([approve, main], {
-    out: [{ token: asset, amountMax: amount }],
-    in:  [{ token: RECEIPT_TOKEN, amountMin: amount }],
+async swap(params: SwapParams) {
+  const approval = await this.erc20.approve({
+    owner: params.user,
+    token: params.tokenIn,
+    spender: this.router.address,
+    amount: params.amountIn,
   });
+  const transaction = this.router.swap(/* protocol arguments */);
+  return [approval, transaction];
 }
 ```
 
-Rules that make or break review:
+Here `approval` is a nested ERC Capability with its own direct transaction and Receipt. `transaction` is the one direct TransactionNode owned by `swap`. A contract-level multicall is still one transaction.
 
-- **Verb ≠ function name.** The verb is what the user experiences: WMON `deposit()` → `wrap`; an LP add → `supply`; a CLOB market order → `swap` with `clob` in tags. If no verb fits, open an issue — extending the closed set is a core decision ([ADR 0003](./adr/0003-two-tier-capability-taxonomy.md)).
-- **Params are human-readable.** Amounts arrive as decimal strings and are scaled by semantic types. A contextual type (`tokenAmount("asset")`) must be declared **after** the parameter it references — decoding runs in declaration order.
-- **`expects` is the safety contract** ([ADR 0004](./adr/0004-quantified-expects-in-plans.md)). Declare the maximum that may leave and the minimum that must arrive. Approvals built with `approveStep` (from `@themoss/erc`) are declared automatically; never approve more than the plan spends. Simulation warns on every undeclared difference — an honest, tight `expects` is what makes your capability trustworthy.
-- **Build-time reads are fine.** Capabilities are async: read the orderbook, check allowances, compute minOut — then encode. Plans must stand alone once built.
-- **Methods receive `(params, ctx)`.** `ctx.account` (`ActionCtx`) is the caller — the sender of every plan transaction. Reach for it when the standard wants the caller *inside calldata* (ERC-721's `safeTransferFrom(from, …)` — see the generic erc721 protocol); everything else ignores the second argument.
-- **Cleanup steps matter.** Refund/unwrap/sweep calls belong in the same plan — a missing cleanup step is exactly the class of bug simulation catches.
+The authoring method may use local bigint or viem helpers while constructing calldata. Values stored in the serializable Capability tree use JSON-safe forms such as decimal strings.
 
-## 4. Declare on-chain receipts — `@Event`
-
-`expects`/warnings are the closed **audit plane**; `@Event` is the open **observation plane** ([ADR 0008](./adr/0008-observation-plane.md)): a protocol-authored, human-rendered statement of what happened *in protocol terms* — "Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)". Declare one for every write with a meaningful receipt. It can also gate the flow: a capability that lists `confirms: ["swapResult"]` fails simulation with a `CONFIRMATION_MISSING` warning when the receipt does not appear.
+## 5. Parse actual Changes with a Receipt
 
 ```ts
-@Capability({ /* … */, confirms: ["swapResult"] })  // this write must produce the receipt
-async swap(/* … */) { /* … */ }
-
-/** Dealer (optional preprocessor): filter/enrich/aggregate matched events. */
-countFills(events: DecodedEvent[], ctx: ObserveCtx): void {
-  ctx.shared.fills = events.filter((e) => e.name === "Trade").length;
-}
-
-@Event<MyProto>({                        // the type argument is mandatory
-  events: {
-    router: ["KuruRouterSwap"],          // contract-handle key → ABI event names
-    monUsdc: ["Trade"],                  // multiple contracts and events are fine
-  },
-  dealer: "countFills",                  // a method name (autocompleted) or an inline function
-  intent: "Swapped {amountIn} {tokenIn} into {amountOut} {tokenOut} ({fills} fills)",
-})
-async swapResult(events: DecodedEvent[], ctx: ObserveCtx) {
-  const swap = events.find((e) => e.name === "KuruRouterSwap");
-  if (!swap) return null;                // null → no observation for this plan
-  const tokenIn = await ctx.token(/* … */);  // resolve symbol/decimals via the table
-  return { tokenIn: tokenIn.symbol, amountIn: tokenIn.format(/* … */), /* … */ fills: ctx.shared.fills };
+@Receipt()
+swapReceipt(changes: readonly Change[]): Receipt<SwapOutcome> {
+  // Decode, loop, branch, and delegate as required by this Protocol.
+  // Every ReceiptChange must retain the exact input Change object.
+  return buildSwapReceipt(changes);
 }
 ```
 
-How it runs: after each plan simulates, the registry decodes that plan's logs against your protocol's ABIs, passes the matches through the dealer (if any), then hands them to the handler; the returned object fills the `intent` template's `{placeholders}` — a missing placeholder throws at render time, so keep template and return shape in sync. `ctx` is injected per plan×protocol: `plan`, `account`, `token` (the token table), and `shared` (scratch space between dealer and handler). Contract keys and event names are validated against your ABIs at registration — typos fail before anything ships.
+A Receipt parser receives only the immutable ordered Changes for one successful direct transaction. It cannot receive Capability parameters or transaction data and cannot call Runtime, Handle, Query, or RPC. It may call another Protocol's pure Receipt parser for a continuous Change interval and embed the returned Receipt.
 
-**The red line** (ADR 0008): observations only **tighten** the outcome (via `confirms`) — they can never satisfy it. No observation silences a reconciliation warning; narrate honestly and let the audit plane stay in charge. The template's `depositReceipt` and Kuru's `swapResult` are the reference implementations.
+Parsing strategy belongs to the Protocol: ordinary loops, queues, and branches are allowed. Core provides no grammar engine or semantic matcher. Core only flattens ReceiptChange leaves and checks exact object identity, length, and order against the input.
 
-## 5. Introduce tokens (if any) — `src/tokens.ts`
+Receipt text is presentation. The structured Outcome is authoritative and must use JSON-safe values.
 
-If your protocol mints receipt/LP/staked tokens, list them so they become symbol-addressable for every agent:
+## 6. Export and compose
 
-```ts
-export const TOKENS: readonly KnownToken[] = [
-  { symbol: "aUSDC", name: "MyProto interest-bearing USDC", ref: "0x…", decimals: 6 },
-];
-```
-
-Every entry is a security claim: verify symbol/decimals on-chain, note the source. Same-symbol collisions with other packages are rejected at registration ([ADR 0006](./adr/0006-protocol-packages-and-manifests.md)).
-
-## 6. Export the manifest, get listed
+The package entry point exports the Protocol class:
 
 ```ts
-export const myProtoManifest = defineProtocolPackage({
-  name: "myproto",
-  protocols: [MyProto],
-  tokens: TOKENS,
-});
+export { MyProtocol } from "./my-protocol.js";
 ```
 
-To enter the official served catalog, add your package to the MCP server (`packages/mcp-server`): one dependency in its `package.json` + your manifest in the `use()` array in `server.ts`. That is the whole listing mechanism.
+The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code.
 
-## 7. Test
+Fixed official Monad constants may be imported from `@themoss/system`. Caller-supplied and chain-discovered token addresses remain explicit; do not introduce a package-level token list.
 
-```ts
-const registry = new Registry(runtime);
-registry.use(systemManifest);   // from @themoss/system: token data + wmon
-registry.use(myProtoManifest);
-```
+## 7. Tests required for review
 
-1. **Offline**: discover/load shape and the built Plan's txs + expects for a known input.
-2. **Live e2e** (`describe.skipIf(!!process.env.MOSS_SKIP_E2E)`): simulate the happy path against Monad mainnet asserting **zero warnings** — free, no funds, no keys. Wire the observer (`createTraceSimulator(runtime, { observer: registry.observer() })`) and assert your receipt renders (see the Kuru round-trip's `swapResult` check). If your flow needs tokens the account lacks, chain plans: acquire in plan 1, spend in plan 2.
+- A compile-time fixture proves valid inferred parameter and Receipt names, plus invalid cases marked with `@ts-expect-error`.
+- Unit tests cover Registry metadata validation and the Capability's exactly-one-direct-transaction invariant.
+- Receipt tests prove complete ordered coverage using the original Change object references, including nested Receipts.
+- Failure tests cover missing, duplicated, replaced, and reordered Changes.
+- Live Monad-mainnet tests verify fixed addresses and run the happy path with zero Warnings.
 
-## 8. Document and submit
-
-Header comment: what the protocol is, supported markets/assets, parameter quirks, known risks (upgradeable proxies? fee-on-transfer? cooldowns?). PR per [CONTRIBUTING.md](../CONTRIBUTING.md) with evidence (test output incl. the simulate effects summary) and a changeset.
-
-## Current limits worth knowing
-
-- Moss v1 is single-chain (Monad mainnet); there are no chain-id parameters in the authoring surface, on purpose ([ADR 0005](./adr/0005-curated-token-catalog.md)).
-- Fixed contracts are declared statically; unbounded dynamic markets need a curated in-adapter catalog validated on first use against on-chain reality (see Kuru).
-- Permit/typed-data flows and cross-chain actions are out of scope ([SECURITY.md](../SECURITY.md)).
+Run `pnpm build`, then `pnpm typecheck`, lint, and tests before review.

@@ -2,77 +2,72 @@
 
 [English](./README.md) | **中文**
 
-> 中文文档可能滞后于英文版；以英文版为准。
-
-Moss 把 [Monad](https://monad.xyz) 上复杂的 DApp/协议交互抽象为 Agent 可调用的统一能力 —— `discover → load → action → simulate` —— 由系统而不是 Agent 负责组装正确的交易。
-
-- **Agent 不再手搓 calldata。** 不碰 ABI、合约地址、multicall 扫尾、decimals 换算 —— 能力接受人类可读的参数，返回组装完毕的未签名交易。
-- **每笔写操作在触达签名方之前都被验证。** Plan 精确声明允许移动的资产（`expects`）；模拟在真实链上状态回放它，任何未声明的差异都会告警。
-- **Moss 永不签名、永不发送。** 它只构建和验证。私钥留在钱包里，最终决定权留在用户手里。
+Moss 把 Monad 上复杂的协议交互变成协议自己维护、Agent 可调用的 Capability，统一流程为 `discover → load → action → simulate`。Moss 只构建和验证未签名交易，永不签名、永不发送。
 
 > [!WARNING]
-> **Moss 是 Alpha 测试版软件，仅供测试与评估。** 未经安全审计；API、Plan 格式、包结构都可能随时变动，不作兼容承诺。
->
-> 使用前请理解风险模型：模拟是一道安全网，不是保证——模拟结果反映的是模拟那一刻的链上状态，从模拟到签名之间，价格、流动性、合约状态都可能变化。Moss 永不签名、永不发送交易，但**你**签出去的每一笔都由你自己负责：签名前务必在钱包里逐笔核对交易内容，测试期间只用小额资金，零警告的模拟结果绝不等于执行结果的承诺。本软件按"现状"提供，不含任何形式的担保（[MIT](./LICENSE)）。安全边界与漏洞报告渠道见 [SECURITY.md](./SECURITY.md)。
+> Moss 仍是未经审计的 Alpha 软件。本文描述的架构已经确认，但 TypeScript 包与可运行示例还在迁移中；当前分支不能作为生产版本使用。
 
-## 核心调用流
+## 框架契约
 
-```
-discover(verb?, category?)   → 跨协议发现能力
-load(coordinates)            → intent、参数语义、风险标签
-action(protocol, method,     → Query：直接返回数据
-       account, params)      → Capability：返回未签名交易 Plan + 量化期望
-simulate(plans[])            → 实际 effects + warnings（声明 vs 实际的对账）
-```
+- `discover` 按协议坐标和用户语义发现 Capability 与 Query。
+- `load` 返回 intent、risk 和 JSON-safe 参数契约；可复用的值类型描述与字段用途描述彼此分离。
+- `action` 执行 Query，或为写操作返回一棵根 Capability tree。
+- `simulate` 在 Monad 状态上执行这棵树，并为成功交易返回已经验证的 Receipt。
 
-两条安全规则，分别在两处强制执行：
+每个 Capability 恰好拥有一笔直接的未签名交易和一个带类型的 Receipt parser。更多交易只能来自嵌套 Capability，因此 core 可以验证整棵树，并按确定的深度优先顺序展开。
 
-1. **Effects 对账**（服务器侧，机械判定）：模拟提取实际发生的一切 —— 资产流出/流入、授权、收款方，包括不发 Transfer 事件的原生 MON 流和 wrapped 代币铸毁 —— 任何 Plan 未声明的差异都产生 warning。有 warning 即停。
-2. **意图对齐**（Agent 侧）：把 effects 摘要和用户的原话对比。只有 Agent 拿着用户的原始意图。
+模拟器按真实执行顺序记录所有成功的原始 Event 与 native MON transfer。所属 Protocol 把这些不可变 Change 解析成结构化 Receipt；只有当原始 Change 对象按相同顺序被完整且仅覆盖一次时，core 才接受结果。交易回滚、解析失败、缺少 Outcome、Change 重排或漏掉 Change 都会产生 Warning，任何 Warning 都会停止流程。
 
-`simulate` 接受 Plan 数组并在计划之间延续状态 —— Plan B 可以花掉只在 Plan A 模拟结果里才存在的代币。这是多步流程（claim → swap → supply）的地基。
+Receipt 的文本只负责展示。Agent 必须用结构化 Outcome 对照用户原话，确认一致后才能交给签名方。
 
-## 当前状态
+## Protocol 组合
 
-Alpha。Monad 主网（chain id 143）。已支持协议：WMON（wrap/unwrap/balanceOf）、erc20 通用协议（任意代币转账/余额/授权查询，含原生 MON）、erc721 通用协议（任意 NFT 转账/归属查询）、Kuru（市价单 swap、报价、市场列表）。
+Protocol 包的注册面是其顶层导出的自描述 `@Protocol` class；它仍可导出 ABI 和 helper，但 Registry 会忽略。这里没有额外注册清单、token 目录或 import 副作用。组合根选择模块 namespace；Registry 扫描其中顶层 Protocol 导出，递归注册声明的依赖并注入带类型实例。
 
-设计上暂不支持：Permit 类签名流、跨链桥、闪电贷原子组合。详见 [SECURITY.md](./SECURITY.md)。
+跨 Protocol 写操作调用注入的 Capability，并形成嵌套 Capability 节点；跨 Protocol Query 直接执行。固定 Monad 常量位于 `@themoss/system`，动态 token 与 pool 地址从链上状态获取。Capability 输入只接受显式 token 地址或 `native`，不接受 symbol。
 
-## 快速开始
+Moss v1 只支持 Monad 主网。Runtime 接受 RPC 地址，启动时验证其 chain ID 必须为 `143`；Protocol metadata、地址常量和 Capability 节点不重复保存链 ID。
 
-需要 Node ≥ 22 与 pnpm。以下全部**零资金、零私钥**可跑 —— 模拟是免费的。
+## 包边界
+
+| Package | 职责 |
+| --- | --- |
+| `@themoss/core` | 装饰器、Registry、框架类型、Capability tree 与 Receipt 验证 |
+| `@themoss/simulator` | `debug_traceCall`、状态串联、有序 Change 提取与 Receipt 调度 |
+| `@themoss/erc` | 无地址标准 ABI、ERC Protocol 与 ERC Receipt 语义 |
+| `@themoss/system` | Monad Runtime、验证过的官方常量和 Monad 系统 Protocol |
+| `@themoss/protocol-*` | 协议 ABI、Capability、Query、依赖与 Receipt |
+| `@themoss/mcp-server` | MCP 传输和应用组合 |
+
+新增 Protocol 只修改它自己的包与显式组合根，不修改 core、simulator 或通用 MCP server。
+
+## 开发
+
+需要 Node 22+ 与 pnpm 11。
 
 ```bash
-git clone https://github.com/nishuzumi/moss && cd moss
 pnpm install
 pnpm build
-
-# 标准调用流：discover → load → action → simulate
-pnpm --filter @themoss/example-simple-flow wrap
-
-# 跨 Plan 组合（真实订单簿）：MON → USDC → MON
-pnpm --filter @themoss/example-simple-flow swap
+pnpm typecheck
+pnpm lint
+pnpm test
 ```
 
-想看一笔交易真正落链？[examples/agent-swap](./examples/agent-swap) 用一个 Claude Code 子 agent 走完 MCP 工具全流程，并在模拟零警告之后才签名发送——执行在**本地 anvil fork 的 Monad 主网**上：真实订单簿状态、零真实资金、零配置。
+目标契约先于源码迁移完成，因此这里不再宣传旧的可运行示例。
 
-新手建议从[新手上路指南](./docs/getting-started.zh-CN.md)开始：先整体跑一遍，再逐层拆开 discover / load / action / simulate / observations，最后引导你写自己的适配器。MCP 接入与库用法的完整示例见英文 [README](./README.md)。
+## 文档
 
-## 文档导航
-
-| 文档 | 内容 |
-| --- | --- |
-| [新手上路指南](./docs/getting-started.zh-CN.md)（[English](./docs/getting-started.md)） | 逐层拆解整个系统：先跑通，再打开每个阶段 |
-| [MCP 工具参考](./docs/mcp-tools.md)（英文） | 四个工具的契约、Plan 结构、warning 码表 |
-| [协议接入指南](./docs/protocol-onboarding.md)（英文） | 从 ABI 到回执，编写并提交一个适配器 |
-| [Agent 使用守则](./docs/agent-skill.md)（英文） | Agent 必须遵守的规则：强制模拟、见警告即停、意图对齐 |
-| [Agent 实盘示例](./examples/agent-swap/README.md)（英文） | Claude Code 子 agent 在本地 Monad 主网 fork 上真实成交 |
-| [设计决策记录 ADR](./docs/adr/)（英文） | 每个架构决定及其取舍 |
-| [词汇表](./CONTEXT.md)（英文） | 项目统一语言 |
+- [新手上路](./docs/getting-started.zh-CN.md)（[English](./docs/getting-started.md)）
+- [MCP 工具契约](./docs/mcp-tools.md)
+- [Protocol 接入指南](./docs/protocol-onboarding.md)
+- [Agent 安全规则](./docs/agent-skill.md)
+- [架构决策](./docs/adr/)
+- [领域词汇](./CONTEXT.md)
+- [安全模型](./SECURITY.md)
 
 ## 参与贡献
 
-从参考实现 [`packages/system/src/wmon.ts`](./packages/system/src/wmon.ts) 复制起步（注释密度拉满），按照 [docs/protocol-onboarding.md](./docs/protocol-onboarding.md) 完成接入；流程规范见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+修改导出契约前先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和当前 ADR。新增 Protocol 从 [`packages/protocols/_template`](./packages/protocols/_template) 开始。
 
 ## License
 
