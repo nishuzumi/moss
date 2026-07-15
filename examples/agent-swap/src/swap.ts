@@ -72,6 +72,10 @@ function isTokenRef(value: JsonSafeValue | undefined): value is TokenRef {
   return value === NATIVE || (typeof value === "string" && isAddress(value, { strict: false }));
 }
 
+function isTokenPath(value: JsonSafeValue | undefined): value is readonly TokenRef[] {
+  return Array.isArray(value) && value.every(isTokenRef);
+}
+
 function isJsonRecord(value: JsonSafeValue): value is { readonly [key: string]: JsonSafeValue } {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -91,7 +95,8 @@ function parseKuruSwapOutcome(value: JsonSafeValue): KuruSwapOutcome {
     typeof value.amountOut !== "string" ||
     typeof value.fills !== "number" ||
     !Number.isInteger(value.fills) ||
-    value.fills < 0
+    value.fills < 0 ||
+    !isTokenPath(value.path)
   ) {
     throw new Error("Kuru Receipt outcome has an invalid shape");
   }
@@ -104,5 +109,6 @@ function parseKuruSwapOutcome(value: JsonSafeValue): KuruSwapOutcome {
     amountIn: value.amountIn,
     amountOut: value.amountOut,
     fills: value.fills,
+    path: value.path,
   };
 }

@@ -34,7 +34,7 @@ const swapParams = {
   tokenOut: { type: TokenReference, description: "Asset requested from the swap." },
   amount: {
     type: PositiveDecimalString,
-    description: "Quantity of tokenIn offered to the selected market.",
+    description: "Quantity of tokenIn offered to the selected market path.",
   },
   slippage: {
     type: BasisPoints.default(50),
@@ -51,14 +51,27 @@ const quoteParams = {
 type MarketHandle = "monUsdc" | "monAusd";
 type MarketEntry = {
   handle: MarketHandle;
+  address: `0x${string}`;
   label: string;
   base: TokenRef;
   quote: Exclude<TokenRef, typeof NATIVE>;
 };
 
 const MARKETS: readonly MarketEntry[] = [
-  { handle: "monUsdc", label: "MON/USDC", base: NATIVE, quote: USDC_ADDRESS },
-  { handle: "monAusd", label: "MON/AUSD", base: NATIVE, quote: AUSD_ADDRESS },
+  {
+    handle: "monUsdc",
+    address: MON_USDC_ADDRESS,
+    label: "MON/USDC",
+    base: NATIVE,
+    quote: USDC_ADDRESS,
+  },
+  {
+    handle: "monAusd",
+    address: MON_AUSD_ADDRESS,
+    label: "MON/AUSD",
+    base: NATIVE,
+    quote: AUSD_ADDRESS,
+  },
 ];
 
 type MarketParams = {
@@ -79,6 +92,7 @@ export type KuruSwapOutcome = {
   amountIn: string;
   amountOut: string;
   fills: number;
+  path: readonly TokenRef[];
 };
 
 const sameToken = (left: TokenRef, right: TokenRef) => left.toLowerCase() === right.toLowerCase();
@@ -103,21 +117,24 @@ export class Kuru {
   declare monAusd: Handle<typeof KuruOrderbookAbi>;
   declare erc20: ProtocolRef<ERC20>;
 
-  @Query({ intent: "Quote a Kuru market swap", params: quoteParams, tags: ["clob", "quote"] })
+  @Query({ intent: "Quote a Kuru market path", params: quoteParams, tags: ["clob", "quote"] })
   async quote(params: InferParams<typeof quoteParams>) {
-    const resolved = await this.#resolve(params.tokenIn, params.tokenOut);
-    const amountIn = parseUnits(params.amount, resolved.inputDecimals);
-    const amountOut = await this.#quoteFill(resolved, amountIn);
+    const resolved = await this.#resolvePath(params.tokenIn, params.tokenOut);
+    const first = resolved[0];
+    if (!first) throw new Error("Kuru market path is empty");
+    const amountIn = parseUnits(params.amount, first.inputDecimals);
+    let amountOut = amountIn;
+    for (const market of resolved) amountOut = await this.#quoteFill(market, amountOut);
     return {
-      market: resolved.entry.label,
-      direction: resolved.isBuy ? "buy" : "sell",
+      market: resolved.map(({ entry }) => entry.label).join(" -> "),
+      direction: resolved.map(({ isBuy }) => (isBuy ? "buy" : "sell")).join(" -> "),
       amountIn: amountIn.toString(),
       amountOut: amountOut.toString(),
     };
   }
 
   @Capability<Kuru, typeof swapParams>({
-    intent: "Swap tokens through a Kuru market",
+    intent: "Swap tokens through a Kuru market path",
     verb: "swap",
     params: swapParams,
     receipt: "swapReceipt",
@@ -125,9 +142,12 @@ export class Kuru {
     tags: ["clob", "orderbook"],
   })
   async swap(params: InferParams<typeof swapParams>) {
-    const resolved = await this.#resolve(params.tokenIn, params.tokenOut);
-    const amountIn = parseUnits(params.amount, resolved.inputDecimals);
-    const quoted = await this.#quoteFill(resolved, amountIn);
+    const resolved = await this.#resolvePath(params.tokenIn, params.tokenOut);
+    const first = resolved[0];
+    if (!first) throw new Error("Kuru market path is empty");
+    const amountIn = parseUnits(params.amount, first.inputDecimals);
+    let quoted = amountIn;
+    for (const market of resolved) quoted = await this.#quoteFill(market, quoted);
     const minOut = (quoted * (10_000n - BigInt(params.slippage))) / 10_000n;
     if (minOut <= 0n) throw new Error("quoted Kuru output is zero");
 
@@ -145,9 +165,9 @@ export class Kuru {
     children.push(
       this.router.anyToAnySwap(
         [
-          [resolved.market.address],
-          [resolved.isBuy],
-          [nativeIn],
+          resolved.map(({ market }) => market.address),
+          resolved.map(({ isBuy }) => isBuy),
+          resolved.map(({ nativeSend }) => nativeSend),
           toKuru(params.tokenIn),
           toKuru(params.tokenOut),
           amountIn,
@@ -177,6 +197,7 @@ export class Kuru {
   swapReceipt(changes: readonly Change[]): ReceiptResult<KuruSwapOutcome> {
     let swap: KuruSwapOutcome | undefined;
     let fills = 0;
+    const route: { entry: MarketEntry; isBuy: boolean }[] = [];
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
       if (sameAddress(change.address, KURU_ROUTER_ADDRESS)) {
@@ -194,19 +215,26 @@ export class Kuru {
           amountIn: event.args.amountIn.toString(),
           amountOut: event.args.amountOut.toString(),
           fills: 0,
+          path: [],
         };
         const text = `Kuru Swap: ${swap.amountIn} ${swap.tokenIn} to ${swap.amountOut} ${swap.tokenOut} by ${swap.sender}`;
         return { kind: "change" as const, change, data: swap, text };
       }
-      if (
-        sameAddress(change.address, MON_USDC_ADDRESS) ||
-        sameAddress(change.address, MON_AUSD_ADDRESS)
-      ) {
+      const entry = MARKETS.find(({ address }) => sameAddress(change.address, address));
+      if (entry) {
         const event = decodeKuruEvent(KuruOrderbookAbi, change);
         if (event.eventName !== "Trade") {
           throw new Error(`Unexpected Change: Kuru market emitted ${event.eventName}`);
         }
+        if (!sameAddress(event.args.takerAddress, KURU_ROUTER_ADDRESS)) {
+          throw new Error("Kuru Receipt Trade taker is not the Kuru router");
+        }
         fills += 1;
+        const previous = route.at(-1);
+        if (previous?.entry === entry && previous.isBuy !== event.args.isBuy) {
+          throw new Error(`Kuru Receipt changed direction within ${entry.label}`);
+        }
+        if (previous?.entry !== entry) route.push({ entry, isBuy: event.args.isBuy });
         const data = {
           operation: "fill",
           market: change.address,
@@ -226,7 +254,24 @@ export class Kuru {
       return this.erc20.changesReceipt([change]);
     });
     if (!swap) throw new Error("Kuru swap Receipt requires KuruRouterSwap");
+    if (!route.length) throw new Error("Kuru swap Receipt requires at least one Trade");
+    const path = [swap.tokenIn];
+    for (const { entry, isBuy } of route) {
+      const input = path.at(-1);
+      if (!input) throw new Error("Kuru Receipt route has no input token");
+      const token = pairedToken(entry, input);
+      if (!token) throw new Error(`Kuru Receipt route does not enter ${entry.label}`);
+      if (isBuy !== sameToken(input, entry.quote)) {
+        throw new Error(`Kuru Receipt Trade direction does not match ${entry.label}`);
+      }
+      path.push(token);
+    }
+    const credited = path.at(-1);
+    if (!credited || !sameToken(credited, swap.tokenOut)) {
+      throw new Error("Kuru Receipt route does not reach the credited token");
+    }
     swap.fills = fills;
+    swap.path = path;
     return {
       kind: "receipt",
       outcome: swap,
@@ -235,18 +280,46 @@ export class Kuru {
     };
   }
 
-  async #resolve(tokenIn: TokenRef, tokenOut: TokenRef) {
-    const entry = MARKETS.find(
-      (market) =>
-        (sameToken(tokenIn, market.base) && sameToken(tokenOut, market.quote)) ||
-        (sameToken(tokenIn, market.quote) && sameToken(tokenOut, market.base)),
-    );
-    if (!entry) throw new Error("no verified Kuru market for this token pair");
-    const market = this[entry.handle];
-    const params = await this.#marketParams(entry, market);
-    const isBuy = sameToken(tokenIn, entry.quote);
-    const inputDecimals = Number(isBuy ? params.quoteDecimals : params.baseDecimals);
-    return { entry, market, params, isBuy, inputDecimals };
+  async #resolvePath(tokenIn: TokenRef, tokenOut: TokenRef) {
+    const pending: { token: TokenRef; path: MarketEntry[] }[] = [{ token: tokenIn, path: [] }];
+    const visited = new Set([tokenIn.toLowerCase()]);
+    let entries: MarketEntry[] | undefined;
+    while (!entries && pending.length) {
+      const current = pending.shift();
+      if (!current) break;
+      for (const entry of MARKETS) {
+        const token = pairedToken(entry, current.token);
+        if (!token || visited.has(token.toLowerCase())) continue;
+        const path = [...current.path, entry];
+        if (sameToken(token, tokenOut)) {
+          entries = path;
+          break;
+        }
+        visited.add(token.toLowerCase());
+        pending.push({ token, path });
+      }
+    }
+    if (!entries) throw new Error("no verified Kuru market path for this token pair");
+
+    const resolved = [];
+    let token = tokenIn;
+    for (const entry of entries) {
+      const market = this[entry.handle];
+      const params = await this.#marketParams(entry, market);
+      const isBuy = sameToken(token, entry.quote);
+      const next = pairedToken(entry, token);
+      if (!next) throw new Error(`Kuru market path does not enter ${entry.label}`);
+      resolved.push({
+        entry,
+        market,
+        params,
+        isBuy,
+        nativeSend: token === NATIVE,
+        inputDecimals: Number(isBuy ? params.quoteDecimals : params.baseDecimals),
+      });
+      token = next;
+    }
+    return resolved;
   }
 
   async #marketParams(entry: MarketEntry, market: Handle<typeof KuruOrderbookAbi>) {
@@ -277,7 +350,9 @@ export class Kuru {
       const size =
         (amountIn * resolved.params.pricePrecision) / 10n ** resolved.params.quoteDecimals;
       if (size <= 0n) throw new Error("amount is below Kuru price precision");
-      return resolved.market.call.placeAndExecuteMarketBuy([size, 0n, false, false]);
+      return resolved.market.call.placeAndExecuteMarketBuy([size, 0n, false, false], {
+        from: KURU_NATIVE,
+      });
     }
     const size = (amountIn * resolved.params.sizePrecision) / 10n ** resolved.params.baseDecimals;
     if (size <= 0n) throw new Error("amount is below Kuru size precision");
@@ -285,9 +360,16 @@ export class Kuru {
       [size, 0n, false, false],
       sameToken(resolved.params.baseAsset, KURU_NATIVE)
         ? { value: amountIn, balance: amountIn }
-        : {},
+        : { from: KURU_NATIVE },
     );
   }
+}
+
+function pairedToken(market: MarketEntry, token: TokenRef | undefined): TokenRef | undefined {
+  if (!token) return undefined;
+  if (sameToken(token, market.base)) return market.quote;
+  if (sameToken(token, market.quote)) return market.base;
+  return undefined;
 }
 
 function sameAddress(left: string, right: string): boolean {
