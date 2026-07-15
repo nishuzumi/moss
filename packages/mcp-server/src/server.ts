@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type Address, CATEGORIES, type Plan, Registry, VERBS } from "@themoss/core";
 import { erc20MetadataSource, ercManifest } from "@themoss/erc";
 import { kuruManifest } from "@themoss/protocol-kuru";
+import { nftMintManifest } from "@themoss/protocol-nft-mint";
 import { createTraceSimulator, type Simulator } from "@themoss/simulator";
 import { monadRuntime, systemManifest } from "@themoss/system";
 import { z } from "zod";
@@ -78,7 +79,9 @@ export function createMossServer(opts: MossServerOptions = {}): {
   });
   // The served catalog, assembled right here (ADR 0006): listing a protocol
   // is one dependency plus one entry in this array.
-  for (const manifest of [systemManifest, ercManifest, kuruManifest]) registry.use(manifest);
+  for (const manifest of [systemManifest, ercManifest, kuruManifest, nftMintManifest]) {
+    registry.use(manifest);
+  }
   // Observation plane: protocol-authored @Event narration + receipt checks.
   const simulator = createTraceSimulator(runtime, { observer: registry.observer() });
 

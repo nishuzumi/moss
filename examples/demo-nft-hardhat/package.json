@@ -1,0 +1,25 @@
+{
+  "name": "@themoss/example-demo-nft-hardhat",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy:testnet": "hardhat run scripts/deploy.ts --network monadTestnet",
+    "price:testnet": "hardhat run scripts/read-price.ts --network monadTestnet",
+    "verify:testnet": "hardhat verify --network monadTestnet",
+    "typecheck": "tsc --noEmit",
+    "test": "hardhat test",
+    "build": "hardhat compile"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.1.0",
+    "@nomicfoundation/hardhat-verify": "^2.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.20.0",
+    "dotenv": "^17.2.3",
+    "ethers": "^6.16.0",
+    "hardhat": "^2.28.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.0"
+  }
+}

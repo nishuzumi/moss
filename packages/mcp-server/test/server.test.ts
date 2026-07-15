@@ -32,6 +32,20 @@ describe("moss mcp server", () => {
     expect(result[0]).toMatchObject({ protocol: "wmon", method: "wrap", kind: "capability" });
   });
 
+  it("serves the public ERC-721 mint capability", async () => {
+    const client = await connectedClient();
+    const result = parseText(
+      await client.callTool({ name: "discover", arguments: { category: "nft", verb: "mint" } }),
+    ) as { protocol: string; method: string }[];
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        protocol: "public-mint-721",
+        method: "mint",
+        kind: "capability",
+      }),
+    );
+  });
+
   it("load returns the calling contract for coordinates", async () => {
     const client = await connectedClient();
     const result = parseText(
