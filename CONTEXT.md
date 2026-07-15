@@ -58,7 +58,7 @@ The Monad-mainnet execution environment supplied when Moss is assembled. Chain i
 _Avoid_: chain map, configurable target chain
 
 **Protocol package**:
-A package exporting one or more self-describing Protocols without a separate manifest or import-time registration. Its public Protocol exports are its registration surface.
+A package exporting one or more self-describing Protocols. Its public Protocol exports are its registration surface.
 _Avoid_: plugin, extension
 
 **Package boundary**:
@@ -72,7 +72,7 @@ _Avoid_: provenance (that word is taken by value provenance)
 Where a returned value's truth comes from: `declared` (author wrote it), `inferred` (derived), `verified` (confirmed on-chain/simulation).
 
 **Verb**:
-The user-perspective fund semantic of a Capability, from a small closed set (`swap`, `wrap`, `unwrap`, `supply`, `withdraw`, `borrow`, `repay`, `stake`, `unstake`, `claim`, `mint`, `transfer`). Never the protocol's function name: WMON's `deposit()` has verb `wrap`, not `deposit`.
+The user-perspective write semantic of a Capability, from a small closed set (`swap`, `wrap`, `unwrap`, `supply`, `withdraw`, `borrow`, `repay`, `stake`, `unstake`, `claim`, `mint`, `transfer`, `approve`). Never the protocol's function name: WMON's `deposit()` has verb `wrap`, not `deposit`.
 _Avoid_: action type, operation
 
 **Category**:
@@ -85,7 +85,7 @@ Free-form descriptive label on a Capability for long-tail semantics (`clob`, `li
 
 **Event**:
 A raw on-chain log carrying only its address, topics, and data. It is the `event` kind of Change; ABI decoding and semantic interpretation belong to the Capability's Receipt.
-_Avoid_: Observation, Receipt
+_Avoid_: Receipt
 
 **Native MON transfer**:
 A raw native-value movement carrying only its sender, recipient, and decimal-string value. It is the `nativeTransfer` kind of Change and covers movements anywhere in a successful transaction, including top-level value and positive value carried by `CALL`, `CREATE`, `CREATE2`, or `SELFDESTRUCT`; reverted and non-value-moving frames are excluded.
@@ -101,7 +101,7 @@ _Avoid_: Event handler, validator
 
 **Receipt**:
 A recursive interpretation containing one structured Outcome, presentation text, and ordered ReceiptChange leaves or nested Receipts. Its structured data is authoritative; text is a projection.
-_Avoid_: Observation, event log
+_Avoid_: event log
 
 **ReceiptChange**:
 A Receipt leaf that retains the exact input Change object and adds JSON-safe protocol data and text.

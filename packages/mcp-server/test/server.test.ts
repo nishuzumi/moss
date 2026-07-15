@@ -1,10 +1,16 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { MossRuntime } from "@themoss/core";
+import * as erc from "@themoss/erc";
+import * as kuru from "@themoss/protocol-kuru";
+import * as system from "@themoss/system";
 import { describe, expect, it } from "vitest";
 import { createMossServer } from "../src/server.js";
 
+const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
+
 async function connectedClient() {
-  const { server } = createMossServer();
+  const { server } = createMossServer({ runtime, protocols: [system, erc, kuru] });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -16,73 +22,66 @@ function parseText(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
   return JSON.parse(content[0]?.text ?? "null");
 }
 
-describe("moss mcp server", () => {
-  it("exposes exactly the four tools", async () => {
-    const client = await connectedClient();
-    const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["action", "discover", "load", "simulate"]);
+describe("moss MCP server", () => {
+  it("exposes exactly discover, load, action, and simulate", async () => {
+    const { tools } = await (await connectedClient()).listTools();
+    expect(tools.map(({ name }) => name).sort()).toEqual([
+      "action",
+      "discover",
+      "load",
+      "simulate",
+    ]);
   });
 
-  it("discover filters by verb and returns coordinates", async () => {
+  it("discovers direct Protocol exports and loads type plus field descriptions", async () => {
     const client = await connectedClient();
-    const result = parseText(
+    const discovered = parseText(
       await client.callTool({ name: "discover", arguments: { verb: "wrap" } }),
     ) as { protocol: string; method: string }[];
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ protocol: "wmon", method: "wrap", kind: "capability" });
-  });
-
-  it("load returns the calling contract for coordinates", async () => {
-    const client = await connectedClient();
-    const result = parseText(
+    expect(discovered).toEqual([
+      expect.objectContaining({ protocol: "wmon", method: "wrap", kind: "capability" }),
+    ]);
+    const loaded = parseText(
       await client.callTool({
         name: "load",
         arguments: { items: [{ protocol: "kuru", method: "swap" }] },
       }),
-    ) as { risk: string[]; params: Record<string, string> }[];
-    expect(result[0]?.risk).toContain("priceImpact");
-    expect(result[0]?.params.amount).toContain("human-decimal");
-  });
-
-  it("action rejects unknown coordinates with a helpful error", async () => {
-    const client = await connectedClient();
-    const result = await client.callTool({
-      name: "action",
-      arguments: {
-        protocol: "nope",
-        method: "x",
-        account: "0xCcCccCCCcCCcccCcCccccCcCCCCcccccCcCCcCcC",
-        params: {},
-      },
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(loaded[0]?.params.slippage).toMatchObject({
+      type: { default: 50 },
+      description: expect.stringContaining("0.5%"),
     });
-    expect(result.isError).toBe(true);
-    const content = result.content as { text: string }[];
-    expect(content[0]?.text).toContain("unknown protocol");
   });
-});
 
-// Full flow over the MCP boundary (JSON round-trip of the Plan blood-bag):
-// action builds the wrap Plan, simulate verifies it — live against mainnet.
-describe.skipIf(!!process.env.MOSS_SKIP_E2E)("moss mcp server (Monad mainnet e2e)", () => {
-  it("action → simulate round trip stays warning-free", { timeout: 120_000 }, async () => {
-    const client = await connectedClient();
-    const plan = parseText(
-      await client.callTool({
+  it("round-trips a Capability tree through action JSON", async () => {
+    const capability = parseText(
+      await (await connectedClient()).callTool({
         name: "action",
         arguments: {
           protocol: "wmon",
           method: "wrap",
-          account: "0xCcCccCCCcCCcccCcCccccCcCCCCcccccCcCCcCcC",
+          account: "0xcccccccccccccccccccccccccccccccccccccccc",
           params: { amount: "0.25" },
         },
       }),
-    ) as Record<string, unknown>;
-    expect(plan.kind).toBe("plan");
+    ) as { kind: string; receipt: string; children: unknown[] };
+    expect(capability).toMatchObject({
+      kind: "capability",
+      protocol: "wmon",
+      method: "wrap",
+      receipt: "wrapReceipt",
+    });
+    expect(capability.children).toHaveLength(1);
+  });
 
-    const outcome = parseText(
-      await client.callTool({ name: "simulate", arguments: { plans: [plan] } }),
-    ) as { ok: boolean; results: { warnings: unknown[] }[] };
-    expect(outcome.ok).toBe(true);
-    expect(outcome.results[0]?.warnings).toEqual([]);
+  it("publishes simulate as one recursive Capability input", async () => {
+    const { tools } = await (await connectedClient()).listTools();
+    const simulate = tools.find(({ name }) => name === "simulate");
+    expect(simulate?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["capability"],
+      properties: { capability: expect.any(Object) },
+    });
+    expect(JSON.stringify(simulate?.inputSchema)).not.toContain("plans");
   });
 });

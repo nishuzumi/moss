@@ -1,6 +1,6 @@
 # Contributing to Moss
 
-Moss is migrating to the architecture defined by `CONTEXT.md` and the current ADRs. Do not add new work against superseded contracts, even when the source migration has not reached that package yet.
+`CONTEXT.md` and the current ADRs define the framework contract. Delete superseded contracts instead of extending them.
 
 ## Development setup
 
@@ -28,7 +28,7 @@ Toolchain notes you shouldn't fight:
 - Read `AGENTS.md`, `CONTEXT.md`, and every relevant current ADR before review.
 - User-facing package changes require a changeset.
 - Do not add compatibility for an uncommitted intermediate design. Delete replaced code and documentation.
-- Keep docs and source honest in the same change. During this migration, target docs must state when runnable source is not ready.
+- Keep docs, examples, tests, and source consistent in the same change.
 - CI must pass lint, build, typecheck, and tests, including the Monad-mainnet E2E path.
 
 ## Protocol Definition of Done

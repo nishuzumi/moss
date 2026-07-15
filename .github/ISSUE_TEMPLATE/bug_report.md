@@ -11,7 +11,7 @@ labels: bug
 
 ## Reproduction
 
-<!-- Minimal steps or code. For simulation issues, include the Plan JSON and the RPC endpoint you used. -->
+<!-- Minimal steps or code. For simulation issues, include the Capability JSON, ordered Receipts, and RPC endpoint. -->
 
 ## Environment
 

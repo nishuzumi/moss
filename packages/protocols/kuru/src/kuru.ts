@@ -1,297 +1,311 @@
-/**
- * Kuru — Monad-native fully on-chain CLOB (central limit order book) DEX.
- *
- * A market-order swap here is verb `swap` like on any AMM — the user pays A
- * and receives B — but the mechanics differ (ADR 0003: `clob` goes in tags,
- * not in a new verb):
- *
- *   - Quoting: there is no pool formula. The exact fill is obtained by
- *     eth_call-simulating the market order itself (`handle.call.*`), the same
- *     technique Kuru's own SDK uses. The returned amount is net of fees.
- *   - Execution: through the KuruRouter's `anyToAnySwap`, which routes over
- *     one or more markets. v1 supports single-hop swaps on a curated catalog
- *     of verified markets.
- *   - Native MON: Kuru markets denominate raw native MON as address(0) —
- *     WMON plays no role. Moss's NATIVE sentinel maps to/from that.
- *
- * All addresses verified on-chain 2026-07-06/07 against rpc.monad.xyz; ABI
- * provenance is documented in ./abis/kuru.ts (ADR 0007).
- */
 import {
-  type Address,
+  BasisPoints,
   Capability,
-  type DecodedEvent,
-  Event,
+  type Change,
   type Handle,
+  type Hex,
+  type InferParams,
   NATIVE,
-  type ObserveCtx,
+  type ParamsSpec,
+  PositiveDecimalString,
   Protocol,
-  plan,
+  type ProtocolRef,
   Query,
-  slippageBps,
+  Receipt,
+  type ReceiptResult,
   type TokenRef,
-  type TxStep,
-  token,
-  tokenAmount,
+  TokenReference,
 } from "@themoss/core";
-import { approveStep } from "@themoss/erc";
-import { knownTokenAddress } from "@themoss/system";
+import { ERC20 } from "@themoss/erc";
+import { AUSD_ADDRESS, USDC_ADDRESS } from "@themoss/system";
+import { decodeEventLog, parseUnits } from "viem";
 import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 
-export const KURU_ROUTER_ADDRESS: Address = "0xd651346d7c789536ebf06dc72aE3C8502cd695CC";
-// Token addresses come from the system token data (single source of truth).
-export const USDC_ADDRESS: Address = knownTokenAddress("USDC");
-export const AUSD_ADDRESS: Address = knownTokenAddress("AUSD");
+// Official mainnet router and markets:
+// https://docs.kuru.io/contracts/Contract-addresses (retrieved 2026-07-15).
+// The live Kuru test verifies deployed bytecode and market parameters.
+export const KURU_ROUTER_ADDRESS = "0xd651346d7c789536ebf06dc72aE3C8502cd695CC" as const;
+const MON_USDC_ADDRESS = "0x065C9d28E428A0db40191a54d33d5b7c71a9C394" as const;
+const MON_AUSD_ADDRESS = "0x131a2e70a5b31a517a74b8c567149bc294470da9" as const;
+const KURU_NATIVE = "0x0000000000000000000000000000000000000000" as const;
 
-/** Kuru denominates native MON as the zero address. */
-const KURU_NATIVE: Address = "0x0000000000000000000000000000000000000000";
-const toKuru = (t: TokenRef): Address => (t === NATIVE ? KURU_NATIVE : t);
+const swapParams = {
+  tokenIn: { type: TokenReference, description: "Asset offered to the swap." },
+  tokenOut: { type: TokenReference, description: "Asset requested from the swap." },
+  amount: {
+    type: PositiveDecimalString,
+    description: "Quantity of tokenIn offered to the selected market.",
+  },
+  slippage: {
+    type: BasisPoints.default(50),
+    description: "Maximum output reduction from the current quote; 50 means 0.5%.",
+  },
+} satisfies ParamsSpec;
 
-/**
- * Curated verified markets. Kuru has no on-chain market enumeration; entries
- * are validated against the market's own getMarketParams() at first use, so
- * catalog rot fails loudly instead of building wrong transactions.
- */
-interface MarketEntry {
-  handle: "monUsdc" | "monAusd";
+const quoteParams = {
+  tokenIn: swapParams.tokenIn,
+  tokenOut: swapParams.tokenOut,
+  amount: swapParams.amount,
+} satisfies ParamsSpec;
+
+type MarketHandle = "monUsdc" | "monAusd";
+type MarketEntry = {
+  handle: MarketHandle;
   label: string;
   base: TokenRef;
-  quote: Address;
-}
+  quote: Exclude<TokenRef, typeof NATIVE>;
+};
 
-const MARKETS: MarketEntry[] = [
+const MARKETS: readonly MarketEntry[] = [
   { handle: "monUsdc", label: "MON/USDC", base: NATIVE, quote: USDC_ADDRESS },
   { handle: "monAusd", label: "MON/AUSD", base: NATIVE, quote: AUSD_ADDRESS },
 ];
 
-interface MarketParams {
+type MarketParams = {
   pricePrecision: bigint;
   sizePrecision: bigint;
-  baseAsset: Address;
+  baseAsset: Exclude<TokenRef, typeof NATIVE>;
   baseDecimals: bigint;
-  quoteAsset: Address;
+  quoteAsset: Exclude<TokenRef, typeof NATIVE>;
   quoteDecimals: bigint;
-}
+};
 
-const sameToken = (a: TokenRef, b: TokenRef) => a.toLowerCase() === b.toLowerCase();
+export type KuruSwapOutcome = {
+  operation: "swap";
+  protocol: "kuru";
+  sender: Exclude<TokenRef, typeof NATIVE>;
+  tokenIn: TokenRef;
+  tokenOut: TokenRef;
+  amountIn: string;
+  amountOut: string;
+  fills: number;
+};
+
+const sameToken = (left: TokenRef, right: TokenRef) => left.toLowerCase() === right.toLowerCase();
+const toKuru = (token: TokenRef) => (token === NATIVE ? KURU_NATIVE : token);
+const fromKuru = (token: Exclude<TokenRef, typeof NATIVE>): TokenRef =>
+  token.toLowerCase() === KURU_NATIVE ? NATIVE : token;
 
 @Protocol({
   name: "kuru",
   category: "dex",
-  description:
-    "Kuru: Monad-native on-chain orderbook (CLOB) DEX. Market-order swaps over verified markets via the KuruRouter.",
+  description: "Kuru on-chain orderbook market swaps over verified Monad markets.",
   contracts: {
     router: { abi: KuruRouterAbi, addr: KURU_ROUTER_ADDRESS },
-    monUsdc: {
-      abi: KuruOrderbookAbi,
-      addr: "0x065C9d28E428A0db40191a54d33d5b7c71a9C394",
-    },
-    monAusd: {
-      abi: KuruOrderbookAbi,
-      addr: "0x131a2e70a5b31a517a74b8c567149bc294470da9",
-    },
+    monUsdc: { abi: KuruOrderbookAbi, addr: MON_USDC_ADDRESS },
+    monAusd: { abi: KuruOrderbookAbi, addr: MON_AUSD_ADDRESS },
   },
+  protocols: { erc20: ERC20 },
 })
 export class Kuru {
   declare router: Handle<typeof KuruRouterAbi>;
   declare monUsdc: Handle<typeof KuruOrderbookAbi>;
   declare monAusd: Handle<typeof KuruOrderbookAbi>;
+  declare erc20: ProtocolRef<ERC20>;
 
-  #params = new Map<string, MarketParams>();
-
-  /** Find the market for a pair and whether the swap is a buy (quote → base). */
-  async #resolve(tokenIn: TokenRef, tokenOut: TokenRef) {
-    const entry = MARKETS.find(
-      (m) =>
-        (sameToken(tokenIn, m.base) && sameToken(tokenOut, m.quote)) ||
-        (sameToken(tokenIn, m.quote) && sameToken(tokenOut, m.base)),
-    );
-    if (!entry) {
-      const pairs = MARKETS.map((m) => m.label).join(", ");
-      throw new Error(`no verified Kuru market for this pair (supported: ${pairs})`);
-    }
-    const market = this[entry.handle];
-    const params = await this.#marketParams(entry, market);
-    // Buying means spending the quote asset to receive the base asset.
-    const isBuy = sameToken(tokenIn, entry.quote);
-    return { entry, market, params, isBuy };
-  }
-
-  async #marketParams(entry: MarketEntry, market: Handle<typeof KuruOrderbookAbi>) {
-    let params = this.#params.get(entry.handle);
-    if (!params) {
-      const [pricePrecision, sizePrecision, baseAsset, baseDecimals, quoteAsset, quoteDecimals] =
-        await market.read.getMarketParams();
-      params = {
-        pricePrecision: BigInt(pricePrecision),
-        sizePrecision,
-        baseAsset: baseAsset as Address,
-        baseDecimals,
-        quoteAsset: quoteAsset as Address,
-        quoteDecimals,
-      };
-      // Kuru contracts are upgradeable; verify the catalog against reality.
-      if (
-        !sameToken(params.baseAsset, toKuru(entry.base)) ||
-        !sameToken(params.quoteAsset, entry.quote)
-      ) {
-        throw new Error(`Kuru market catalog is stale for ${entry.label}; refusing to build`);
-      }
-      this.#params.set(entry.handle, params);
-    }
-    return params;
-  }
-
-  /**
-   * Exact expected fill for a market order, by simulating it via eth_call —
-   * Kuru sizes market orders in precision units, not token decimals:
-   * buys in `quote × pricePrecision`, sells in `base × sizePrecision`.
-   */
-  async #quoteFill(
-    market: Handle<typeof KuruOrderbookAbi>,
-    params: MarketParams,
-    isBuy: boolean,
-    amountIn: bigint,
-  ): Promise<bigint> {
-    if (isBuy) {
-      const quoteSize = (amountIn * params.pricePrecision) / 10n ** params.quoteDecimals;
-      if (quoteSize <= 0n) throw new Error("amount is below the market's price precision");
-      return (await market.call.placeAndExecuteMarketBuy([quoteSize, 0n, false, false])) as bigint;
-    }
-    const size = (amountIn * params.sizePrecision) / 10n ** params.baseDecimals;
-    if (size <= 0n) throw new Error("amount is below the market's size precision");
-    return (await market.call.placeAndExecuteMarketSell([size, 0n, false, false])) as bigint;
-  }
-
-  @Query({
-    intent: "Quote a market-order swap of {amount} {tokenIn} into {tokenOut} on Kuru",
-    params: {
-      tokenIn: token,
-      tokenOut: token,
-      amount: tokenAmount("tokenIn"),
-    },
-    tags: ["clob", "orderbook", "quote"],
-  })
-  async quote({
-    tokenIn,
-    tokenOut,
-    amount,
-  }: {
-    tokenIn: TokenRef;
-    tokenOut: TokenRef;
-    amount: bigint;
-  }) {
-    const { entry, market, params, isBuy } = await this.#resolve(tokenIn, tokenOut);
-    const amountOut = await this.#quoteFill(market, params, isBuy, amount);
+  @Query({ intent: "Quote a Kuru market swap", params: quoteParams, tags: ["clob", "quote"] })
+  async quote(params: InferParams<typeof quoteParams>) {
+    const resolved = await this.#resolve(params.tokenIn, params.tokenOut);
+    const amountIn = parseUnits(params.amount, resolved.inputDecimals);
+    const amountOut = await this.#quoteFill(resolved, amountIn);
     return {
-      market: entry.label,
-      direction: isBuy ? "buy" : "sell",
-      amountIn: amount.toString(),
+      market: resolved.entry.label,
+      direction: resolved.isBuy ? "buy" : "sell",
+      amountIn: amountIn.toString(),
       amountOut: amountOut.toString(),
-      note: "amountOut is the simulated net fill at current book depth; it moves with the book",
     };
   }
 
-  @Capability({
-    intent:
-      "Swap {amount} {tokenIn} into {tokenOut} at market on Kuru, tolerating {slippage} bps slippage",
+  @Capability<Kuru, typeof swapParams>({
+    intent: "Swap tokens through a Kuru market",
     verb: "swap",
-    params: {
-      tokenIn: token,
-      tokenOut: token,
-      amount: tokenAmount("tokenIn"),
-      slippage: slippageBps(100),
-    },
+    params: swapParams,
+    receipt: "swapReceipt",
     risk: ["fundOut", "approval", "priceImpact"],
     tags: ["clob", "orderbook"],
-    // The on-chain receipt: simulation must surface the swapResult
-    // observation, or CONFIRMATION_MISSING warns (ADR 0008).
-    confirms: ["swapResult"],
   })
-  async swap({
-    tokenIn,
-    tokenOut,
-    amount,
-    slippage,
-  }: {
-    tokenIn: TokenRef;
-    tokenOut: TokenRef;
-    amount: bigint;
-    slippage: number;
-  }) {
-    const { market, params, isBuy } = await this.#resolve(tokenIn, tokenOut);
-    const quoted = await this.#quoteFill(market, params, isBuy, amount);
-    const minOut = (quoted * (10_000n - BigInt(slippage))) / 10_000n;
-    if (minOut <= 0n) throw new Error("quoted fill is zero — amount too small for this book");
+  async swap(params: InferParams<typeof swapParams>) {
+    const resolved = await this.#resolve(params.tokenIn, params.tokenOut);
+    const amountIn = parseUnits(params.amount, resolved.inputDecimals);
+    const quoted = await this.#quoteFill(resolved, amountIn);
+    const minOut = (quoted * (10_000n - BigInt(params.slippage))) / 10_000n;
+    if (minOut <= 0n) throw new Error("quoted Kuru output is zero");
 
-    const nativeIn = tokenIn === NATIVE;
-    const steps: TxStep[] = [];
+    const nativeIn = params.tokenIn === NATIVE;
+    const children = [];
     if (!nativeIn) {
-      // ERC-20 input: the router pulls via transferFrom — approve exactly the
-      // input amount (encoding from the standards layer). The step is tagged,
-      // so the approval expectation is auto-declared by plan().
-      steps.push(approveStep(tokenIn as Address, this.router.address, amount));
+      children.push(
+        await this.erc20.approve({
+          token: params.tokenIn,
+          spender: this.router.address,
+          amount: amountIn.toString(),
+        }),
+      );
     }
-    steps.push(
+    children.push(
       this.router.anyToAnySwap(
-        [[market.address], [isBuy], [nativeIn], toKuru(tokenIn), toKuru(tokenOut), amount, minOut],
-        { value: nativeIn ? amount : 0n },
+        [
+          [resolved.market.address],
+          [resolved.isBuy],
+          [nativeIn],
+          toKuru(params.tokenIn),
+          toKuru(params.tokenOut),
+          amountIn,
+          minOut,
+        ],
+        { value: nativeIn ? amountIn : 0n },
       ),
     );
-
-    return plan(steps, {
-      out: [{ token: tokenIn, amountMax: amount }],
-      in: [{ token: tokenOut, amountMin: minOut }],
-    });
-  }
-
-  /** Dealer: seed ctx.shared with the fill count (one order = N Trade events). */
-  countFills(events: DecodedEvent[], ctx: ObserveCtx): void {
-    ctx.shared.fills = events.filter((e) => e.name === "Trade").length;
-  }
-
-  @Event<Kuru>({
-    events: {
-      router: ["KuruRouterSwap"],
-      monUsdc: ["Trade"],
-      monAusd: ["Trade"],
-    },
-    dealer: "countFills",
-    intent: "Swapped {amountIn} {tokenIn} into {amountOut} {tokenOut} on Kuru ({fills} fills)",
-  })
-  async swapResult(events: DecodedEvent[], ctx: ObserveCtx) {
-    const swap = events.find((e) => e.name === "KuruRouterSwap");
-    if (!swap) return null;
-    // Router event amounts are in native token units; render them human.
-    const args = swap.args as {
-      debitToken: Address;
-      creditToken: Address;
-      amountIn: bigint;
-      amountOut: bigint;
-    };
-    const fromKuru = (a: Address): TokenRef => (a.toLowerCase() === KURU_NATIVE ? NATIVE : a);
-    const tokenIn = await ctx.token(fromKuru(args.debitToken));
-    const tokenOut = await ctx.token(fromKuru(args.creditToken));
-    return {
-      tokenIn: tokenIn.symbol,
-      amountIn: tokenIn.format(args.amountIn),
-      tokenOut: tokenOut.symbol,
-      amountOut: tokenOut.format(args.amountOut),
-      fills: Number(ctx.shared.fills ?? 0),
-    };
+    return children;
   }
 
   @Query({
-    intent: "List the verified Kuru markets this adapter can trade on",
+    intent: "List Kuru markets supported by this Protocol",
     params: {},
     tags: ["clob", "orderbook"],
   })
   async markets() {
-    return MARKETS.map((m) => ({
-      market: this[m.handle].address,
-      label: m.label,
-      base: m.base,
-      quote: m.quote,
+    return MARKETS.map((market) => ({
+      market: this[market.handle].address,
+      label: market.label,
+      base: market.base,
+      quote: market.quote,
     }));
+  }
+
+  @Receipt()
+  swapReceipt(changes: readonly Change[]): ReceiptResult<KuruSwapOutcome> {
+    let swap: KuruSwapOutcome | undefined;
+    let fills = 0;
+    const parsed = changes.map((change) => {
+      if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
+      if (sameAddress(change.address, KURU_ROUTER_ADDRESS)) {
+        const event = decodeKuruEvent(KuruRouterAbi, change);
+        if (event.eventName !== "KuruRouterSwap") {
+          throw new Error(`Unexpected Change: Kuru router emitted ${event.eventName}`);
+        }
+        if (swap) throw new Error("Kuru swap emitted multiple KuruRouterSwap events");
+        swap = {
+          operation: "swap",
+          protocol: "kuru",
+          sender: event.args.msgSender,
+          tokenIn: fromKuru(event.args.debitToken),
+          tokenOut: fromKuru(event.args.creditToken),
+          amountIn: event.args.amountIn.toString(),
+          amountOut: event.args.amountOut.toString(),
+          fills: 0,
+        };
+        const text = `Kuru Swap: ${swap.amountIn} ${swap.tokenIn} to ${swap.amountOut} ${swap.tokenOut} by ${swap.sender}`;
+        return { kind: "change" as const, change, data: swap, text };
+      }
+      if (
+        sameAddress(change.address, MON_USDC_ADDRESS) ||
+        sameAddress(change.address, MON_AUSD_ADDRESS)
+      ) {
+        const event = decodeKuruEvent(KuruOrderbookAbi, change);
+        if (event.eventName !== "Trade") {
+          throw new Error(`Unexpected Change: Kuru market emitted ${event.eventName}`);
+        }
+        fills += 1;
+        const data = {
+          operation: "fill",
+          market: change.address,
+          orderId: event.args.orderId.toString(),
+          maker: event.args.makerAddress,
+          taker: event.args.takerAddress,
+          price: event.args.price.toString(),
+          size: event.args.filledSize.toString(),
+        } as const;
+        return {
+          kind: "change" as const,
+          change,
+          data,
+          text: `Kuru Trade: ${data.size} at ${data.price} on ${data.market}`,
+        };
+      }
+      return this.erc20.changesReceipt([change]);
+    });
+    if (!swap) throw new Error("Kuru swap Receipt requires KuruRouterSwap");
+    swap.fills = fills;
+    return {
+      kind: "receipt",
+      outcome: swap,
+      text: `Kuru Swap: ${swap.amountIn} ${swap.tokenIn} to ${swap.amountOut} ${swap.tokenOut} across ${fills} fill${fills === 1 ? "" : "s"}`,
+      changes: parsed,
+    };
+  }
+
+  async #resolve(tokenIn: TokenRef, tokenOut: TokenRef) {
+    const entry = MARKETS.find(
+      (market) =>
+        (sameToken(tokenIn, market.base) && sameToken(tokenOut, market.quote)) ||
+        (sameToken(tokenIn, market.quote) && sameToken(tokenOut, market.base)),
+    );
+    if (!entry) throw new Error("no verified Kuru market for this token pair");
+    const market = this[entry.handle];
+    const params = await this.#marketParams(entry, market);
+    const isBuy = sameToken(tokenIn, entry.quote);
+    const inputDecimals = Number(isBuy ? params.quoteDecimals : params.baseDecimals);
+    return { entry, market, params, isBuy, inputDecimals };
+  }
+
+  async #marketParams(entry: MarketEntry, market: Handle<typeof KuruOrderbookAbi>) {
+    const [pricePrecision, sizePrecision, baseAsset, baseDecimals, quoteAsset, quoteDecimals] =
+      await market.read.getMarketParams();
+    const params = {
+      pricePrecision: BigInt(pricePrecision),
+      sizePrecision,
+      baseAsset,
+      baseDecimals,
+      quoteAsset,
+      quoteDecimals,
+    };
+    if (
+      !sameToken(params.baseAsset, toKuru(entry.base)) ||
+      !sameToken(params.quoteAsset, entry.quote)
+    ) {
+      throw new Error(`Kuru market address does not match ${entry.label}`);
+    }
+    return params;
+  }
+
+  async #quoteFill(
+    resolved: { market: Handle<typeof KuruOrderbookAbi>; params: MarketParams; isBuy: boolean },
+    amountIn: bigint,
+  ) {
+    if (resolved.isBuy) {
+      const size =
+        (amountIn * resolved.params.pricePrecision) / 10n ** resolved.params.quoteDecimals;
+      if (size <= 0n) throw new Error("amount is below Kuru price precision");
+      return resolved.market.call.placeAndExecuteMarketBuy([size, 0n, false, false]);
+    }
+    const size = (amountIn * resolved.params.sizePrecision) / 10n ** resolved.params.baseDecimals;
+    if (size <= 0n) throw new Error("amount is below Kuru size precision");
+    return resolved.market.call.placeAndExecuteMarketSell(
+      [size, 0n, false, false],
+      sameToken(resolved.params.baseAsset, KURU_NATIVE)
+        ? { value: amountIn, balance: amountIn }
+        : {},
+    );
+  }
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function decodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrderbookAbi>(
+  abi: TAbi,
+  change: Extract<Change, { kind: "event" }>,
+) {
+  try {
+    return decodeEventLog({
+      abi,
+      topics: change.topics as [Hex, ...Hex[]],
+      data: change.data,
+      strict: true,
+    });
+  } catch {
+    throw new Error(`Unexpected Change: ${change.address} emitted an unsupported Kuru event`);
   }
 }

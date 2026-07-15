@@ -10,8 +10,7 @@
   thing.
 - **Accepted architecture is the requirement.** ADRs, the glossary, public
   docs, Agent rules, and the package template must describe it consistently.
-  While source migration is incomplete, say so explicitly and never teach a
-  superseded contract as a supported alternative.
+  Never teach a superseded contract as a supported alternative.
 
 ## Repo facts
 

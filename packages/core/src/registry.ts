@@ -1,35 +1,33 @@
-import { decodeEventLog } from "viem";
 import {
   METHOD_META,
   type MethodMeta,
   PROTOCOL_META,
+  PROTOCOL_TARGET,
   type ProtocolConfig,
   type ProtocolCtor,
+  type ProtocolDependencies,
+  RECEIPT_META,
 } from "./decorators.js";
-import type { ProtocolPackage } from "./manifest.js";
-import {
-  type DealerFn,
-  type DecodedEvent,
-  EVENT_META,
-  type EventMeta,
-  type ObserveCtx,
-  type ObserverHook,
-  type PlanObservation,
-} from "./observe.js";
-import { finalizePlan, type PlanDraft } from "./plan.js";
+import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
 import type { MossRuntime } from "./runtime.js";
-import { decodeParams } from "./semantics.js";
-import type { TokenSource } from "./token.js";
-import { TokenTable } from "./tokens.js";
-import type { Address, Category, Plan, RiskLabel, Verb } from "./types.js";
+import { describeParams, parseParams } from "./semantics.js";
+import type {
+  Address,
+  CapabilityNode,
+  CapabilityResult,
+  Category,
+  Change,
+  JsonSafeValue,
+  Receipt,
+  RiskLabel,
+  Verb,
+} from "./types.js";
+import { CATEGORIES, RISK_LABELS, VERBS } from "./types.js";
 
-/** Second argument to every capability/query method: the caller's identity. */
 export interface ActionCtx {
-  /** The account `action` was called for — the sender of every plan tx. */
   account: Address;
 }
 
-/** A discover result: where a capability/query lives and how to filter it. */
 export interface Coordinate {
   protocol: string;
   method: string;
@@ -40,7 +38,11 @@ export interface Coordinate {
   summary: string;
 }
 
-/** A load result: everything an agent needs to call `action` correctly. */
+export interface LoadedParameter {
+  type: JsonSafeValue;
+  description: string;
+}
+
 export interface Stub {
   protocol: string;
   method: string;
@@ -50,339 +52,346 @@ export interface Stub {
   category: Category;
   risk: RiskLabel[];
   tags: string[];
-  params: Record<string, string>;
+  params: Record<string, LoadedParameter>;
 }
 
 export interface QueryResult {
   kind: "query";
   protocol: string;
   method: string;
-  data: unknown;
+  data: JsonSafeValue;
 }
 
 interface Registered {
   ctor: ProtocolCtor;
-  config: ProtocolConfig;
+  receiptCtor: ProtocolCtor;
+  config: ProtocolConfig<ProtocolDependencies>;
   methods: Record<string, MethodMeta>;
-  events: Record<string, EventMeta>;
+  receipts: Set<string>;
 }
 
-function jsonSafe(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
+export type ProtocolSource = ProtocolCtor | Record<string, unknown>;
+
+function configOf(value: unknown): ProtocolConfig<ProtocolDependencies> | undefined {
+  if (typeof value !== "function") return undefined;
+  if (!Object.hasOwn(value, PROTOCOL_META)) return undefined;
+  return (value as unknown as Record<symbol, ProtocolConfig<ProtocolDependencies> | undefined>)[
+    PROTOCOL_META
+  ];
 }
 
-function fillTemplate(template: string, raw: Record<string, unknown>): string {
-  return template.replace(/\{(\w+)\}/g, (_, name) =>
-    raw[name] === undefined ? `{${name}}` : String(raw[name]),
-  );
-}
-
-/**
- * The protocol catalog behind the four MCP tools. Registration validates the
- * decorator metadata; instances are created lazily, one per protocol, with
- * Handles bound to this registry's runtime.
- */
-export interface RegistryOptions {
-  /**
-   * Resolves token ADDRESSES outside the table (symbols never fall through).
-   * Wire @themoss/erc's erc20MetadataSource(client) here; without it,
-   * unknown addresses fail loudly with guidance — core reads no contracts.
-   */
-  tokenFallback?: TokenSource;
+function requireMetadataText(value: unknown, path: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${path} must be a non-empty string`);
+  }
 }
 
 export class Registry {
   #protocols = new Map<string, Registered>();
-  #instances = new Map<string, object>();
-  #table = new TokenTable();
-  #tokens: TokenSource;
   readonly runtime: MossRuntime;
 
-  /**
-   * A new Registry is EMPTY — no protocols, no tokens. Assemble it from
-   * protocol packages with use(); nothing registers itself by import
-   * side effects (ADR 0006). The Monad defaults ship in @themoss/system's
-   * `systemManifest`.
-   */
-  constructor(runtime: MossRuntime, opts: RegistryOptions = {}) {
+  constructor(runtime: MossRuntime) {
     this.runtime = runtime;
-    this.#tokens = this.#table.source(opts.tokenFallback);
   }
 
-  /** Register one protocol package: its tokens (collision-checked) and protocols. */
-  use(pkg: ProtocolPackage): void {
-    if (pkg?.kind !== "moss-package") {
-      throw new Error("use() takes a ProtocolPackage (see defineProtocolPackage)");
+  use(...sources: ProtocolSource[]): this {
+    for (const source of sources) {
+      if (configOf(source)) {
+        this.register(source as ProtocolCtor);
+        continue;
+      }
+      if (!source || typeof source !== "object") {
+        throw new Error("Registry.use() expects a decorated Protocol class or module namespace");
+      }
+      const protocols = [...new Set(Object.values(source).filter((value) => configOf(value)))];
+      if (protocols.length === 0) {
+        throw new Error("module namespace exports no decorated Protocol classes");
+      }
+      for (const protocol of protocols) this.register(protocol as ProtocolCtor);
     }
-    for (const token of pkg.tokens) this.#table.add(token, pkg.name);
-    for (const protocol of pkg.protocols) this.register(protocol);
+    return this;
   }
 
-  register(ctor: ProtocolCtor): void {
-    const config = (ctor as unknown as Record<symbol, ProtocolConfig | undefined>)[PROTOCOL_META];
-    if (!config) {
-      throw new Error(`${ctor.name} is not decorated with @Protocol`);
+  register(ctor: ProtocolCtor, stack: string[] = []): void {
+    const config = configOf(ctor);
+    if (!config) throw new Error(`${ctor.name} is not decorated with @Protocol`);
+    const target = (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET];
+    for (let ancestor = target && Object.getPrototypeOf(target); ancestor; ) {
+      if (configOf(ancestor)) {
+        throw new Error(
+          `protocol "${config.name}" cannot extend another decorated Protocol; declare it as a dependency`,
+        );
+      }
+      ancestor = Object.getPrototypeOf(ancestor);
     }
-    if (this.#protocols.has(config.name)) {
-      throw new Error(`protocol "${config.name}" is already registered`);
+    requireMetadataText(config.description, `protocol "${config.name}" description`);
+    if (!CATEGORIES.includes(config.category)) {
+      throw new Error(`protocol "${config.name}" has an invalid category`);
     }
-    // Collect @Capability/@Query methods by their marker property, walking the
-    // prototype chain (the @Protocol wrapper subclasses the author's class).
+    const existing = this.#protocols.get(config.name);
+    if (existing?.ctor === ctor) return;
+    if (existing) throw new Error(`protocol "${config.name}" is already registered`);
+    if (stack.includes(config.name)) {
+      throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
+    }
+    for (const dependency of Object.values(config.protocols ?? {})) {
+      this.register(dependency, [...stack, config.name]);
+    }
+
     const methods: Record<string, MethodMeta> = {};
-    const events: Record<string, EventMeta> = {};
+    const receipts = new Set<string>();
+    const seenNames = new Set<string>();
     for (
-      let proto = ctor.prototype;
-      proto && proto !== Object.prototype;
-      proto = Object.getPrototypeOf(proto)
+      let prototype = ctor.prototype;
+      prototype && prototype !== Object.prototype;
+      prototype = Object.getPrototypeOf(prototype)
     ) {
-      for (const name of Object.getOwnPropertyNames(proto)) {
+      for (const name of Object.getOwnPropertyNames(prototype)) {
         if (name === "constructor") continue;
-        const fn = Object.getOwnPropertyDescriptor(proto, name)?.value;
-        if (typeof fn !== "function") continue;
-        const markers = fn as unknown as Record<symbol, unknown>;
+        if (seenNames.has(name)) continue;
+        seenNames.add(name);
+        const method = Object.getOwnPropertyDescriptor(prototype, name)?.value;
+        if (typeof method !== "function") continue;
+        const markers = method as unknown as Record<symbol, unknown>;
         const meta = markers[METHOD_META] as MethodMeta | undefined;
         if (meta && !Object.hasOwn(methods, name)) methods[name] = meta;
-        const eventMeta = markers[EVENT_META] as EventMeta | undefined;
-        if (eventMeta && !Object.hasOwn(events, name)) events[name] = eventMeta;
+        if (markers[RECEIPT_META]) receipts.add(name);
       }
     }
     if (Object.keys(methods).length === 0) {
       throw new Error(`protocol "${config.name}" declares no @Capability or @Query methods`);
     }
     for (const [name, meta] of Object.entries(methods)) {
-      if (meta.kind === "capability" && meta.spec.risk.length === 0) {
-        throw new Error(
-          `protocol "${config.name}": capability "${name}" must declare at least one risk label`,
+      requireMetadataText(meta.spec.intent, `method "${config.name}.${name}" intent`);
+      if (meta.spec.tags?.some((tag) => typeof tag !== "string" || tag.trim().length === 0)) {
+        throw new Error(`method "${config.name}.${name}" has an invalid tag`);
+      }
+      for (const [param, field] of Object.entries(meta.spec.params)) {
+        requireMetadataText(
+          field.description,
+          `parameter "${config.name}.${name}.${param}" description`,
         );
-      }
-      if (meta.kind === "capability") {
-        for (const confirmed of meta.spec.confirms ?? []) {
-          if (!Object.hasOwn(events, confirmed)) {
-            throw new Error(
-              `protocol "${config.name}": capability "${name}" confirms "${confirmed}", which is not an @Event method`,
-            );
-          }
+        if (!field.type || typeof field.type.safeParseAsync !== "function") {
+          throw new Error(`parameter "${config.name}.${name}.${param}" has an invalid type`);
         }
       }
-    }
-    // @Event declarations: contract keys must exist, event names must exist
-    // in that contract's (origin-verified) ABI, dealer names must resolve.
-    for (const [name, { spec }] of Object.entries(events)) {
-      for (const [contractKey, names] of Object.entries(spec.events)) {
-        const contract = config.contracts[contractKey];
-        if (!contract) {
-          throw new Error(
-            `protocol "${config.name}": @Event "${name}" subscribes to unknown contract "${contractKey}"`,
-          );
-        }
-        const abiEvents = new Set(
-          contract.abi.filter((e) => e.type === "event").map((e) => e.name),
-        );
-        for (const eventName of names ?? []) {
-          if (!abiEvents.has(eventName)) {
-            throw new Error(
-              `protocol "${config.name}": @Event "${name}" subscribes to "${eventName}", absent from "${contractKey}"'s ABI`,
-            );
-          }
-        }
+      if (meta.kind !== "capability") continue;
+      if (!VERBS.includes(meta.spec.verb)) {
+        throw new Error(`capability "${config.name}.${name}" has an invalid verb`);
       }
-      if (typeof spec.dealer === "string" && typeof ctor.prototype[spec.dealer] !== "function") {
+      if (meta.spec.risk.length === 0) {
+        throw new Error(`capability "${config.name}.${name}" must declare a risk label`);
+      }
+      if (meta.spec.risk.some((risk) => !RISK_LABELS.includes(risk))) {
+        throw new Error(`capability "${config.name}.${name}" has an invalid risk label`);
+      }
+      if (!receipts.has(meta.spec.receipt)) {
         throw new Error(
-          `protocol "${config.name}": @Event "${name}" names dealer "${spec.dealer}", which is not a method`,
+          `capability "${config.name}.${name}" names "${meta.spec.receipt}", which is not an @Receipt method`,
         );
       }
     }
-    this.#protocols.set(config.name, { ctor, config, methods, events });
+    const receiptCtor =
+      (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET] ?? ctor;
+    this.#protocols.set(config.name, { ctor, receiptCtor, config, methods, receipts });
   }
 
   discover(filter: { verb?: Verb; category?: Category; protocol?: string } = {}): Coordinate[] {
-    const results: Coordinate[] = [];
+    const found: Coordinate[] = [];
     for (const { config, methods } of this.#protocols.values()) {
-      if (filter.protocol && config.name !== filter.protocol) continue;
-      if (filter.category && config.category !== filter.category) continue;
+      if (filter.protocol && filter.protocol !== config.name) continue;
+      if (filter.category && filter.category !== config.category) continue;
       for (const [method, meta] of Object.entries(methods)) {
         const verb = meta.kind === "capability" ? meta.spec.verb : undefined;
-        if (filter.verb && verb !== filter.verb) continue;
-        results.push({
+        if (filter.verb && filter.verb !== verb) continue;
+        found.push({
           protocol: config.name,
           method,
           kind: meta.kind,
-          verb,
+          ...(verb === undefined ? {} : { verb }),
           category: config.category,
           tags: meta.spec.tags ?? [],
           summary: meta.spec.intent,
         });
       }
     }
-    return results;
+    return found;
   }
 
-  load(coords: { protocol: string; method: string }[]): Stub[] {
+  load(coords: readonly { protocol: string; method: string }[]): Stub[] {
     return coords.map(({ protocol, method }) => {
-      const { config, methods } = this.#get(protocol);
-      const meta = methods[method];
+      const registered = this.#get(protocol);
+      const meta = registered.methods[method];
       if (!meta) throw new Error(`protocol "${protocol}" has no method "${method}"`);
       return {
         protocol,
         method,
         kind: meta.kind,
         intent: meta.spec.intent,
-        verb: meta.kind === "capability" ? meta.spec.verb : undefined,
-        category: config.category,
+        ...(meta.kind === "capability" ? { verb: meta.spec.verb } : {}),
+        category: registered.config.category,
         risk: meta.kind === "capability" ? meta.spec.risk : [],
         tags: meta.spec.tags ?? [],
-        params: Object.fromEntries(
-          Object.entries(meta.spec.params).map(([name, type]) => [name, type.describe]),
-        ),
+        params: describeParams(meta.spec.params),
       };
     });
   }
 
-  /**
-   * Execute a query (returns data) or build a capability's Plan (returns
-   * unsigned transactions). Assembles only — never signs, never sends.
-   */
   async action(
     protocol: string,
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
-  ): Promise<QueryResult | Plan> {
-    const { methods } = this.#get(protocol);
-    const meta = methods[method];
+  ): Promise<QueryResult | CapabilityNode> {
+    const meta = this.#get(protocol).methods[method];
     if (!meta) throw new Error(`protocol "${protocol}" has no method "${method}"`);
-
-    const decoded = await decodeParams(meta.spec.params, rawParams, {
-      account,
-      token: this.#tokens,
-    });
-
-    const instance = this.#instantiate(protocol);
-    // Methods needing the caller inside calldata (ERC-721 transferFrom) read
-    // it from the second argument; everyone else just ignores it.
-    const ctx: ActionCtx = { account };
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic dispatch to the decorated method
-    const result = await (instance as any)[method](decoded, ctx);
-
     if (meta.kind === "query") {
-      return { kind: "query", protocol, method, data: jsonSafe(result) };
+      return {
+        kind: "query",
+        protocol,
+        method,
+        data: await this.#runQuery(protocol, method, account, rawParams),
+      };
     }
+    return this.#buildCapability(protocol, method, account, rawParams);
+  }
 
-    const draft = result as PlanDraft;
-    if (draft?.kind !== "planDraft") {
+  parseReceipt(node: CapabilityNode, changes: readonly Change[]): Receipt {
+    const meta = this.#get(node.protocol).methods[node.method];
+    if (meta?.kind !== "capability") {
+      throw new Error(`unknown capability "${node.protocol}.${node.method}"`);
+    }
+    if (meta.spec.receipt !== node.receipt) {
       throw new Error(
-        `capability "${protocol}.${method}" must return plan(...); got ${typeof result}`,
+        `capability "${node.protocol}.${node.method}" must use Receipt "${meta.spec.receipt}"`,
       );
     }
-    // Fill the intent template from what the agent sent; parameters that fell
-    // back to defaults are missing from raw, so backfill with decoded values
-    // when they are human-readable primitives (e.g. slippage bps).
-    const readableDefaults = Object.fromEntries(
-      Object.entries(decoded).filter(
-        ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean",
-      ),
-    );
-    return finalizePlan(draft, {
+    flattenCapabilityTree(node);
+    return this.#runReceipt(node.protocol, node.receipt, changes);
+  }
+
+  async #buildCapability(
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+  ): Promise<CapabilityNode> {
+    const registered = this.#get(protocol);
+    const meta = registered.methods[method];
+    if (meta?.kind !== "capability") {
+      throw new Error(`"${protocol}.${method}" is not a Capability`);
+    }
+    const params = await parseParams(meta.spec.params, rawParams);
+    const instance = this.#instantiate(protocol, account);
+    // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
+    const result = (await (instance as any)[method](params, { account } satisfies ActionCtx)) as
+      | CapabilityResult
+      | undefined;
+    const children = Array.isArray(result) ? result : result ? [result] : [];
+    const node: CapabilityNode = {
+      kind: "capability",
       protocol,
       method,
-      verb: meta.spec.verb,
-      chainId: this.runtime.chainId,
-      account,
-      intent: fillTemplate(meta.spec.intent, { ...readableDefaults, ...rawParams }),
-      declaredRisk: meta.spec.risk,
-      confirms: meta.spec.confirms ?? [],
-    });
+      params: toJsonSafe(params),
+      receipt: meta.spec.receipt,
+      children,
+    };
+    flattenCapabilityTree(node);
+    return node;
   }
 
-  #get(protocol: string): Registered {
-    const entry = this.#protocols.get(protocol);
-    if (!entry) {
-      const known = [...this.#protocols.keys()].join(", ");
-      throw new Error(`unknown protocol "${protocol}" (registered: ${known})`);
+  async #runQuery(
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+  ): Promise<JsonSafeValue> {
+    const registered = this.#get(protocol);
+    const meta = registered.methods[method];
+    if (meta?.kind !== "query") throw new Error(`"${protocol}.${method}" is not a Query`);
+    const params = await parseParams(meta.spec.params, rawParams);
+    const instance = this.#instantiate(protocol, account);
+    // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
+    return toJsonSafe(await (instance as any)[method](params, { account } satisfies ActionCtx));
+  }
+
+  #runReceipt(protocol: string, receiptName: string, changes: readonly Change[]): Receipt {
+    const registered = this.#get(protocol);
+    if (!registered.receipts.has(receiptName)) {
+      throw new Error(`protocol "${protocol}" has no Receipt "${receiptName}"`);
     }
-    return entry;
+    const instance = this.#instantiateReceipt(protocol);
+    // biome-ignore lint/suspicious/noExplicitAny: registration validates Receipt dispatch
+    const receipt = (instance as any)[receiptName](changes) as Receipt;
+    verifyReceiptCoverage(changes, receipt);
+    return receipt;
   }
 
-  #instantiate(protocol: string): object {
-    let instance = this.#instances.get(protocol);
-    if (!instance) {
-      instance = new (this.#get(protocol).ctor)(this.runtime);
-      this.#instances.set(protocol, instance);
+  #instantiateReceipt(protocol: string): object {
+    const registered = this.#get(protocol);
+    const ReceiptCtor = registered.receiptCtor as unknown as new () => object;
+    const instance = new ReceiptCtor();
+    for (const [key, dependency] of Object.entries(registered.config.protocols ?? {})) {
+      const name = configOf(dependency)?.name;
+      if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
+      Object.defineProperty(instance, key, {
+        value: this.#receiptDependency(name),
+        writable: false,
+      });
     }
     return instance;
   }
 
-  /**
-   * The observation hook for the simulator (SimulatorOptions.observer):
-   * decodes each plan's logs through the registered protocols' own
-   * origin-verified ABIs and runs their @Event pipelines
-   * (dealer → handler → intent render). Narrative only — observations never
-   * feed reconciliation (ADR 0008).
-   */
-  observer(): ObserverHook {
-    return async (plan, logs) => {
-      const observations: PlanObservation[] = [];
-      for (const [protocolName, reg] of this.#protocols) {
-        const declarations = Object.entries(reg.events);
-        if (declarations.length === 0) continue;
-        const addressKey = new Map<string, string>();
-        for (const [key, contract] of Object.entries(reg.config.contracts)) {
-          addressKey.set(contract.addr.toLowerCase(), key);
-        }
-        // Decode this protocol's logs via its own ABI; foreign logs skip.
-        const decoded: DecodedEvent[] = [];
-        for (const log of logs) {
-          const key = addressKey.get(log.address.toLowerCase());
-          const contract = key ? reg.config.contracts[key] : undefined;
-          if (!key || !contract) continue;
-          try {
-            const parsed = decodeEventLog({
-              abi: contract.abi,
-              // biome-ignore lint/suspicious/noExplicitAny: raw log topics
-              topics: log.topics as any,
-              data: log.data,
-            });
-            if (!parsed.eventName) continue;
-            decoded.push({
-              contract: key,
-              address: log.address,
-              name: parsed.eventName,
-              args: (parsed.args ?? {}) as Record<string, unknown>,
-            });
-          } catch {
-            // not an event of this ABI — irrelevant to observations
-          }
-        }
-        if (decoded.length === 0) continue;
-        const instance = this.#instantiate(protocolName);
-        // One ctx per plan × protocol: dealer seeds it, handlers consume it.
-        const ctx: ObserveCtx = { plan, account: plan.account, token: this.#tokens, shared: {} };
-        for (const [name, { spec }] of declarations) {
-          let matched = decoded.filter((e) => (spec.events[e.contract] ?? []).includes(e.name));
-          if (matched.length === 0) continue;
-          const dealer =
-            typeof spec.dealer === "string"
-              ? // biome-ignore lint/suspicious/noExplicitAny: registration-validated method name
-                ((instance as any)[spec.dealer] as DealerFn).bind(instance)
-              : spec.dealer;
-          if (dealer) matched = ((await dealer(matched, ctx)) ?? matched) as DecodedEvent[];
-          // biome-ignore lint/suspicious/noExplicitAny: dynamic dispatch to the decorated method
-          const content = await (instance as any)[name](matched, ctx);
-          if (!content) continue;
-          const data = jsonSafe(content) as Record<string, unknown>;
-          // Strict render: a placeholder the handler didn't supply is a bug.
-          const intent = spec.intent.replace(/\{(\w+)\}/g, (_, key: string) => {
-            if (data[key] === undefined) {
-              throw new Error(
-                `@Event "${protocolName}.${name}": intent placeholder {${key}} missing from handler result`,
-              );
-            }
-            return String(data[key]);
-          });
-          observations.push({ protocol: protocolName, name, intent, data });
-        }
-      }
-      return observations;
-    };
+  #instantiate(protocol: string, account: Address): object {
+    const registered = this.#get(protocol);
+    const dependencies = Object.fromEntries(
+      Object.entries(registered.config.protocols ?? {}).map(([key, dependency]) => {
+        const name = configOf(dependency)?.name;
+        if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
+        return [key, this.#dependency(name, account)];
+      }),
+    );
+    const Ctor = registered.ctor as unknown as new (
+      runtime: MossRuntime,
+      account: Address,
+      dependencies: Record<string, object>,
+    ) => object;
+    return new Ctor(this.runtime, account, dependencies);
+  }
+
+  #dependency(protocol: string, account: Address): object {
+    const registered = this.#get(protocol);
+    const dependency: Record<string, unknown> = {};
+    for (const [method, meta] of Object.entries(registered.methods)) {
+      dependency[method] =
+        meta.kind === "capability"
+          ? (params: Record<string, unknown>) =>
+              this.#buildCapability(protocol, method, account, params)
+          : (params: Record<string, unknown>) => this.#runQuery(protocol, method, account, params);
+    }
+    for (const receipt of registered.receipts) {
+      dependency[receipt] = (changes: readonly Change[]) =>
+        this.#runReceipt(protocol, receipt, changes);
+    }
+    return Object.freeze(dependency);
+  }
+
+  #receiptDependency(protocol: string): object {
+    const dependency: Record<string, unknown> = {};
+    for (const receipt of this.#get(protocol).receipts) {
+      dependency[receipt] = (changes: readonly Change[]) =>
+        this.#runReceipt(protocol, receipt, changes);
+    }
+    return Object.freeze(dependency);
+  }
+
+  #get(protocol: string): Registered {
+    const registered = this.#protocols.get(protocol);
+    if (!registered) {
+      throw new Error(
+        `unknown protocol "${protocol}" (registered: ${[...this.#protocols.keys()].join(", ")})`,
+      );
+    }
+    return registered;
   }
 }

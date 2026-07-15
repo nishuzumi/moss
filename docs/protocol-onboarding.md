@@ -1,6 +1,6 @@
-# Protocol onboarding for the new Moss framework
+# Protocol onboarding
 
-One Protocol package owns its ABIs, Capabilities, Queries, declared Protocol dependencies, and Receipt parsers. The architecture is accepted; exact exported helper names may still move while the TypeScript migration lands.
+One Protocol package owns its ABIs, Capabilities, Queries, declared Protocol dependencies, and Receipt parsers.
 
 ## 1. Establish ABI and address provenance
 
@@ -32,7 +32,7 @@ A package exports its public `@Protocol` classes directly from its entry point. 
 })
 export class MyProtocol {
   declare router: Handle<typeof RouterAbi>;
-  declare erc20: ERC20;
+  declare erc20: ProtocolRef<ERC20>;
 }
 ```
 
@@ -78,7 +78,7 @@ Registry parses action input with the composed schemas. `load` returns JSON-safe
 Every Capability owns exactly one direct transaction and one named Receipt parser. More transactions require nested Capabilities.
 
 ```ts
-@Capability<MyProtocol>({
+@Capability<MyProtocol, typeof swapParams>({
   intent: "Swap {amountIn} of {tokenIn} into {tokenOut}",
   verb: "swap",
   params: swapParams,
@@ -87,10 +87,9 @@ Every Capability owns exactly one direct transaction and one named Receipt parse
 })
 async swap(params: SwapParams) {
   const approval = await this.erc20.approve({
-    owner: params.user,
     token: params.tokenIn,
     spender: this.router.address,
-    amount: params.amountIn,
+    amount: amountInBaseUnits.toString(),
   });
   const transaction = this.router.swap(/* protocol arguments */);
   return [approval, transaction];

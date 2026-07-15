@@ -10,7 +10,7 @@ Protocol adapters are authored as classes with TC39 stage-3 decorators (`@Protoc
 
 ## Consequences
 
-- Handles MUST be declared with their ABI type parameter (`Handle<typeof PoolAbi>`), otherwise calls are untyped. The ABI is referenced twice (in `@Protocol` config and in the `declare` type); the compiler cannot check they agree, so `@Protocol` validates at registration time that declared handle fields match the `contracts` config keys and throws on mismatch.
+- Handles MUST be declared with their ABI type parameter (`Handle<typeof PoolAbi>`), otherwise calls are untyped. The ABI is referenced twice (in `@Protocol` config and in the erased `declare` type), so TypeScript cannot prove they agree at runtime. Compile-time Handle fixtures and Protocol tests must cover valid and invalid method calls; `@Protocol` injects exactly the keys declared by `contracts`.
 - Requires TS 5.2+ standard decorators. `experimentalDecorators` / reflect-metadata is explicitly off the table.
 - Decorator metadata is attached as symbol-keyed **marker properties** on the class and its method functions, not via `context.metadata`: `Symbol.metadata` lowering is still uneven across transpilers (esbuild, oxc), while marker properties compile identically everywhere. The registry discovers methods by walking the prototype chain for markers.
 - Toolchain constraint (verified 2026-07-06): Node's V8 does not parse stage-3 decorator syntax natively, and oxc (vite 8 / vitest 4) does not lower it — so build/run/test pipelines must transform through the esbuild family (tsup, tsx, vitest 3). Revisit when oxc ships stage-3 decorator lowering.

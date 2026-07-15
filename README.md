@@ -5,7 +5,7 @@
 Moss turns complex interactions on Monad into protocol-owned, Agent-callable Capabilities through one flow: `discover → load → action → simulate`. Moss builds and verifies unsigned transactions; it never signs or sends them.
 
 > [!WARNING]
-> Moss is alpha software and has not been audited. The architecture in this document is accepted, while the TypeScript packages and runnable examples are still being migrated to it. Do not treat the current branch as production-ready.
+> Moss is alpha software and has not been audited. Do not use it with production funds.
 
 ## Framework contract
 
@@ -53,7 +53,11 @@ pnpm lint
 pnpm test
 ```
 
-The target contracts are documented before the source migration is complete, so the old runnable examples are intentionally not advertised here.
+Runnable examples:
+
+- `pnpm --filter @themoss/example-simple-flow wrap`
+- `pnpm --filter @themoss/example-simple-flow swap`
+- [`examples/agent-swap`](./examples/agent-swap) for a separate Agent/signer flow on a local Monad fork
 
 ## Documentation
 

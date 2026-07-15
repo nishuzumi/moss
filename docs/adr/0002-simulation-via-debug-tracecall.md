@@ -2,7 +2,7 @@
 
 Monad mainnet does not implement `eth_simulateV1` (verified empirically 2026-07-06: `-32601 Method not found`), so multi-transaction simulation uses `debug_traceCall`. For each TransactionNode derived from a Capability tree, simulation obtains call/log evidence and a `prestateTracer` state diff, then merges that diff into accumulated `stateOverrides` so the next transaction executes on the resulting state. The evidence source must establish the exact interleaving of successful Events and native-value movements; if it cannot prove that total order, simulation fails rather than approximating it.
 
-The trace is raw evidence for protocol-owned Receipt parsing, not a protocol-agnostic effects summary. Reverted internal frames remain diagnostics and never enter the Change array.
+The trace is raw evidence for protocol-owned Receipt parsing. Reverted internal frames remain diagnostics and never enter the Change array.
 
 ## Evidence (Monad mainnet, 2026-07-06 through 2026-07-15)
 
@@ -24,6 +24,6 @@ Monad retains logs inside a failed child frame even though the frame reports `er
 - The default RPC endpoint is `rpc.monad.xyz` (full support, no key).
 - Monad's `debug_traceCall` **enforces sender balance** (discovered 2026-07-07: a 2-MON transfer from an underfunded address is rejected with `insufficient balance`, unlike geth's default). The simulator therefore pre-funds the transaction sender via a balance override — matching `eth_simulateV1`'s validation-off semantics. Simulation answers "what would this transaction do", not "can the account afford it"; affordability is the wallet's question at signing time.
 - When `debug_traceCall` is unavailable or cannot supply provably ordered Change evidence, simulate fails loudly — it never silently skips evidence or falls back to an approximate ordering.
-- Exact ordering is reconstructed in one recursive pass over call-frame `position` data; no generic effects accumulator, second event pass, or protocol ABI is involved.
+- Exact ordering is reconstructed in one recursive pass over call-frame `position` data; protocol ABI semantics enter only in the Receipt parser.
 - All simulation requests set an explicit, modest `gas` value; provider free tiers reject calls that fall back to the node's block-gas-limit default.
 - Trace `gasUsed` appears to report the gas limit rather than actual consumption; gas estimates go through `eth_estimateGas` separately.

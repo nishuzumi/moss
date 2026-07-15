@@ -1,6 +1,6 @@
-# Getting started with the new Moss framework
+# Getting started with Moss
 
-The architecture below is accepted. Source packages and examples are still being migrated, so this guide explains the contract without presenting stale runnable code.
+Moss exposes one framework contract from Protocol authoring through simulation and Receipt review.
 
 ## 1. Start from user intent
 

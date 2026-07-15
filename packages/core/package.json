@@ -1,7 +1,7 @@
 {
   "name": "@themoss/core",
   "version": "0.1.0",
-  "description": "Moss core package; public framework API migration in progress",
+  "description": "Moss Protocol registration, Capability, parameter, and Receipt contracts",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -19,7 +19,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "viem": "^2.54.3"
+    "viem": "^2.54.3",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

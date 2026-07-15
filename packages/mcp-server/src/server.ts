@@ -1,111 +1,97 @@
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type Address, CATEGORIES, type Plan, Registry, VERBS } from "@themoss/core";
-import { erc20MetadataSource, ercManifest } from "@themoss/erc";
-import { kuruManifest } from "@themoss/protocol-kuru";
+import {
+  type AddressValue,
+  CATEGORIES,
+  type CapabilityNode,
+  type MossRuntime,
+  type ProtocolSource,
+  Registry,
+  VERBS,
+} from "@themoss/core";
 import { createTraceSimulator, type Simulator } from "@themoss/simulator";
-import { monadRuntime, systemManifest } from "@themoss/system";
 import { z } from "zod";
 
 export interface MossServerOptions {
-  rpcUrl?: string;
-  chainId?: number;
+  runtime: MossRuntime;
+  protocols: readonly ProtocolSource[];
 }
 
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte 0x address");
-
 const hexSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, "expected 0x hex data");
+const jsonValueSchema: z.ZodType<unknown> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number(),
+    z.string(),
+    z.array(jsonValueSchema),
+    z.record(jsonValueSchema),
+  ]),
+);
 
-// The Plan travels agent-side between action and simulate (the server is
-// stateless), so simulate revalidates its whole shape here and its integrity
-// via planHash inside the simulator.
-const planSchema = z.object({
-  kind: z.literal("plan"),
-  protocol: z.string(),
-  method: z.string(),
-  verb: z.string(),
-  chainId: z.number().int(),
-  account: addressSchema,
-  intent: z.string(),
-  declaredRisk: z.array(z.string()),
-  expects: z.object({
-    out: z.array(z.object({ token: z.string(), amountMax: z.string() })).optional(),
-    in: z.array(z.object({ token: z.string(), amountMin: z.string() })).optional(),
-    approvals: z
-      .array(z.object({ token: z.string(), spender: z.string(), amountMax: z.string() }))
-      .optional(),
-    nfts: z
-      .array(
-        z.object({
-          collection: z.string(),
-          count: z.number().int(),
-          direction: z.enum(["in", "out"]),
-        }),
-      )
-      .optional(),
+const transactionSchema = z.object({
+  kind: z.literal("transaction"),
+  transaction: z.object({
+    from: addressSchema,
+    to: addressSchema,
+    data: hexSchema,
+    value: hexSchema,
   }),
-  confirms: z.array(z.string()),
-  txs: z
-    .array(z.object({ from: addressSchema, to: addressSchema, data: hexSchema, value: hexSchema }))
-    .min(1),
-  planHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
 });
+
+const capabilitySchema: z.ZodType<CapabilityNode> = z.lazy(() =>
+  z.object({
+    kind: z.literal("capability"),
+    protocol: z.string().min(1),
+    method: z.string().min(1),
+    params: jsonValueSchema,
+    receipt: z.string().min(1),
+    children: z.array(z.union([capabilitySchema, transactionSchema])),
+  }),
+) as z.ZodType<CapabilityNode>;
 
 function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-function jsonError(err: unknown) {
-  const message = err instanceof Error ? err.message : String(err);
+function jsonError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
 }
 
-/**
- * The Moss MCP server: four stateless tools over one protocol Registry.
- * discover → load → action → (for writes) simulate. Nothing here signs or
- * sends a transaction — ever.
- */
-export function createMossServer(opts: MossServerOptions = {}): {
+/** Creates the four-tool Moss MCP server. It never signs or broadcasts transactions. */
+export function createMossServer(opts: MossServerOptions): {
   server: McpServer;
   registry: Registry;
   simulator: Simulator;
 } {
-  const runtime = monadRuntime(opts);
-  const registry = new Registry(runtime, {
-    // Tokens outside the table resolve their metadata on-chain (addresses
-    // only; unknown symbols still fail loudly — ADR 0005).
-    tokenFallback: erc20MetadataSource(runtime.client),
+  const { runtime } = opts;
+  const registry = new Registry(runtime).use(...opts.protocols);
+  const simulator = createTraceSimulator(runtime, {
+    receipt: (capability, changes) => registry.parseReceipt(capability, changes),
   });
-  // The served catalog, assembled right here (ADR 0006): listing a protocol
-  // is one dependency plus one entry in this array.
-  for (const manifest of [systemManifest, ercManifest, kuruManifest]) registry.use(manifest);
-  // Observation plane: protocol-authored @Event narration + receipt checks.
-  const simulator = createTraceSimulator(runtime, { observer: registry.observer() });
-
-  // Version rides on package.json so changesets releases can't drift it.
   const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
   const server = new McpServer({ name: "moss", version });
 
   server.registerTool(
     "discover",
     {
-      title: "Discover protocol capabilities",
+      title: "Discover Protocol operations",
       description:
-        "Find on-chain capabilities (writes) and queries (reads) across Monad protocols. " +
-        "Filter by verb (the user-perspective fund action) and/or category. " +
-        "Returns coordinates {protocol, method} to pass to load/action. " +
+        "Find Monad Protocol Capabilities and Queries. Return coordinates to pass to load and action. " +
         `Verbs: ${VERBS.join(", ")}. Categories: ${CATEGORIES.join(", ")}.`,
       inputSchema: {
-        verb: z.enum(VERBS).optional().describe("User-perspective fund action to filter by"),
-        category: z.enum(CATEGORIES).optional().describe("Protocol domain to filter by"),
-        protocol: z.string().optional().describe("Exact protocol slug to filter by"),
+        verb: z.enum(VERBS).optional().describe("User-perspective write operation"),
+        category: z.enum(CATEGORIES).optional().describe("Protocol domain"),
+        protocol: z.string().optional().describe("Exact Protocol slug"),
       },
     },
     async ({ verb, category, protocol }) => {
       try {
         return json(registry.discover({ verb, category, protocol }));
-      } catch (err) {
-        return jsonError(err);
+      } catch (error) {
+        return jsonError(error);
       }
     },
   );
@@ -113,23 +99,21 @@ export function createMossServer(opts: MossServerOptions = {}): {
   server.registerTool(
     "load",
     {
-      title: "Load capability stubs",
+      title: "Load operation contracts",
       description:
-        "Fetch full calling contracts for specific coordinates: the intent template, " +
-        "each parameter's semantics (pass human-readable values — never pre-scale " +
-        "amounts to base units), and declared risk labels.",
+        "Load intent, risks, and every parameter's separate value-type schema and field description.",
       inputSchema: {
         items: z
           .array(z.object({ protocol: z.string(), method: z.string() }))
           .min(1)
-          .describe("Coordinates from discover"),
+          .describe("Coordinates returned by discover"),
       },
     },
     async ({ items }) => {
       try {
         return json(registry.load(items));
-      } catch (err) {
-        return jsonError(err);
+      } catch (error) {
+        return jsonError(error);
       }
     },
   );
@@ -137,29 +121,21 @@ export function createMossServer(opts: MossServerOptions = {}): {
   server.registerTool(
     "action",
     {
-      title: "Run a query or build a Plan",
+      title: "Run a Query or build a Capability",
       description:
-        "Execute a query (returns data immediately) or build a capability's Plan: " +
-        "UNSIGNED transactions plus the declared intent, risks, and quantified " +
-        "expectations. Moss never signs or sends. " +
-        "MANDATORY: before showing a Plan to the user or any signer, pass it to " +
-        "simulate and check the warnings.",
+        "Run a Query immediately or build an unsigned Capability tree. A Capability must be simulated before signing.",
       inputSchema: {
-        protocol: z.string().describe("Protocol slug from discover"),
-        method: z.string().describe("Method name from discover"),
-        account: addressSchema.describe("The user's address (sender of any transactions)"),
-        params: z
-          .record(z.unknown())
-          .default({})
-          .describe("Parameters per the load stub, human-readable values"),
+        protocol: z.string().describe("Protocol slug returned by discover"),
+        method: z.string().describe("Method returned by discover"),
+        account: addressSchema.describe("Address that sends the transactions"),
+        params: z.record(z.unknown()).default({}).describe("Parameters described by load"),
       },
     },
     async ({ protocol, method, account, params }) => {
       try {
-        // account passed the 0x-address regex above; narrow for the registry.
-        return json(await registry.action(protocol, method, account as Address, params));
-      } catch (err) {
-        return jsonError(err);
+        return json(await registry.action(protocol, method, account as AddressValue, params));
+      } catch (error) {
+        return jsonError(error);
       }
     },
   );
@@ -167,33 +143,27 @@ export function createMossServer(opts: MossServerOptions = {}): {
   server.registerTool(
     "simulate",
     {
-      title: "Simulate Plans and reconcile effects",
+      title: "Simulate and parse a Capability",
       description:
-        "Simulate one or more Plans in order against live Monad state (later plans " +
-        "see earlier plans' effects — use this for multi-step flows). Returns, per " +
-        "plan: the effects summary (assets out/in, approvals, recipients), gas, and " +
-        "warnings from reconciling declared expectations against actual effects. " +
-        "RULES: if any warning is present, STOP — do not hand the transactions to a " +
-        "signer; report the warnings instead. If warnings are empty, still compare " +
-        "the effects summary against what the user actually asked for (intent " +
-        "alignment) before proceeding.",
+        "Execute the Capability tree in depth-first order with debug_traceCall. Each successful transaction returns an exhaustive ordered Receipt. Any warning halts execution and must prevent signing. When there are no warnings, compare every Receipt text and outcome with the user's intent before signing.",
       inputSchema: {
-        plans: z.array(planSchema).min(1).describe("Plans exactly as returned by action"),
+        capability: capabilitySchema.describe("Capability tree returned by action"),
       },
     },
-    async ({ plans }) => {
+    async ({ capability }) => {
       try {
-        const outcome = await simulator.simulate(plans as Plan[]);
-        const ok = outcome.results.every((r) => r.warnings.length === 0);
+        const outcome = await simulator.simulate(capability);
+        const ok =
+          !outcome.halted && outcome.results.every((result) => result.warnings.length === 0);
         return json({
           ok,
           guidance: ok
-            ? "No warnings. Verify the effects match the user's intent, then the unsigned transactions may be handed to the signer."
-            : "WARNINGS PRESENT — do not sign. Report the warnings to the user.",
+            ? "Compare every ordered Receipt with the user's intent before handing transactions to a signer."
+            : "Stop. Do not sign; report the warning and failed transaction.",
           ...outcome,
         });
-      } catch (err) {
-        return jsonError(err);
+      } catch (error) {
+        return jsonError(error);
       }
     },
   );

@@ -1,7 +1,7 @@
 {
   "name": "@themoss/system",
   "version": "0.1.0",
-  "description": "Moss Monad system package; runtime API migration in progress",
+  "description": "Monad mainnet runtime, canonical addresses, and system Protocols for Moss",
   "license": "MIT",
   "type": "module",
   "exports": {

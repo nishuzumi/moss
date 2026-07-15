@@ -21,6 +21,10 @@ export interface TraceLog {
   address: Address;
   topics: Hex[];
   data: Hex;
+  /** Number of child calls completed before this log was emitted. */
+  position?: number | Hex;
+  /** Transaction-global log order supplied by Monad's callTracer. */
+  index?: number | Hex;
 }
 
 export interface AccountDiff {
@@ -98,7 +102,7 @@ async function traceCall<T>(
   }
 }
 
-/** Call tree + event logs: the raw material for effects extraction. */
+/** Call tree plus logs: the raw evidence used to extract ordered Changes. */
 export function traceWithCalls(
   client: PublicClient,
   rpcUrl: string,

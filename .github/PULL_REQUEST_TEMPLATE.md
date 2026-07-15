@@ -1,27 +1,21 @@
-## What & why
+## Motivation
 
-<!-- What does this PR change, and what problem does it solve? Link the issue if there is one. -->
+<!-- What user or Protocol problem does this solve? -->
 
-## Type of change
+## Framework impact
 
-- [ ] New protocol adapter / capability / query
-- [ ] Core / MCP server change
-- [ ] Docs / examples
-- [ ] Bugfix
+<!-- Public contracts, package boundaries, Capability tree, Change/Receipt behavior. -->
 
-## Checklist
+## Verification
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm build && pnpm test` passes locally
-- [ ] Includes a changeset (`pnpm changeset`) if user-facing
+- [ ] Every Capability owns exactly one direct TransactionNode and one typed Receipt
+- [ ] Every parameter separates its context-free Zod type from its field description
+- [ ] Receipt tests retain every original Change object in exact length and order
+- [ ] Positive and `@ts-expect-error` fixtures cover exported type behavior
+- [ ] Fixed addresses and ABIs have provenance and verification
+- [ ] `pnpm build`
+- [ ] `pnpm typecheck`
+- [ ] `pnpm lint`
+- [ ] `pnpm test`
 
-### For new capabilities (required)
-
-- [ ] `intent`, `params` (semantic types), and `risk` labels are all declared
-- [ ] The Plan declares `expects` (funds out / in, approvals) built from decoded params
-- [ ] Discoverable & loadable: shows up in `discover` and `load` output
-- [ ] A reproducible example or e2e test runs `discover → load → action → simulate` against Monad mainnet
-- [ ] Simulation produces no warnings for the happy path
-
-## Evidence
-
-<!-- Test output, simulate effects summary, or a short recording. -->
+<!-- Include relevant test output and, for live behavior, ordered Receipt outcomes. -->

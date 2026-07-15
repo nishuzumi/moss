@@ -1,6 +1,6 @@
 # Moss Protocol package template
 
-This package is being migrated to the accepted self-describing Protocol contract. Copy it only after its source matches the checklist below.
+Copy this package when starting a Protocol integration, then replace every `CHANGEME` marker.
 
 ## Checklist
 

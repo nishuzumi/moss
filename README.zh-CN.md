@@ -5,7 +5,7 @@
 Moss 把 Monad 上复杂的协议交互变成协议自己维护、Agent 可调用的 Capability，统一流程为 `discover → load → action → simulate`。Moss 只构建和验证未签名交易，永不签名、永不发送。
 
 > [!WARNING]
-> Moss 仍是未经审计的 Alpha 软件。本文描述的架构已经确认，但 TypeScript 包与可运行示例还在迁移中；当前分支不能作为生产版本使用。
+> Moss 仍是未经审计的 Alpha 软件，请勿用于生产资金。
 
 ## 框架契约
 
@@ -53,7 +53,11 @@ pnpm lint
 pnpm test
 ```
 
-目标契约先于源码迁移完成，因此这里不再宣传旧的可运行示例。
+可运行示例：
+
+- `pnpm --filter @themoss/example-simple-flow wrap`
+- `pnpm --filter @themoss/example-simple-flow swap`
+- [`examples/agent-swap`](./examples/agent-swap)：在 Monad 本地 fork 上分离 Agent 与签名方
 
 ## 文档
 

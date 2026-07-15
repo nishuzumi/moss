@@ -1,14 +1,14 @@
 # MCP tool contracts
 
-This document describes the accepted Moss MCP contract. The TypeScript server is still being migrated to it.
+The Moss MCP server exposes exactly four tools and never signs or sends.
 
-The server exposes exactly four tools and never signs or sends. Its composition root receives one Monad Runtime and the selected Protocol module namespaces. `MOSS_RPC_URL` may choose the endpoint; chain ID is not configurable and must resolve to `143`.
+Its composition root receives one Monad Runtime and the selected Protocol module namespaces. `MOSS_RPC_URL` may choose the endpoint; chain ID is not configurable and must resolve to `143`.
 
 All values crossing MCP are JSON-safe. Chain quantities use decimal strings.
 
 ## discover
 
-Find Protocol methods by optional verb, category, tags, or coordinates. Results identify the Protocol, method, whether it is a Capability or Query, and enough metadata to choose what to load.
+Find Protocol methods by optional verb, category, or Protocol slug. Results identify the Protocol, method, whether it is a Capability or Query, and enough metadata to choose what to load.
 
 ## load
 
@@ -71,4 +71,4 @@ A reverted transaction returns no Receipt. Earlier Receipts remain available, th
 
 ## Warnings
 
-Warnings include transaction reverts, unavailable or unordered trace evidence, Receipt parse failures, missing Outcomes, and incomplete or reordered Change coverage. Every Warning halts the flow; there is no warning-suppression or semantic-matcher stage.
+Warnings include transaction reverts, unavailable or unordered trace evidence, state-chaining failure, Receipt parse failures, missing Outcomes, and incomplete or reordered Change coverage. Every Warning halts the flow; there is no warning-suppression or semantic-matcher stage.

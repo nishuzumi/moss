@@ -1,6 +1,6 @@
 # Moss documentation
 
-The accepted architecture is documented here while the TypeScript migration is in progress.
+The framework contract and its decisions are documented here.
 
 - [Overview](../README.md)
 - [Getting started](./getting-started.md) ([中文](./getting-started.zh-CN.md))

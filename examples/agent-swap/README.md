@@ -1,13 +1,12 @@
 # Agent swap example
 
-This example is temporarily unavailable while its source migrates to the accepted Capability-tree and Receipt contracts. Do not use its current TypeScript files as API documentation.
+This example keeps planning/simulation and signing in separate processes:
 
-The migrated example must demonstrate one end-to-end boundary:
+1. `pnpm --filter @themoss/example-agent-swap fork`
+2. `pnpm --filter @themoss/example-agent-swap swap -- verified-capability.json`
+3. Review the Capability and the ordered Receipt printed by step 2.
+4. `pnpm --filter @themoss/example-agent-swap wallet -- send verified-capability.json`
 
-1. an Agent records the user's swap intent;
-2. `discover`, `load`, and `action` return one root Capability tree;
-3. `simulate` returns ordered structured Receipts with zero Warnings;
-4. the Agent aligns Receipt Outcomes with the user's words;
-5. a separate local-fork wallet receives only the verified unsigned transactions and remains the sole signer.
+`swap` loads Kuru, records the requested assets, amount, slippage, and sender, builds one Capability tree, simulates every transaction, rejects any Warning, and compares the final structured Receipt outcome with that intent before writing the unsigned tree. Receipt text is displayed for review but is not used as evidence. `wallet` owns the public local-fork development key, validates the tree and sender, and is the only process that signs or sends.
 
-Moss must never receive a private key or send a transaction. The example will be re-enabled only after the new public contracts, simulator checks, and wallet handoff compile together.
+Never use the included development key on a public network.

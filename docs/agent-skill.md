@@ -1,6 +1,6 @@
 # Agent safety rules for Moss
 
-These rules describe the accepted MCP contract while the implementation migration is in progress.
+These rules apply to every Agent that uses the Moss MCP tools.
 
 ## Required flow
 
