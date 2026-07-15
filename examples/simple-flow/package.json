@@ -6,6 +6,7 @@
   "scripts": {
     "wrap": "tsx src/wmon-wrap.ts",
     "swap": "tsx src/kuru-swap.ts",
+    "combined": "tsx src/combined-flow.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"examples are exercised by e2e tests in packages\" && exit 0",
     "build": "echo \"examples are not built\" && exit 0"
@@ -16,9 +17,11 @@
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
+    "chalk": "^5.4.1",
     "viem": "^2.54.3"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "~5.9.0"
   }

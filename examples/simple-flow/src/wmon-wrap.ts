@@ -1,55 +1,103 @@
-/**
- * The canonical Moss flow, end to end, against Monad mainnet — with ZERO
- * funds and ZERO keys. Moss never signs and never sends; everything up to
- * and including simulation is free.
- *
- *   discover → load → action (build Plan) → simulate → reconcile
- *
- * Run:  pnpm --filter @themoss/example-simple-flow wrap
- */
 import { type Plan, Registry } from "@themoss/core";
 import { ercManifest } from "@themoss/erc";
 import { kuruManifest } from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
 import { monadRuntime, systemManifest } from "@themoss/system";
+import { log, formatAmount } from "./utils/logger.js";
+import { handleError, validateAmount } from "./utils/error-handler.js";
+import { parseArgs, getAmount, getAccount } from "./utils/args.js";
 
-const ACCOUNT = (process.env.MOSS_ACCOUNT ??
-  "0xCcCccCCCcCCcccCcCccccCcCCCCcccccCcCCcCcC") as `0x${string}`;
+const args = parseArgs();
+const AMOUNT = getAmount(args, "1.5");
+const ACCOUNT = (getAccount(args) as `0x${string}`);
 
-const runtime = monadRuntime({ rpcUrl: process.env.MOSS_RPC_URL });
-const registry = new Registry(runtime);
-for (const manifest of [systemManifest, ercManifest, kuruManifest]) registry.use(manifest);
-const simulator = createTraceSimulator(runtime);
+log.section("Moss Demo: WMON Wrap");
+log.info(`Parameters: amount=${AMOUNT}, account=${ACCOUNT.slice(0, 10)}...`);
+log.divider();
 
-// 1. discover — what can wrap funds around here?
-const found = registry.discover({ verb: "wrap" });
-console.log("1. discover(verb: wrap) →", found);
+try {
+  validateAmount(AMOUNT);
+  const runtime = monadRuntime({ rpcUrl: process.env.MOSS_RPC_URL });
+  const registry = new Registry(runtime);
+  for (const manifest of [systemManifest, ercManifest, kuruManifest])
+    registry.use(manifest);
+  const simulator = createTraceSimulator(runtime);
 
-// 2. load — how do I call it correctly?
-const [stub] = registry.load([{ protocol: "wmon", method: "wrap" }]);
-console.log("\n2. load →", stub);
+  log.step(1, "Discovering wrap capabilities...");
+  const found = registry.discover({ verb: "wrap" });
+  if (found.length === 0) {
+    log.error("No wrap capability found");
+    process.exit(1);
+  }
+  log.table(found.map((f) => ({ protocol: f.protocol, method: f.method, summary: f.summary })));
 
-// 3. action — build the Plan. Note the human-readable amount: semantic types
-//    scale it; agents never touch base units.
-const plan = (await registry.action("wmon", "wrap", ACCOUNT, { amount: "1.5" })) as Plan;
-console.log("\n3. action → Plan");
-console.log("   intent:  ", plan.intent);
-console.log("   risk:    ", plan.declaredRisk.join(", "));
-console.log("   expects: ", JSON.stringify(plan.expects));
-console.log("   txs:     ", plan.txs);
+  log.step(2, "Loading wmon.wrap capability...");
+  const stubs = registry.load([{ protocol: "wmon", method: "wrap" }]);
+  const stub = stubs[0];
+  if (!stub) {
+    log.error("Failed to load wmon.wrap capability");
+    process.exit(1);
+  }
+  log.table([
+    {
+      intent: stub.intent,
+      risk: stub.risk.join(", "),
+      params: Object.keys(stub.params).join(", "),
+    },
+  ]);
 
-// 4. simulate — the gate that turns "declared" into "verified".
-const { results } = await simulator.simulate([plan]);
-const [result] = results;
-console.log("\n4. simulate →");
-console.log("   reverted:", result?.reverted);
-console.log("   effects: ", JSON.stringify(result?.effects, null, 2));
-console.log("   warnings:", result?.warnings);
+  log.step(3, `Building Plan: Wrap ${AMOUNT} MON into WMON...`);
+  const plan = (await registry.action("wmon", "wrap", ACCOUNT, {
+    amount: AMOUNT,
+  })) as Plan;
+  log.info(`Intent: ${plan.intent}`);
+  log.info(`Risk: ${plan.declaredRisk.join(", ")}`);
+  log.info(`Expects: ${JSON.stringify(plan.expects, null, 2)}`);
+  log.info(`Transactions: ${plan.txs.length}`);
+  for (const tx of plan.txs) {
+    log.info(`  - To: ${tx.to} (value: ${formatAmount(tx.value ?? "0")} MON)`);
+  }
 
-// 5. the rule every agent must follow:
-if (result && result.warnings.length === 0) {
-  console.log("\n✓ No warnings — the unsigned txs may be handed to a wallet for review.");
-} else {
-  console.log("\n✗ Warnings present — STOP. Never hand these txs to a signer.");
-  process.exitCode = 1;
+  log.step(4, "Simulating on Monad mainnet...");
+  const { results } = await simulator.simulate([plan]);
+  const [result] = results;
+
+  if (!result) {
+    log.error("No simulation result returned");
+    process.exit(1);
+  }
+
+  log.table([
+    {
+      reverted: result.reverted ? "Yes" : "No",
+      assetsOut: result.effects.assetsOut
+        .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+        .join(", "),
+      assetsIn: result.effects.assetsIn
+        .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+        .join(", "),
+      warnings: result.warnings.length === 0 ? "None" : `${result.warnings.length} warning(s)`,
+    },
+  ]);
+
+  if (result.reverted) {
+    log.error("Transaction reverted during simulation");
+    process.exit(1);
+  }
+
+  if (result.warnings.length === 0) {
+    log.section("SUCCESS");
+    log.success("No warnings detected — the unsigned txs may be handed to a wallet for review.");
+    log.divider();
+  } else {
+    log.section("WARNING");
+    log.warning("Warnings present — STOP. Never hand these txs to a signer.");
+    for (const warning of result.warnings) {
+      log.warning(`  - ${warning}`);
+    }
+    log.divider();
+    process.exit(1);
+  }
+} catch (error) {
+  handleError(error, "WMON Wrap Demo Failed");
 }
