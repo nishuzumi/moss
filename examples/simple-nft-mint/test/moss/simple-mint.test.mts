@@ -1,6 +1,6 @@
 import { type MossRuntime, NATIVE, type Plan } from "@themoss/core";
 import { describe, expect, it } from "vitest";
-import { buildMintPlan } from "../src/simple-mint.js";
+import { buildMintPlan } from "../../src/simple-mint.mjs";
 
 const ACCOUNT = "0xcccccccccccccccccccccccccccccccccccccccc";
 const COLLECTION = "0x1111111111111111111111111111111111111111";

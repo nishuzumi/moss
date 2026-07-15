@@ -29,6 +29,9 @@ const config: HardhatUserConfig = {
       chainId: 10143,
     },
   },
+  paths: {
+    tests: "test/hardhat",
+  },
   sourcify: {
     enabled: true,
     apiUrl: "https://sourcify-api-monad.blockvision.org",

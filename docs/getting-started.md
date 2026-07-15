@@ -171,7 +171,56 @@ Two experiments worth running:
 **Go deeper:** [mcp-tools.md](./mcp-tools.md#simulate) — warning codes ·
 [ADR 0002](./adr/0002-simulation-via-debug-tracecall.md) — why debug_traceCall
 
-## 6. observations — protocol receipts
+## 6. Try NFT mint on Monad testnet
+
+The swap examples use already-deployed protocols. For NFT minting, the repo
+also includes a self-contained testnet flow that first deploys an
+OpenZeppelin ERC-721 demo collection, then drives Moss against it:
+
+```text
+deploy contract → discover → load → mintPrice → action → simulate
+```
+
+The example lives in [`examples/simple-nft-mint`](../examples/simple-nft-mint/README.md).
+Its contract exposes the adapter surface:
+
+```solidity
+function mintPrice() external view returns (uint256);
+function mint(address to, string memory uri) external payable returns (uint256 tokenId);
+```
+
+Run the local checks:
+
+```bash
+pnpm --filter @themoss/example-simple-nft-mint compile
+pnpm --filter @themoss/example-simple-nft-mint test
+```
+
+To deploy your own copy, create `examples/simple-nft-mint/.env` from the
+example file, set a Monad testnet private key, then run:
+
+```bash
+pnpm --filter @themoss/example-simple-nft-mint deploy:testnet
+```
+
+The deploy script prints the address and a ready-to-run Moss command. You can
+also use the known demo deployment:
+
+```bash
+MOSS_COLLECTION=0x642BD034244cEEE44B3d371Fb7e6EB73EE921909 \
+MOSS_TOKEN_URI=ipfs://example-token \
+MOSS_RPC_URL=https://testnet-rpc.monad.xyz \
+pnpm --filter @themoss/example-simple-nft-mint mint:testnet
+```
+
+The script discovers `public-mint-721`, loads its parameters, reads
+`mintPrice`, builds the unsigned Plan, then simulates it and requires
+`warnings: []`.
+
+**Go deeper:** [simple-nft-mint README](../examples/simple-nft-mint/README.md)
+· [`@themoss/protocol-nft-mint`](../packages/protocols/nft-mint/README.md)
+
+## 7. observations — protocol receipts
 
 Reconciliation speaks in token flows. Protocols can also narrate in their own
 terms. Wire the observer and simulate a swap:
@@ -196,7 +245,7 @@ tighten the outcome (via `confirms`) but can never silence a warning.
 **Go deeper:** [ADR 0008](./adr/0008-observation-plane.md) — the two-plane
 design
 
-## 7. Drive it from an agent
+## 8. Drive it from an agent
 
 Everything you just did by hand is exposed as four MCP tools. Point an MCP
 client (Claude Desktop, Claude Code, …) at the server:
@@ -220,7 +269,7 @@ rule, intent alignment) is in [agent-skill.md](./agent-skill.md).
 
 **Go deeper:** [mcp-tools.md](./mcp-tools.md) — the four tool contracts
 
-## 8. Write your own adapter
+## 9. Write your own adapter
 
 You now know everything an adapter must produce. Scaffold one:
 

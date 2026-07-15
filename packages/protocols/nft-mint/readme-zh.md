@@ -45,7 +45,7 @@ collection 地址是运行时参数。这样可以支持多个简单公开 mint 
 
 ## Monad Testnet Demo Collection
 
-已经使用 `examples/demo-nft-hardhat` 在 Monad testnet 部署了一个 demo collection：
+已经使用 `examples/simple-nft-mint` 在 Monad testnet 部署了一个 demo collection：
 
 ```text
 0x642BD034244cEEE44B3d371Fb7e6EB73EE921909
@@ -65,7 +65,7 @@ mintPrice: 10000000000000000 wei (0.01 MON)
 MOSS_COLLECTION=0x642BD034244cEEE44B3d371Fb7e6EB73EE921909 \
 MOSS_TOKEN_URI=ipfs://example-token \
 MOSS_RPC_URL=https://testnet-rpc.monad.xyz \
-pnpm --filter @themoss/example-simple-flow mint
+pnpm --filter @themoss/example-simple-nft-mint mint:testnet
 ```
 
 ## 安全模型

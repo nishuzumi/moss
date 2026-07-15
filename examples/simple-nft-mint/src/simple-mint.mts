@@ -6,9 +6,8 @@
  * supports `mint(address,string) payable` and `mintPrice()`.
  *
  * Run:
- *   MOSS_COLLECTION=0x... MOSS_TOKEN_URI=ipfs://... pnpm --filter @themoss/example-simple-flow mint
+ *   MOSS_COLLECTION=0x... MOSS_TOKEN_URI=ipfs://... pnpm --filter @themoss/example-simple-nft-mint mint:testnet
  */
-import { fileURLToPath } from "node:url";
 import { type Address, type MossRuntime, type Plan, Registry } from "@themoss/core";
 import { nftMintManifest } from "@themoss/protocol-nft-mint";
 import { createTraceSimulator } from "@themoss/simulator";
@@ -85,6 +84,9 @@ async function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main();
+if (process.argv[1]?.endsWith("simple-mint.mts")) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

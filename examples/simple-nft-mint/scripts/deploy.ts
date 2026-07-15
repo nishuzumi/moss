@@ -20,12 +20,12 @@ async function main() {
   console.log("");
   console.log("Verify:");
   console.log(
-    `pnpm --filter @themoss/example-demo-nft-hardhat verify:testnet ${address} "${name}" "${symbol}" ${mintPrice.toString()}`,
+    `pnpm --filter @themoss/example-simple-nft-mint verify:testnet ${address} "${name}" "${symbol}" ${mintPrice.toString()}`,
   );
   console.log("");
   console.log("Use with Moss simple-mint:");
   console.log(
-    `MOSS_COLLECTION=${address} MOSS_TOKEN_URI=ipfs://example-token MOSS_RPC_URL=https://testnet-rpc.monad.xyz pnpm --filter @themoss/example-simple-flow mint`,
+    `MOSS_COLLECTION=${address} MOSS_TOKEN_URI=ipfs://example-token MOSS_RPC_URL=https://testnet-rpc.monad.xyz pnpm --filter @themoss/example-simple-nft-mint mint:testnet`,
   );
 }
 

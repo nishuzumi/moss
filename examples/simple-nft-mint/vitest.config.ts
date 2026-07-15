@@ -5,6 +5,9 @@ const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
   esbuild: { target: "es2022" },
+  test: {
+    include: ["test/moss/**/*.test.mts"],
+  },
   resolve: {
     alias: {
       "@themoss/core": src("../../packages/core/src/index.ts"),

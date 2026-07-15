@@ -6,23 +6,20 @@
   "scripts": {
     "wrap": "tsx src/wmon-wrap.ts",
     "swap": "tsx src/kuru-swap.ts",
-    "mint": "tsx src/simple-mint.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "echo \"examples are exercised by e2e tests in packages\" && exit 0",
     "build": "echo \"examples are not built\" && exit 0"
   },
   "dependencies": {
     "@themoss/core": "workspace:*",
     "@themoss/erc": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
-    "@themoss/protocol-nft-mint": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
-    "typescript": "~5.9.0",
-    "vitest": "^3.2.6"
+    "typescript": "~5.9.0"
   }
 }

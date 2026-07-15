@@ -164,7 +164,55 @@ wrapped 铸毁）、每一个授权、每一个收款方。然后把现实和计
 [ADR 0002](./adr/0002-simulation-via-debug-tracecall.md) —— 为什么用
 debug_traceCall
 
-## 6. observations — 协议回执
+## 6. 在 Monad testnet 上测试 NFT mint
+
+前面的 swap 示例使用已经部署好的协议。NFT mint 示例则提供了一个完整的
+testnet 流程：先部署一个 OpenZeppelin ERC-721 demo collection，再用 Moss
+调用它：
+
+```text
+deploy contract → discover → load → mintPrice → action → simulate
+```
+
+示例位于 [`examples/simple-nft-mint`](../examples/simple-nft-mint/README.md)。
+合约暴露 adapter 需要的接口：
+
+```solidity
+function mintPrice() external view returns (uint256);
+function mint(address to, string memory uri) external payable returns (uint256 tokenId);
+```
+
+先跑本地检查：
+
+```bash
+pnpm --filter @themoss/example-simple-nft-mint compile
+pnpm --filter @themoss/example-simple-nft-mint test
+```
+
+如果要部署自己的合约，先从示例文件创建 `examples/simple-nft-mint/.env`，
+填入 Monad testnet 私钥，然后运行：
+
+```bash
+pnpm --filter @themoss/example-simple-nft-mint deploy:testnet
+```
+
+部署脚本会打印合约地址和一条可直接运行的 Moss 命令。你也可以使用已经
+部署好的 demo：
+
+```bash
+MOSS_COLLECTION=0x642BD034244cEEE44B3d371Fb7e6EB73EE921909 \
+MOSS_TOKEN_URI=ipfs://example-token \
+MOSS_RPC_URL=https://testnet-rpc.monad.xyz \
+pnpm --filter @themoss/example-simple-nft-mint mint:testnet
+```
+
+脚本会发现 `public-mint-721`、加载参数、读取 `mintPrice`、构建未签名
+Plan，然后模拟并要求 `warnings: []`。
+
+**深入阅读：** [simple-nft-mint README](../examples/simple-nft-mint/README.md)
+· [`@themoss/protocol-nft-mint`](../packages/protocols/nft-mint/README.md)
+
+## 7. observations — 协议回执
 
 对账说的是 token 流动的语言。协议还可以用自己的语言叙述。接上 observer
 再模拟一次 swap：
@@ -187,7 +235,7 @@ console.log(results[0]?.observations);
 
 **深入阅读：** [ADR 0008](./adr/0008-observation-plane.md) —— 双面制设计
 
-## 7. 让 agent 来开
+## 8. 让 agent 来开
 
 你刚才手动做的一切，都以四个 MCP 工具的形式暴露。把 MCP 客户端
 （Claude Desktop、Claude Code……）指向服务器：
@@ -211,7 +259,7 @@ discover → load → action → simulate。工具描述内嵌了安全规则；
 
 **深入阅读：** [mcp-tools.md](./mcp-tools.md) —— 四个工具的契约
 
-## 8. 写你自己的适配器
+## 9. 写你自己的适配器
 
 到这里你已经知道一个适配器要产出什么了。开始搭：
 

@@ -23,7 +23,7 @@ function mintPrice() external view returns (uint256);
 
 The adapter builds an unsigned Plan that:
 
-- calls the collection's `mint(address to)` function with the caller as `to`
+- calls the collection's `mint(address to, string uri)` function with the caller as `to`
 - reads `mintPrice()` and attaches that MON value to the transaction
 - declares `expects.out` for the maximum MON that may leave the account
 - declares `expects.nfts` for one ERC-721 NFT expected to arrive
@@ -50,7 +50,7 @@ Example action parameters:
 
 ## Monad Testnet Demo Collection
 
-A demo collection deployed from `examples/demo-nft-hardhat` is available on
+A demo collection deployed from `examples/simple-nft-mint` is available on
 Monad testnet:
 
 ```text
@@ -71,7 +71,7 @@ Use it with the simple mint example:
 MOSS_COLLECTION=0x642BD034244cEEE44B3d371Fb7e6EB73EE921909 \
 MOSS_TOKEN_URI=ipfs://example-token \
 MOSS_RPC_URL=https://testnet-rpc.monad.xyz \
-pnpm --filter @themoss/example-simple-flow mint
+pnpm --filter @themoss/example-simple-nft-mint mint:testnet
 ```
 
 ## Safety Model
