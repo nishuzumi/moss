@@ -135,6 +135,7 @@ Build must precede typecheck because workspace packages resolve generated declar
 | [Getting started](./docs/getting-started.md) ([中文](./docs/getting-started.zh-CN.md)) | Run and develop with Moss step by step |
 | [MCP tool contracts](./docs/mcp-tools.md) | Inputs and outputs of the four MCP tools |
 | [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package |
+| [Protocol roadmap](./docs/protocol-roadmap.md) | Prioritize adapter work and decide when design is needed first |
 | [Agent safety rules](./docs/agent-skill.md) | Mandatory simulation and intent-alignment rules |
 | [Agent swap example](./examples/agent-swap/README.md) | Separate Agent and signer on a local Monad fork |
 | [Architecture decisions](./docs/adr/) | Current design decisions and trade-offs |
