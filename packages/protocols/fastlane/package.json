@@ -1,12 +1,9 @@
 {
-  "name": "@themoss/mcp-server",
+  "name": "@themoss/protocol-fastlane",
   "version": "0.1.0",
-  "description": "Moss MCP server: discover / load / action / simulate over stdio",
+  "description": "Moss protocol adapter for FastLane shMONAD liquid staking on Monad",
   "license": "MIT",
   "type": "module",
-  "bin": {
-    "moss-mcp": "./dist/cli.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,19 +14,16 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts src/cli.ts --format esm --dts --sourcemap --clean --target es2022",
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@themoss/core": "workspace:*",
-    "@themoss/protocol-kuru": "workspace:*",
-    "@themoss/protocol-fastlane": "workspace:*",
-    "zod": "^3.25.0",
     "@themoss/erc": "workspace:*",
     "@themoss/system": "workspace:*",
-    "@themoss/simulator": "workspace:*"
+    "@themoss/simulator": "workspace:*",
+    "viem": "^2.54.3"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
