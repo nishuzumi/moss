@@ -51,6 +51,8 @@ export class MyProtocol {
 
 Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
 
+Injected contract and Protocol field names must be unique and must not be `runtime`, or the name of any Capability, Query, or Receipt method on the same Protocol.
+
 ## 3. Define parameter contracts
 
 Each field pairs a reusable Zod value contract with a description of that field's role.

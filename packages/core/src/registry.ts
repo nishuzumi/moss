@@ -72,6 +72,8 @@ interface Registered {
 
 export type ProtocolSource = ProtocolCtor | Record<string, unknown>;
 
+const RESERVED_INJECTION_KEYS = new Set(["constructor", "runtime"]);
+
 function configOf(value: unknown): ProtocolConfig<ProtocolDependencies> | undefined {
   if (typeof value !== "function") return undefined;
   if (!Object.hasOwn(value, PROTOCOL_META)) return undefined;
@@ -83,6 +85,27 @@ function configOf(value: unknown): ProtocolConfig<ProtocolDependencies> | undefi
 function requireMetadataText(value: unknown, path: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${path} must be a non-empty string`);
+  }
+}
+
+function validateInjectionKeys(
+  config: ProtocolConfig<ProtocolDependencies>,
+  memberNames: ReadonlySet<string>,
+): void {
+  const seen = new Set<string>();
+  for (const key of [...Object.keys(config.contracts), ...Object.keys(config.protocols ?? {})]) {
+    if (RESERVED_INJECTION_KEYS.has(key)) {
+      throw new Error(`protocol "${config.name}" injection key "${key}" is reserved`);
+    }
+    if (memberNames.has(key)) {
+      throw new Error(
+        `protocol "${config.name}" injection key "${key}" conflicts with a method or Receipt`,
+      );
+    }
+    if (seen.has(key)) {
+      throw new Error(`protocol "${config.name}" declares injection key "${key}" more than once`);
+    }
+    seen.add(key);
   }
 }
 
@@ -134,9 +157,6 @@ export class Registry {
     if (stack.includes(config.name)) {
       throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
     }
-    for (const dependency of Object.values(config.protocols ?? {})) {
-      this.register(dependency, [...stack, config.name]);
-    }
 
     const methods: Record<string, MethodMeta> = {};
     const receipts = new Set<string>();
@@ -161,6 +181,7 @@ export class Registry {
     if (Object.keys(methods).length === 0) {
       throw new Error(`protocol "${config.name}" declares no @Capability or @Query methods`);
     }
+    validateInjectionKeys(config, new Set([...Object.keys(methods), ...receipts]));
     for (const [name, meta] of Object.entries(methods)) {
       requireMetadataText(meta.spec.intent, `method "${config.name}.${name}" intent`);
       if (meta.spec.tags?.some((tag) => typeof tag !== "string" || tag.trim().length === 0)) {
@@ -194,6 +215,9 @@ export class Registry {
           `capability "${config.name}.${name}" names "${meta.spec.receipt}", which is not an @Receipt method`,
         );
       }
+    }
+    for (const dependency of Object.values(config.protocols ?? {})) {
+      this.register(dependency, [...stack, config.name]);
     }
     const receiptCtor =
       (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET] ?? ctor;

@@ -298,6 +298,71 @@ class UndescribedParameterProtocol {
   }
 }
 
+@Protocol({
+  name: "reserved-injection",
+  category: "token",
+  description: "Fixture with a reserved injected field.",
+  contracts: { runtime: { abi: VaultAbi, addr: VAULT } },
+})
+class ReservedInjectionProtocol {
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+}
+
+@Protocol({
+  name: "duplicate-injection",
+  category: "token",
+  description: "Fixture with duplicate injected field names.",
+  contracts: { approval: { abi: VaultAbi, addr: VAULT } },
+  protocols: { approval: ApprovalProtocol },
+})
+class DuplicateInjectionProtocol {
+  declare approval: ProtocolRef<ApprovalProtocol>;
+
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+}
+
+@Protocol({
+  name: "method-injection",
+  category: "token",
+  description: "Fixture whose injection key would shadow a Query method.",
+  contracts: { inspect: { abi: VaultAbi, addr: VAULT } },
+})
+class MethodInjectionProtocol {
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+}
+
+@Protocol({
+  name: "receipt-injection",
+  category: "token",
+  description: "Fixture whose injection key would shadow a Receipt method.",
+  contracts: { fixtureReceipt: { abi: VaultAbi, addr: VAULT } },
+})
+class ReceiptInjectionProtocol {
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+
+  @Receipt()
+  fixtureReceipt(changes: readonly Change[]): MossReceipt<null> {
+    return {
+      kind: "receipt",
+      outcome: null,
+      text: "fixture",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+}
+
 function receiptFor<T extends "approve" | "swap">(
   operation: T,
   changes: readonly Change[],
@@ -398,6 +463,21 @@ describe("framework core seam", () => {
     expect(() => new Registry(runtime).use(InvalidMetadataProtocol)).toThrow("non-empty string");
     expect(() => new Registry(runtime).use(UndescribedParameterProtocol)).toThrow(
       "type description",
+    );
+  });
+
+  it("rejects injected fields that would shadow runtime, methods, or Receipts", () => {
+    expect(() => new Registry(runtime).use(ReservedInjectionProtocol)).toThrow(
+      'injection key "runtime" is reserved',
+    );
+    expect(() => new Registry(runtime).use(DuplicateInjectionProtocol)).toThrow(
+      'injection key "approval" more than once',
+    );
+    expect(() => new Registry(runtime).use(MethodInjectionProtocol)).toThrow(
+      'injection key "inspect" conflicts',
+    );
+    expect(() => new Registry(runtime).use(ReceiptInjectionProtocol)).toThrow(
+      'injection key "fixtureReceipt" conflicts',
     );
   });
 
