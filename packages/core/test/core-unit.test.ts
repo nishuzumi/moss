@@ -9,6 +9,7 @@ import {
   slippageBps,
   token,
   tokenAmount,
+  uint,
 } from "../src/semantics.js";
 import { Token } from "../src/token.js";
 import { type KnownToken, TokenTable } from "../src/tokens.js";
@@ -40,6 +41,31 @@ describe("semantic types", () => {
     expect(decoded.a).toBe(USDC);
     await expect(decodeParams({ a: address }, { a: "0x123" }, ctx)).rejects.toThrow(
       'invalid parameter "a"',
+    );
+  });
+
+  it("rejects unsafe numeric uints and preserves exact decimal strings", async () => {
+    const maxSafe = Number.MAX_SAFE_INTEGER;
+    expect((await decodeParams({ id: uint }, { id: maxSafe }, ctx)).id).toBe(BigInt(maxSafe));
+
+    await expect(decodeParams({ id: uint }, { id: maxSafe + 1 }, ctx)).rejects.toThrow(
+      /unsafe integer.*decimal string/i,
+    );
+
+    expect((await decodeParams({ id: uint }, { id: "9007199254740992" }, ctx)).id).toBe(
+      9_007_199_254_740_992n,
+    );
+
+    const uint128Max = "340282366920938463463374607431768211455";
+    expect((await decodeParams({ id: uint }, { id: uint128Max }, ctx)).id).toBe(BigInt(uint128Max));
+  });
+
+  it("continues to reject negative and fractional uints", async () => {
+    await expect(decodeParams({ id: uint }, { id: -1 }, ctx)).rejects.toThrow(
+      "must be non-negative",
+    );
+    await expect(decodeParams({ id: uint }, { id: 1.5 }, ctx)).rejects.toThrow(
+      "expected an integer",
     );
   });
 

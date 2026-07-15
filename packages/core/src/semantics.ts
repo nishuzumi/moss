@@ -79,12 +79,20 @@ export const token: SemanticType<TokenRef> = {
   },
 };
 
-/** A non-negative integer (e.g. an NFT token id), as a decimal string or number. */
+/** A non-negative integer (e.g. an NFT token id), as a decimal string or safe integer number. */
 export const uint: SemanticType<bigint> = {
   describe: 'A non-negative integer (e.g. an NFT token id), as a decimal string like "42".',
   decode(value) {
     if (typeof value !== "string" && typeof value !== "number") {
       throw new Error(`expected an integer, got ${typeof value}`);
+    }
+    if (typeof value === "number") {
+      if (!Number.isInteger(value)) {
+        throw new Error(`expected an integer, got "${value}"`);
+      }
+      if (!Number.isSafeInteger(value)) {
+        throw new Error("unsafe integer number; pass large integers as a decimal string");
+      }
     }
     let n: bigint;
     try {
