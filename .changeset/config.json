@@ -10,6 +10,7 @@
       "@themoss/erc",
       "@themoss/system",
       "@themoss/protocol-kuru",
+      "@themoss/protocol-morpho",
       "@themoss/mcp-server"
     ]
   ],
