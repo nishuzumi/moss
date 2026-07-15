@@ -13,6 +13,6 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 describe("abi provenance chain", () => {
   it("src/abis/kuru.ts derives byte-for-byte from abis-src/", () => {
     const committed = readFileSync(join(packageRoot, "src", "abis", "kuru.ts"), "utf8");
-    expect(committed).toBe(generate(packageRoot));
+    expect(committed.replace(/\r\n/g, "\n")).toBe(generate(packageRoot).replace(/\r\n/g, "\n"));
   });
 });

@@ -63,6 +63,9 @@ pnpm build
 # the canonical flow: discover → load → action → simulate
 pnpm --filter @themoss/example-simple-flow wrap
 
+# cross-plan composition and generic token transfer: MON → WMON → Transfer
+pnpm --filter @themoss/example-simple-flow transfer
+
 # cross-plan composition on a live orderbook: MON → USDC → MON
 pnpm --filter @themoss/example-simple-flow swap
 ```

@@ -50,6 +50,9 @@ pnpm build
 # 标准调用流：discover → load → action → simulate
 pnpm --filter @themoss/example-simple-flow wrap
 
+# 跨 Plan 组合与通用代币转账：MON → WMON → Transfer
+pnpm --filter @themoss/example-simple-flow transfer
+
 # 跨 Plan 组合（真实订单簿）：MON → USDC → MON
 pnpm --filter @themoss/example-simple-flow swap
 ```
