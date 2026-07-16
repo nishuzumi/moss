@@ -51,18 +51,35 @@ export const BasisPoints = z
   .max(10_000)
   .describe("An integer basis-point count from 0 through 10000; 1 bps equals 0.01%.");
 
+function paramsSchema(spec: ParamsSpec) {
+  return z
+    .object(Object.fromEntries(Object.entries(spec).map(([name, field]) => [name, field.type])))
+    .strict();
+}
+
 export async function parseParams<S extends ParamsSpec>(
   spec: S,
   raw: Record<string, unknown>,
 ): Promise<InferParams<S>> {
-  const schema = z
-    .object(Object.fromEntries(Object.entries(spec).map(([name, field]) => [name, field.type])))
-    .strict();
-  const result = await schema.safeParseAsync(raw);
+  const result = await paramsSchema(spec).safeParseAsync(raw);
   if (!result.success) {
     throw new ParameterError(z.prettifyError(result.error));
   }
   return result.data as InferParams<S>;
+}
+
+export function parseBinding<S extends ParamsSpec>(
+  spec: S,
+  raw: Record<string, unknown>,
+): InferParams<S> {
+  try {
+    const result = paramsSchema(spec).safeParse(raw);
+    if (!result.success) throw new TypeError(`invalid binding: ${z.prettifyError(result.error)}`);
+    return result.data as InferParams<S>;
+  } catch (error) {
+    if (error instanceof TypeError && error.message.startsWith("invalid binding:")) throw error;
+    throw new TypeError("invalid binding: binding schemas must be synchronous", { cause: error });
+  }
 }
 
 export function describeParams(

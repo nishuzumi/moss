@@ -52,6 +52,7 @@ export interface CapabilityNode {
   kind: "capability";
   protocol: string;
   method: string;
+  binding?: JsonSafeValue;
   params: JsonSafeValue;
   children: readonly (CapabilityNode | TransactionNode)[];
 }
@@ -73,6 +74,36 @@ export type ProtocolRef<T> = {
         : (params: Params) => Promise<Awaited<Result>>
     : never;
 };
+
+type ReceiptNames<T> = {
+  [K in keyof T]: T[K] extends (...args: infer _Args) => infer Result
+    ? Result extends Receipt
+      ? K
+      : never
+    : never;
+}[keyof T];
+
+export type ReceiptRef<T> = Pick<T, Extract<ReceiptNames<T>, keyof T>>;
+export type BoundProtocolRef<T> = Omit<ProtocolRef<T>, ReceiptNames<T>>;
+
+export const PROTOCOL_FACTORY_TARGET: unique symbol = Symbol.for("moss.protocol.factory");
+declare const PROTOCOL_FACTORY_BINDING: unique symbol;
+
+export interface ProtocolFactorySource<
+  Protocol extends object = object,
+  Binding extends object = object,
+> {
+  readonly [PROTOCOL_FACTORY_TARGET]: new () => Protocol;
+  readonly [PROTOCOL_FACTORY_BINDING]?: Binding;
+}
+
+export type ProtocolFactory<Source extends ProtocolFactorySource> =
+  Source extends ProtocolFactorySource<infer Protocol, infer Binding>
+    ? {
+        create(binding: Binding): BoundProtocolRef<Protocol>;
+        receipts: ReceiptRef<Protocol>;
+      }
+    : never;
 
 export type Change =
   | {

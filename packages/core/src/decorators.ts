@@ -8,11 +8,14 @@ import type {
   Category,
   Change,
   JsonSafeValue,
+  ProtocolFactory,
+  ProtocolFactorySource,
   ProtocolRef,
   Receipt as ReceiptResult,
   RiskLabel,
   Verb,
 } from "./types.js";
+import { PROTOCOL_FACTORY_TARGET } from "./types.js";
 
 export interface ContractConfig {
   abi: Abi;
@@ -20,16 +23,30 @@ export interface ContractConfig {
 }
 
 export type ProtocolCtor = new () => object;
-export type ProtocolDependencies = Record<string, ProtocolCtor>;
+export type ProtocolDependency = ProtocolCtor | ProtocolFactorySource;
+export type ProtocolDependencies = Record<string, ProtocolDependency>;
 type InjectedProtocols<Dependencies extends ProtocolDependencies> = {
-  [K in keyof Dependencies]: ProtocolRef<InstanceType<Dependencies[K]>>;
+  [K in keyof Dependencies]: Dependencies[K] extends ProtocolCtor
+    ? ProtocolRef<InstanceType<Dependencies[K]>>
+    : Dependencies[K] extends ProtocolFactorySource
+      ? ProtocolFactory<Dependencies[K]>
+      : never;
 };
 
-export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Record<never, never>> {
+export interface ProtocolBinding<Binding extends ParamsSpec = ParamsSpec> {
+  params: Binding;
+  contracts: (binding: InferParams<Binding>) => Record<string, ContractConfig>;
+}
+
+export interface ProtocolConfig<
+  Dependencies extends ProtocolDependencies = Record<never, never>,
+  Binding extends ParamsSpec = ParamsSpec,
+> {
   name: string;
   category: Category;
   description: string;
   contracts: Record<string, ContractConfig>;
+  binding?: ProtocolBinding<Binding>;
   protocols?: Dependencies;
 }
 
@@ -64,9 +81,10 @@ export const PROTOCOL_TARGET = Symbol.for("moss.protocol.target");
 export const METHOD_META = Symbol.for("moss.method");
 export const RECEIPT_META = Symbol.for("moss.receipt");
 
-export function Protocol<Dependencies extends ProtocolDependencies = Record<never, never>>(
-  config: ProtocolConfig<Dependencies>,
-) {
+export function Protocol<
+  Dependencies extends ProtocolDependencies = Record<never, never>,
+  Binding extends ParamsSpec = ParamsSpec,
+>(config: ProtocolConfig<Dependencies, Binding>) {
   if (!/^[a-z][a-z0-9-]*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
   }
@@ -79,15 +97,43 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
     const injected = class extends Base {
       constructor(...args: unknown[]) {
         super();
-        const [runtime, account, dependencies = {}] = args as [
+        const [runtime, account, dependencies = {}, binding] = args as [
           MossRuntime,
           Address,
           Record<string, object>?,
+          InferParams<Binding>?,
         ];
         if (!runtime?.client || !account) {
           throw new Error(`protocol "${config.name}" must be constructed by Registry`);
         }
-        for (const [key, contract] of Object.entries(config.contracts)) {
+        if (config.binding && binding === undefined) {
+          throw new Error(`protocol "${config.name}" requires a binding`);
+        }
+        if (!config.binding && binding !== undefined) {
+          throw new Error(`protocol "${config.name}" does not accept a binding`);
+        }
+        const dynamicContracts = config.binding?.contracts(binding as InferParams<Binding>);
+        if (
+          dynamicContracts &&
+          typeof (dynamicContracts as unknown as { then?: unknown }).then === "function"
+        ) {
+          throw new Error(`protocol "${config.name}" binding contracts must be synchronous`);
+        }
+        if (
+          dynamicContracts !== undefined &&
+          (typeof dynamicContracts !== "object" || dynamicContracts === null)
+        ) {
+          throw new Error(`protocol "${config.name}" binding contracts must return an object`);
+        }
+        for (const key of Object.keys(dynamicContracts ?? {})) {
+          if (Object.hasOwn(config.contracts, key)) {
+            throw new Error(`protocol "${config.name}" declares contract "${key}" twice`);
+          }
+        }
+        for (const [key, contract] of Object.entries({
+          ...config.contracts,
+          ...dynamicContracts,
+        })) {
           Object.defineProperty(this, key, {
             value: createHandle(contract.abi, contract.addr, runtime.client, account),
             writable: false,
@@ -108,6 +154,20 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
     Object.defineProperty(injected, PROTOCOL_TARGET, { value: target });
     return injected as unknown as T;
   };
+}
+
+export function protocolFactory<ProtocolInstance extends object, Binding extends ParamsSpec>(
+  ctor: new () => ProtocolInstance,
+  binding: Binding,
+): ProtocolFactorySource<ProtocolInstance, InferParams<Binding>> {
+  const config = (ctor as unknown as Record<symbol, ProtocolConfig | undefined>)[PROTOCOL_META];
+  if (!config) throw new Error(`${ctor.name} is not decorated with @Protocol`);
+  if (config.binding?.params !== binding) {
+    throw new Error(`protocol "${config.name}" factory must use its declared binding schema`);
+  }
+  return Object.freeze({
+    [PROTOCOL_FACTORY_TARGET]: ctor,
+  }) as ProtocolFactorySource<ProtocolInstance, InferParams<Binding>>;
 }
 
 function recordMethod(

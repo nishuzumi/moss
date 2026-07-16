@@ -6,11 +6,18 @@ import {
   type ProtocolConfig,
   type ProtocolCtor,
   type ProtocolDependencies,
+  type ProtocolDependency,
   RECEIPT_META,
 } from "./decorators.js";
 import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
 import type { MossRuntime } from "./runtime.js";
-import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
+import {
+  describeParams,
+  type ParamsSpec,
+  parameterTypeDescription,
+  parseBinding,
+  parseParams,
+} from "./semantics.js";
 import type {
   Address,
   CapabilityNode,
@@ -22,7 +29,13 @@ import type {
   RiskLabel,
   Verb,
 } from "./types.js";
-import { CATEGORIES, RISK_LABELS, VERBS } from "./types.js";
+import {
+  CATEGORIES,
+  PROTOCOL_FACTORY_TARGET,
+  type ProtocolFactorySource,
+  RISK_LABELS,
+  VERBS,
+} from "./types.js";
 
 export interface ActionCtx {
   account: Address;
@@ -52,6 +65,7 @@ export interface Stub {
   category: Category;
   risk: RiskLabel[];
   tags: string[];
+  binding?: Record<string, LoadedParameter>;
   params: Record<string, LoadedParameter>;
 }
 
@@ -82,9 +96,27 @@ function configOf(value: unknown): ProtocolConfig<ProtocolDependencies> | undefi
   ];
 }
 
+function isFactorySource(value: ProtocolDependency): value is ProtocolFactorySource {
+  return typeof value === "object" && Object.hasOwn(value, PROTOCOL_FACTORY_TARGET);
+}
+
+function dependencyCtor(value: ProtocolDependency): ProtocolCtor {
+  return isFactorySource(value) ? value[PROTOCOL_FACTORY_TARGET] : value;
+}
+
 function requireMetadataText(value: unknown, path: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${path} must be a non-empty string`);
+  }
+}
+
+function validateParams(spec: ParamsSpec, path: string): void {
+  for (const [param, field] of Object.entries(spec)) {
+    requireMetadataText(field.description, `${path}.${param} description`);
+    if (!field.type || typeof field.type.safeParseAsync !== "function") {
+      throw new Error(`${path}.${param} has an invalid type`);
+    }
+    requireMetadataText(parameterTypeDescription(field.type), `${path}.${param} type description`);
   }
 }
 
@@ -136,8 +168,23 @@ export class Registry {
     if (stack.includes(config.name)) {
       throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
     }
+    if (config.binding) {
+      validateParams(config.binding.params, `binding "${config.name}"`);
+      if (typeof config.binding.contracts !== "function") {
+        throw new Error(`protocol "${config.name}" binding contracts must be a function`);
+      }
+    }
     for (const dependency of Object.values(config.protocols ?? {})) {
-      this.register(dependency, [...stack, config.name]);
+      const dependencyConfig = configOf(dependencyCtor(dependency));
+      if (!isFactorySource(dependency) && dependencyConfig?.binding) {
+        throw new Error(
+          `parameterized protocol "${dependencyConfig.name}" must be declared with protocolFactory()`,
+        );
+      }
+      if (isFactorySource(dependency) && dependencyConfig && !dependencyConfig.binding) {
+        throw new Error(`protocol "${dependencyConfig.name}" does not declare a binding`);
+      }
+      this.register(dependencyCtor(dependency), [...stack, config.name]);
     }
 
     const methods: Record<string, MethodMeta> = {};
@@ -168,19 +215,7 @@ export class Registry {
       if (meta.spec.tags?.some((tag) => typeof tag !== "string" || tag.trim().length === 0)) {
         throw new Error(`method "${config.name}.${name}" has an invalid tag`);
       }
-      for (const [param, field] of Object.entries(meta.spec.params)) {
-        requireMetadataText(
-          field.description,
-          `parameter "${config.name}.${name}.${param}" description`,
-        );
-        if (!field.type || typeof field.type.safeParseAsync !== "function") {
-          throw new Error(`parameter "${config.name}.${name}.${param}" has an invalid type`);
-        }
-        requireMetadataText(
-          parameterTypeDescription(field.type),
-          `parameter "${config.name}.${name}.${param}" type description`,
-        );
-      }
+      validateParams(meta.spec.params, `parameter "${config.name}.${name}"`);
       if (meta.kind !== "capability") continue;
       if (!VERBS.includes(meta.spec.verb)) {
         throw new Error(`capability "${config.name}.${name}" has an invalid verb`);
@@ -238,6 +273,9 @@ export class Registry {
         category: registered.config.category,
         risk: meta.kind === "capability" ? meta.spec.risk : [],
         tags: meta.spec.tags ?? [],
+        ...(registered.config.binding
+          ? { binding: describeParams(registered.config.binding.params) }
+          : {}),
         params: describeParams(meta.spec.params),
       };
     });
@@ -248,6 +286,7 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    rawBinding?: Record<string, unknown>,
   ): Promise<QueryResult | CapabilityNode> {
     const meta = this.#get(protocol).methods[method];
     if (!meta) throw new Error(`protocol "${protocol}" has no method "${method}"`);
@@ -256,10 +295,10 @@ export class Registry {
         kind: "query",
         protocol,
         method,
-        data: await this.#runQuery(protocol, method, account, rawParams),
+        data: await this.#runQuery(protocol, method, account, rawParams, rawBinding),
       };
     }
-    return this.#buildCapability(protocol, method, account, rawParams);
+    return this.#buildCapability(protocol, method, account, rawParams, rawBinding);
   }
 
   parseReceipt(node: CapabilityNode, changes: readonly Change[]): Receipt {
@@ -279,14 +318,28 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    rawBinding?: Record<string, unknown>,
   ): Promise<CapabilityNode> {
     const registered = this.#get(protocol);
     const meta = registered.methods[method];
     if (meta?.kind !== "capability") {
       throw new Error(`"${protocol}.${method}" is not a Capability`);
     }
+    const binding = this.#parseBinding(protocol, rawBinding);
     const params = await parseParams(meta.spec.params, rawParams);
-    const instance = this.#instantiate(protocol, account);
+    const instance = this.#instantiate(protocol, account, binding);
+    return this.#invokeCapability(protocol, method, meta, account, params, instance, binding);
+  }
+
+  async #invokeCapability(
+    protocol: string,
+    method: string,
+    meta: Extract<MethodMeta, { kind: "capability" }>,
+    account: Address,
+    params: Record<string, unknown>,
+    instance: object,
+    binding?: Record<string, unknown>,
+  ): Promise<CapabilityNode> {
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
     const result = (await (instance as any)[method](params, { account } satisfies ActionCtx)) as
       | CapabilityResult
@@ -296,6 +349,7 @@ export class Registry {
       kind: "capability",
       protocol,
       method,
+      ...(binding === undefined ? {} : { binding: toJsonSafe(binding) }),
       params: toJsonSafe(params),
       children,
     };
@@ -308,14 +362,42 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    rawBinding?: Record<string, unknown>,
   ): Promise<JsonSafeValue> {
     const registered = this.#get(protocol);
     const meta = registered.methods[method];
     if (meta?.kind !== "query") throw new Error(`"${protocol}.${method}" is not a Query`);
+    const binding = this.#parseBinding(protocol, rawBinding);
     const params = await parseParams(meta.spec.params, rawParams);
-    const instance = this.#instantiate(protocol, account);
+    const instance = this.#instantiate(protocol, account, binding);
+    return this.#invokeQuery(method, account, params, instance);
+  }
+
+  async #invokeQuery(
+    method: string,
+    account: Address,
+    params: Record<string, unknown>,
+    instance: object,
+  ): Promise<JsonSafeValue> {
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
     return toJsonSafe(await (instance as any)[method](params, { account } satisfies ActionCtx));
+  }
+
+  #parseBinding(
+    protocol: string,
+    rawBinding?: Record<string, unknown>,
+  ): Record<string, unknown> | undefined {
+    const binding = this.#get(protocol).config.binding;
+    if (!binding) {
+      if (rawBinding !== undefined) {
+        throw new TypeError(`invalid binding: protocol "${protocol}" does not accept one`);
+      }
+      return undefined;
+    }
+    if (rawBinding === undefined) {
+      throw new TypeError(`invalid binding: protocol "${protocol}" requires one`);
+    }
+    return parseBinding(binding.params, rawBinding);
   }
 
   #runReceipt(protocol: string, receiptName: string, changes: readonly Change[]): Receipt {
@@ -335,31 +417,39 @@ export class Registry {
     const ReceiptCtor = registered.receiptCtor as unknown as new () => object;
     const instance = new ReceiptCtor();
     for (const [key, dependency] of Object.entries(registered.config.protocols ?? {})) {
-      const name = configOf(dependency)?.name;
+      const name = configOf(dependencyCtor(dependency))?.name;
       if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
       Object.defineProperty(instance, key, {
-        value: this.#receiptDependency(name),
+        value: isFactorySource(dependency)
+          ? Object.freeze({ receipts: this.#receiptDependency(name) })
+          : this.#receiptDependency(name),
         writable: false,
       });
     }
     return instance;
   }
 
-  #instantiate(protocol: string, account: Address): object {
+  #instantiate(protocol: string, account: Address, binding?: Record<string, unknown>): object {
     const registered = this.#get(protocol);
     const dependencies = Object.fromEntries(
       Object.entries(registered.config.protocols ?? {}).map(([key, dependency]) => {
-        const name = configOf(dependency)?.name;
+        const name = configOf(dependencyCtor(dependency))?.name;
         if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
-        return [key, this.#dependency(name, account)];
+        return [
+          key,
+          isFactorySource(dependency)
+            ? this.#factoryDependency(name, account)
+            : this.#dependency(name, account),
+        ];
       }),
     );
     const Ctor = registered.ctor as unknown as new (
       runtime: MossRuntime,
       account: Address,
       dependencies: Record<string, object>,
+      binding?: Record<string, unknown>,
     ) => object;
-    return new Ctor(this.runtime, account, dependencies);
+    return new Ctor(this.runtime, account, dependencies, binding);
   }
 
   #dependency(protocol: string, account: Address): object {
@@ -377,6 +467,32 @@ export class Registry {
         this.#runReceipt(protocol, receipt, changes);
     }
     return Object.freeze(dependency);
+  }
+
+  #factoryDependency(protocol: string, account: Address): object {
+    return Object.freeze({
+      create: (rawBinding: Record<string, unknown>) => {
+        const binding = this.#parseBinding(protocol, rawBinding);
+        if (!binding) throw new Error(`protocol "${protocol}" does not declare a binding`);
+        return this.#boundReference(protocol, account, binding);
+      },
+      receipts: this.#receiptDependency(protocol),
+    });
+  }
+
+  #boundReference(protocol: string, account: Address, binding: Record<string, unknown>): object {
+    const registered = this.#get(protocol);
+    const instance = this.#instantiate(protocol, account, binding);
+    const reference: Record<string, unknown> = {};
+    for (const [method, meta] of Object.entries(registered.methods)) {
+      reference[method] = async (rawParams: Record<string, unknown>) => {
+        const params = await parseParams(meta.spec.params, rawParams);
+        return meta.kind === "capability"
+          ? this.#invokeCapability(protocol, method, meta, account, params, instance, binding)
+          : this.#invokeQuery(method, account, params, instance);
+      };
+    }
+    return Object.freeze(reference);
   }
 
   #receiptDependency(protocol: string): object {
