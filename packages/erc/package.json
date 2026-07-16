@@ -17,7 +17,7 @@
     "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "gen:abis": "wagmi generate"
+    "gen:abis": "forge build && wagmi generate"
   },
   "dependencies": {
     "@themoss/core": "workspace:*",
