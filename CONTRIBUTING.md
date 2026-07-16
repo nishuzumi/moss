@@ -1,55 +1,59 @@
 # Contributing to Moss
 
-Thanks for helping build the capability layer for agentic Monad. Contributions we're excited about, roughly in order of impact:
+`CONTEXT.md` and the current ADRs define the framework contract. Delete superseded contracts instead of extending them.
 
-1. **Protocol adapters** — new protocols, new capabilities/queries on existing ones, better metadata (parameter constraints, risk labels, cleanup steps).
-2. **Docs & examples** — tutorials, FAQ entries, runnable examples for real user needs.
-3. **Bugfixes & core improvements.**
+Useful contributions include:
+
+1. Protocol packages and new Capabilities or Queries;
+2. runnable tutorials, examples, and documentation;
+3. bug fixes, safety checks, and focused core improvements.
 
 ## Development setup
 
-Node ≥ 22 and pnpm 11 (`corepack` is no longer bundled with Node — `npm i -g pnpm` works).
+Requires Node 22 or newer and pnpm 11.
 
 ```bash
 pnpm install
-pnpm build        # build precedes typecheck: packages resolve each other's dist types
+pnpm build
 pnpm typecheck
-pnpm lint         # biome — pnpm lint:fix to auto-format
-pnpm test         # includes live e2e against Monad mainnet (free: nothing is signed/sent)
+pnpm lint
+pnpm test
 ```
 
-`MOSS_SKIP_E2E=1 pnpm test` skips the live-chain tests when offline.
+`MOSS_SKIP_E2E=1 pnpm test` skips live Monad tests when offline. Build must precede typecheck because cross-package declarations resolve through built output.
 
 Toolchain notes you shouldn't fight:
 
-- **Stage-3 decorators** are lowered by esbuild (tsup/tsx/vitest 3). Don't bump vitest to 4.x until vite's oxc transform lowers decorators, and don't enable `experimentalDecorators`. Background: [ADR 0001](./docs/adr/0001-decorator-authoring-model.md).
+- **Stage-3 decorators** are lowered by esbuild (tsup/tsx/vitest 3). Don't bump vitest to 4.x until vite's oxc transform lowers decorators. Don't enable `experimentalDecorators`. See [ADR 0001](./docs/adr/0001-decorator-authoring-model.md).
 - TypeScript is pinned to 5.9.x until tsup's dts build supports TS 6.
-- **Supply-chain guard**: `pnpm-workspace.yaml` sets `minimumReleaseAge: 1440` — dependency versions younger than one day are rejected at resolution. If you bump a dependency and pnpm refuses a just-published version, that's working as intended; take the previous release or wait a day.
+- **Supply-chain guard**: `pnpm-workspace.yaml` sets `minimumReleaseAge: 1440` — dependency versions younger than one day are rejected at resolution.
 
 ## Pull requests
 
-- Branch from `main`; conventional titles appreciated (`feat(protocols): add curvance supply`).
-- Every PR: motivation, what changed, and evidence (test output; for capabilities, a simulate effects summary).
-- User-facing changes need a changeset: `pnpm changeset`.
-- CI must pass: lint, build, typecheck, tests (including mainnet e2e).
+- Branch from `main` and explain motivation, behavior, package boundaries, and verification evidence.
+- Read `AGENTS.md`, `CONTEXT.md`, and every relevant current ADR before review.
+- User-facing package changes require a changeset.
+- Do not add compatibility for an uncommitted intermediate design. Delete replaced code and documentation.
+- Keep docs, examples, tests, and source consistent in the same change.
+- CI must pass lint, build, typecheck, and tests, including the Monad-mainnet E2E path.
 
-## Adding a protocol adapter — Definition of Done
+## Protocol Definition of Done
 
-One protocol = one package: copy [`packages/protocols/_template`](./packages/protocols/_template) and follow its checklist; full guide in [docs/protocol-onboarding.md](./docs/protocol-onboarding.md). The bar a new adapter must clear:
+- [ ] The package exports one or more top-level self-describing `@Protocol` classes. There is no separate registration object or import-time registration.
+- [ ] Protocol dependencies are declared explicitly and injected into typed instance fields. Cross-Protocol writes use injected Capabilities; reads use injected Queries.
+- [ ] Every Capability and Query parameter is `{ type, description }`: a reusable context-free Zod value contract plus a method-specific field description.
+- [ ] Generated JSON Schema shown by `load` preserves the type description separately from the field description.
+- [ ] Every Capability owns exactly one direct TransactionNode and names exactly one typed Receipt parser. Additional transactions belong to nested Capabilities.
+- [ ] Every Receipt parser is pure, receives only the immutable ordered Changes of one successful transaction, and returns a structured Outcome plus exact ordered coverage.
+- [ ] Positive and negative compile-time fixtures prove exported decorator inference, parameter inference, and Receipt-name autocomplete. Invalid usage uses `@ts-expect-error`.
+- [ ] Registry runtime checks reject invalid metadata, missing dependencies, bad Receipt bindings, and malformed Capability trees.
+- [ ] Every ABI has a documented origin and follows [ADR 0007](./docs/adr/0007-abi-origin.md). Vendored generation uses the full upstream artifact.
+- [ ] Every fixed address cites a canonical source and is checked for deployed bytecode; token constants also verify expected metadata.
+- [ ] A live Monad-mainnet simulation test proves zero Warnings and exact Receipt coverage for the happy path.
+- [ ] Adding the Protocol changes only its package and the explicit application composition root.
 
-- [ ] The package exports a **manifest** (`defineProtocolPackage`) and, to be officially listed, is added to the MCP server's `use()` array in `packages/mcp-server` ([ADR 0006](./docs/adr/0006-protocol-packages-and-manifests.md)).
-- [ ] Every ABI lives in `src/abis/` with an **ABI origin** header — compiled / explorer / vendored ([ADR 0007](./docs/adr/0007-abi-origin.md)).
-- [ ] Capabilities/queries are declared with `@Capability`/`@Query`: intent template, semantic params, risk labels, tags. Verbs are user-perspective fund semantics from the closed set — never protocol function names ([ADR 0003](./docs/adr/0003-two-tier-capability-taxonomy.md)).
-- [ ] Every capability returns `plan(steps, flows)` with **quantified expects** — what may leave (max), what must arrive (min). Approvals built via `approveStep` (from `@themoss/erc`) are auto-declared ([ADR 0004](./docs/adr/0004-quantified-expects-in-plans.md)).
-- [ ] Writes with a meaningful on-chain receipt declare it with `@Event` and gate on it via `confirms`; observations narrate, never overrule the audit plane ([ADR 0008](./docs/adr/0008-observation-plane.md)).
-- [ ] Tokens the protocol introduces are listed in `src/tokens.ts`, verified on-chain (collisions with existing symbols are rejected at registration).
-- [ ] Discoverable & loadable: shows up in `discover`/`load` output (unit test).
-- [ ] A live e2e test simulates the happy path against Monad mainnet and asserts **zero warnings**.
-- [ ] Contract addresses verified on-chain, with the verification method noted in a comment.
-- [ ] Docs: what the protocol is, supported markets/assets, parameter quirks, known risks.
-
-References: the system WMON adapter [`packages/system/src/wmon.ts`](./packages/system/src/wmon.ts) (over-commented on purpose); [`packages/protocols/kuru`](./packages/protocols/kuru) for reads-before-build and precision-unit quirks; [`packages/erc`](./packages/erc) for dynamic-address protocols and compiled ABIs.
+Start from [`packages/protocols/_template`](./packages/protocols/_template) and read [Protocol onboarding](./docs/protocol-onboarding.md).
 
 ## Reporting security issues
 
-Not in public issues — see [SECURITY.md](./SECURITY.md).
+Use GitHub private vulnerability reporting. Do not open a public issue for a vulnerability.

@@ -1,7 +1,7 @@
 {
   "name": "@themoss/simulator",
   "version": "0.1.0",
-  "description": "Moss verification engine: debug_traceCall simulation, effects extraction, expects reconciliation",
+  "description": "Moss trace simulation, ordered Change extraction, and Receipt verification",
   "license": "MIT",
   "type": "module",
   "exports": {

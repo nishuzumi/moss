@@ -1,7 +1,7 @@
 {
   "name": "@themoss/system",
   "version": "0.1.0",
-  "description": "Moss system layer for Monad: the well-known token data, chain defaults, and address-bearing system protocols",
+  "description": "Monad mainnet runtime, canonical addresses, and system Protocols for Moss",
   "license": "MIT",
   "type": "module",
   "exports": {

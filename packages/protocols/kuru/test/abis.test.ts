@@ -8,7 +8,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // The provenance chain, enforced: the committed generated TS must be exactly
 // what the deterministic generator derives from the committed abis-src/.
-// Fails on: hand-edits to src/abis/kuru.ts, allowlist edits without
+// Fails on: hand-edits to src/abis/kuru.ts, generator edits without
 // `pnpm gen:abis`, abis-src/ edits without regeneration.
 describe("abi provenance chain", () => {
   it("src/abis/kuru.ts derives byte-for-byte from abis-src/", () => {

@@ -2,204 +2,209 @@
 
 **English** | [中文](./getting-started.zh-CN.md)
 
-This guide walks you through Moss one layer at a time. You will run the full
-flow first, then open each stage up — discover, load, action, simulate,
-observations — and finish by wiring an agent and sketching your own adapter.
-Everything runs against **live Monad mainnet with zero funds and zero keys**:
-Moss never signs and never sends, and simulation is free.
+This tutorial runs Moss first, then rebuilds the flow one stage at a time. You will finish by configuring MCP and starting a Protocol package.
 
-Each step ends with **Go deeper** pointers. Skim them on the first pass; come
-back when you need the "why".
+The examples read live Monad mainnet state. They need no private key or funded account because Moss builds and simulates unsigned transactions only.
 
-## 0. Setup (5 minutes)
+## 0. Set up the repository
 
-Requires Node ≥ 22 and pnpm.
+Requires Node 22 or newer and pnpm 11.
 
 ```bash
-git clone https://github.com/nishuzumi/moss && cd moss
+git clone https://github.com/nishuzumi/moss
+cd moss
 pnpm install
 pnpm build
 ```
 
-Prove the toolchain without touching the network:
+Prove the toolchain without making RPC calls:
 
 ```bash
 MOSS_SKIP_E2E=1 pnpm test
 ```
 
-Every package's offline tests should pass. (Without the env var, the suite
-also runs live mainnet e2e — free, but it needs an RPC that supports
-`debug_traceCall`; the default `https://rpc.monad.xyz` does.)
+Build must run before typecheck because workspace packages resolve generated declarations from `dist`.
 
-## 1. Run the whole flow once
+## 1. Run the complete flow
 
 ```bash
 pnpm --filter @themoss/example-simple-flow wrap
 ```
 
-You just watched the canonical four-step flow — wrapping 1.5 MON into WMON:
+This example discovers WMON, loads its parameter contract, builds a wrap Capability, simulates it, and prints the ordered Receipt.
 
-1. `discover` found which protocol can `wrap`
-2. `load` fetched how to call it
-3. `action` built a **Plan** — unsigned transactions plus declared expectations
-4. `simulate` replayed it on real chain state and reconciled the results
+The important final check is not a success sentence. It is the combination of zero Warnings and a structured Receipt Outcome that matches the request.
 
-The last line is the point of the whole system:
+Run a Kuru example too:
 
-```
-✓ No warnings — the unsigned txs may be handed to a wallet for review.
+```bash
+pnpm --filter @themoss/example-simple-flow swap
 ```
 
-Now let's take those four steps apart. Create a scratch file to follow along
-(`examples/simple-flow/src/play.ts`, run with
-`pnpm --filter @themoss/example-simple-flow exec tsx src/play.ts`):
+It requests a MON/USDC quote, builds one swap Capability, and simulates it against the current Kuru market.
+
+## 2. Assemble Moss in a scratch file
+
+Create `examples/simple-flow/src/play.ts`:
 
 ```ts
-import { Registry } from "@themoss/core";
-import { ercManifest } from "@themoss/erc";
-import { kuruManifest } from "@themoss/protocol-kuru";
+import { NATIVE, Registry } from "@themoss/core";
+import * as erc from "@themoss/erc";
+import * as kuru from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime, systemManifest } from "@themoss/system";
+import * as system from "@themoss/system";
+import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
 
-const runtime = monadRuntime();
-const registry = new Registry(runtime);
-for (const m of [systemManifest, ercManifest, kuruManifest]) registry.use(m);
-```
-
-Note what just happened: the registry started **empty** and you chose what to
-assemble. Nothing in Moss registers itself by being imported.
-
-## 2. discover — what's on the shelf
-
-```ts
-console.log(registry.discover({ verb: "swap" }));
-```
-
-```jsonc
-[{ "protocol": "kuru", "method": "swap", "kind": "capability",
-   "verb": "swap", "category": "dex", "tags": ["clob"], "summary": "…" }]
-```
-
-Two vocabularies are at work:
-
-- **verb** — the user-perspective fund action, from a small closed set
-  (`swap`, `wrap`, `supply`, `transfer`, …). Never a protocol's function
-  name: WMON's `deposit()` is verb `wrap`.
-- **tags** — free-form long-tail semantics (`clob` tells you this DEX is an
-  orderbook, not an AMM).
-
-Try `discover({ verb: "transfer" })` — served twice, by the generic `erc20`
-protocol (any token) and the generic `erc721` protocol (any NFT collection).
-Try `discover({})` to see the whole catalog.
-
-**Go deeper:** [mcp-tools.md](./mcp-tools.md#discover) · verb/category design:
-[ADR 0003](./adr/0003-two-tier-capability-taxonomy.md)
-
-## 3. load — the calling contract
-
-```ts
-console.log(registry.load([{ protocol: "kuru", method: "swap" }]));
-```
-
-The stub tells a caller (human or agent) everything needed to call correctly:
-the intent template, each parameter's semantics, and the declared risk labels
-(`fundOut`, `approval`, `priceImpact`).
-
-Read one parameter description closely — e.g. `amount`: *"A human-decimal
-amount of the token in `tokenIn` (e.g. \"1.5\"). Do not pre-scale."* That is a
-**semantic type**: you pass `"1.5"`, and the runtime resolves the token's
-decimals and scales it. Token parameters take well-known symbols (`"MON"`,
-`"USDC"`), a `0x` address, or `"native"` — symbols resolve only through the
-curated catalog, never from on-chain names (which scam tokens spoof).
-
-**Go deeper:** semantic types: `packages/core/src/semantics.ts` · symbol
-safety: [ADR 0005](./adr/0005-curated-token-catalog.md)
-
-## 4. action — build a Plan
-
-```ts
-const ACCOUNT = "0xCcCccCCCcCCcccCcCccccCcCCCCcccccCcCCcCcC"; // any address — no keys needed
-const plan = await registry.action("kuru", "swap", ACCOUNT, {
-  tokenIn: "MON", tokenOut: "USDC", amount: "1",
+const ACCOUNT = "0xcccccccccccccccccccccccccccccccccccccccc";
+const runtime = await monadRuntime({
+  ...(process.env.MOSS_RPC_URL ? { rpcUrl: process.env.MOSS_RPC_URL } : {}),
 });
-console.log(plan.intent, plan.expects, plan.txs);
+
+const registry = new Registry(runtime).use(system, erc, kuru);
+const simulator = createTraceSimulator(runtime, {
+  receipt: (capability, changes) => registry.parseReceipt(capability, changes),
+});
 ```
 
-A **Plan** is the contract between the protocol and everyone downstream:
+Run the file after each section:
 
-- `txs` — the unsigned transactions, fully encoded (calldata, value)
-- `expects` — the quantified promise: at most 1 MON leaves (`out.amountMax`),
-  at least the quoted USDC arrives (`in.amountMin`), approvals capped
-  exactly at the spend
-- `intent` + `declaredRisk` — what the plan claims to be, in words
-- `planHash` — integrity seal over `{chainId, account, txs, expects, confirms}`
-- `confirms` — on-chain receipts this write must produce (step 6)
+```bash
+pnpm --filter @themoss/example-simple-flow exec tsx src/play.ts
+```
 
-Build the reverse swap (`tokenIn: "USDC"`) and notice `txs` now has **two**
-entries: an `approve` step appeared, and `expects.approvals` declares it —
-capped at exactly the amount spent, never unlimited.
+The composition root chooses Protocol modules. Registry scans their top-level decorated exports, ignores helpers and ABIs, and recursively registers declared Protocol dependencies.
 
-**Go deeper:** [ADR 0004](./adr/0004-quantified-expects-in-plans.md) — why
-expects are the safety contract
+## 3. Record intent before calling tools
 
-## 5. simulate — the verification gate
+For this tutorial the request is:
+
+> Swap 1 native MON into USDC on Kuru, allowing at most 0.5% slippage.
+
+Keep the operation, input asset, output asset, amount, limit, sender, and Protocol choice. Moss cannot recover the user's words from calldata later.
+
+The reusable constants are explicit identities: `NATIVE` for native MON and `USDC_ADDRESS` for the official USDC contract. User-supplied symbols are not token identity.
+
+## 4. Discover operations
+
+Append:
 
 ```ts
-const simulator = createTraceSimulator(runtime);
-const { results } = await simulator.simulate([plan]);
-console.log(results[0]?.effects, results[0]?.warnings);
+const candidates = registry.discover({ verb: "swap" });
+console.log(candidates);
 ```
 
-The simulator replays the plan's transactions on **live chain state** via
-`debug_traceCall` and extracts what actually happened — every asset flow
-(including native MON and wrapped mint/burn, which emit no Transfer events),
-every approval, every recipient. Then it reconciles reality against the
-plan's `expects`: **any undeclared difference becomes a warning**, and any
-warning means stop.
+`discover` returns small coordinates and selection metadata. It does not return a parameter schema or build a transaction.
 
-Two experiments worth running:
-
-- **Tamper with the plan** — edit `plan.txs[0].value` and simulate again:
-  `PLAN_TAMPERED`. The plan travels agent-side; integrity is re-derived, not
-  trusted.
-- **Chain plans** — pass `[sellPlan, buyBackPlan]` in one call: plan B runs
-  on plan A's simulated state, so it can spend USDC the account only holds
-  inside the simulation. That is how multi-step flows (claim → swap → supply)
-  are verified end to end. Run `pnpm --filter @themoss/example-simple-flow
-  swap` to watch a MON → USDC → MON round-trip do exactly this.
-
-**Go deeper:** [mcp-tools.md](./mcp-tools.md#simulate) — warning codes ·
-[ADR 0002](./adr/0002-simulation-via-debug-tracecall.md) — why debug_traceCall
-
-## 6. observations — protocol receipts
-
-Reconciliation speaks in token flows. Protocols can also narrate in their own
-terms. Wire the observer and simulate a swap:
+Try these filters:
 
 ```ts
-const observing = createTraceSimulator(runtime, { observer: registry.observer() });
-const { results } = await observing.simulate([plan]);
-console.log(results[0]?.observations);
-// [{ protocol: "kuru", name: "swapResult",
-//    intent: "Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)", data: {…} }]
+registry.discover({ verb: "transfer" });
+registry.discover({ category: "token" });
+registry.discover({ protocol: "kuru" });
 ```
 
-That sentence was authored by the Kuru adapter with `@Event`: after
-simulation, the plan's logs are decoded against the protocol's ABIs and
-rendered into a human receipt. Because the swap capability declares
-`confirms: ["swapResult"]`, a swap whose receipt fails to appear raises a
-`CONFIRMATION_MISSING` warning — the receipt is load-bearing.
+Verbs describe the user's operation, such as `swap`, `wrap`, or `approve`. Tags carry open-ended details such as `clob` or `orderbook`.
 
-One rule to internalize: observations are **narrative, not law**. They can
-tighten the outcome (via `confirms`) but can never silence a warning.
+## 5. Load the calling contract
 
-**Go deeper:** [ADR 0008](./adr/0008-observation-plane.md) — the two-plane
-design
+Append:
 
-## 7. Drive it from an agent
+```ts
+const [swap] = registry.load([{ protocol: "kuru", method: "swap" }]);
+console.dir(swap, { depth: null });
+```
 
-Everything you just did by hand is exposed as four MCP tools. Point an MCP
-client (Claude Desktop, Claude Code, …) at the server:
+`load` returns intent, risk labels, and each parameter's two separate descriptions:
+
+- `type` is generated JSON Schema plus a reusable value description;
+- `description` explains the field's role in this operation.
+
+For `slippage`, the type explains basis points and the valid range. The field description explains that this value limits output reduction. A value of `50` means `0.5%`.
+
+Always call `load` before `action`. Do not guess units, defaults, addresses, or field meaning from the parameter name.
+
+## 6. Run a Query
+
+Queries execute immediately and do not produce a Capability:
+
+```ts
+const quote = await registry.action("kuru", "quote", ACCOUNT, {
+  tokenIn: NATIVE,
+  tokenOut: USDC_ADDRESS,
+  amountIn: "1",
+});
+
+if (quote.kind !== "query") throw new Error("expected a Query result");
+console.log("quote", quote.data);
+```
+
+`amountIn` is a human-readable decimal string. Alternatively, supply only `amountOut` to request a minimum output. Kuru discovers current markets, compares direct and via-MON paths, and returns human-readable quote bounds.
+
+## 7. Build a Capability tree
+
+Append:
+
+```ts
+const result = await registry.action("kuru", "swap", ACCOUNT, {
+  tokenIn: NATIVE,
+  tokenOut: USDC_ADDRESS,
+  amountIn: "1",
+  slippage: 50,
+});
+
+if (result.kind !== "capability") throw new Error("expected a Capability");
+const capability = result;
+console.dir(capability, { depth: null });
+```
+
+Each Capability owns exactly one direct TransactionNode and one named Receipt parser. Core rejects zero or multiple direct transactions.
+
+An ERC-20 input swap would contain a nested ERC-20 approval Capability before the Kuru transaction. That child owns its own transaction and Receipt; execution order comes from depth-first traversal.
+
+Capability parameters stay JSON-safe. Protocol code may use bigint while constructing calldata, but serialized chain quantities use strings or hex transaction fields.
+
+## 8. Simulate and inspect Receipts
+
+Append:
+
+```ts
+const simulation = await simulator.simulate(capability);
+console.dir(simulation, { depth: null });
+
+if (simulation.halted || simulation.results.some((item) => item.warnings.length > 0)) {
+  throw new Error("simulation warning: stop before signing");
+}
+
+for (const item of simulation.results) {
+  console.log(item.receipt?.outcome);
+  console.log(item.receipt?.text);
+}
+```
+
+The simulator executes transactions in depth-first order and carries state forward. Each successful transaction produces an immutable Change list containing raw Events and native MON transfers in exact execution order.
+
+The owning Protocol parses those Changes. Core recursively checks that Receipt leaves retain the exact original Change objects, with identical length and order.
+
+A revert, trace failure, state-chaining failure, Receipt error, or coverage mismatch produces a terminal Warning. Earlier successful Receipts remain for diagnosis; later transactions do not run.
+
+## 9. Align structured Outcomes with intent
+
+Zero Warnings means every observed Change was parsed. It does not mean the result matches the user's request.
+
+For this swap, check the final structured Outcome for:
+
+- `operation === "swap"` and `protocol === "kuru"`;
+- the requested sender, `tokenIn`, and `tokenOut`;
+- an `amountIn` equal to 1 MON in base units;
+- a positive `amountOut`.
+
+Also confirm the Capability preserves `slippage: 50`. The Protocol used that value to construct the transaction's on-chain minimum-output protection.
+
+Receipt text is useful for display, but it is not evidence. Never approve a transaction only because a string contains words such as “Kuru Swap”.
+
+## 10. Use the MCP server
+
+After `pnpm build`, add this server to an MCP client:
 
 ```jsonc
 {
@@ -213,52 +218,34 @@ client (Claude Desktop, Claude Code, …) at the server:
 }
 ```
 
-Then ask the agent something like *"quote 1 MON in USDC on Monad"* and watch
-it walk discover → load → action → simulate. The tool descriptions embed the
-safety rules; the full agent-side contract (mandatory simulation, the halt
-rule, intent alignment) is in [agent-skill.md](./agent-skill.md).
+The Agent receives the same four stages as tools: `discover`, `load`, `action`, and `simulate`. MCP `simulate` returns each transaction's ordered Receipt leaf texts and Warnings; full Receipt evidence remains available through the library API. A write must pass through simulate after the final action result.
 
-**Go deeper:** [mcp-tools.md](./mcp-tools.md) — the four tool contracts
+Read [MCP tool contracts](./mcp-tools.md) for wire shapes and [Agent safety rules](./agent-skill.md) for the mandatory halt and intent-alignment rules.
 
-## 8. Write your own adapter
+## 11. Start a Protocol package
 
-You now know everything an adapter must produce. Scaffold one:
+Copy the compiling template:
 
 ```bash
-cp -r packages/protocols/_template packages/protocols/<yourprotocol>
+cp -R packages/protocols/_template packages/protocols/myprotocol
 ```
 
-The template is a real CI-built package — if you copied it, it compiles — and
-its README is a checklist. The shape you'll fill in:
+Then work in this order:
 
-1. **ABIs** with a documented origin (compiled / explorer / vendored)
-2. **`@Protocol`** — contracts + verified addresses
-3. **`@Capability`** — semantic params, quantified expects, honest risk labels
-4. **`@Event`** — the receipt your write produces, gated by `confirms`
-5. **Tests** — offline shapes + a live zero-warning e2e
+1. rename the package and replace every `CHANGEME` marker;
+2. add source-backed ABIs and verified fixed addresses;
+3. declare `@Protocol`, typed Handles, and Protocol dependencies;
+4. define Zod parameter contracts, Capabilities, Queries, and pure Receipts;
+5. add positive and negative type fixtures, failure tests, and one live happy path;
+6. export the Protocol and add it to the application composition root.
 
-Reference implementations, in reading order:
-[`packages/system/src/wmon.ts`](../packages/system/src/wmon.ts) (deliberately
-over-commented), [`packages/erc`](../packages/erc) (dynamic addresses),
-[`packages/protocols/kuru`](../packages/protocols/kuru) (reads-before-build,
-vendored ABIs, observations).
+Follow [Protocol onboarding](./protocol-onboarding.md) for the complete development and review checklist.
 
-**Go deeper:** [protocol-onboarding.md](./protocol-onboarding.md) — the full
-guide, section by section · [CONTRIBUTING.md](../CONTRIBUTING.md) — the
-Definition of Done your PR is reviewed against
+## 12. Where to go next
 
-## The map
-
-| Layer | Package | One-line charter |
-| --- | --- | --- |
-| machinery | `@themoss/core` | decorators, Plans, Registry — zero chain data |
-| verification | `@themoss/simulator` | trace simulation + effects reconciliation |
-| interfaces | `@themoss/erc` | compiled standard ABIs + address-free generic adapters (erc20, erc721) |
-| instances | `@themoss/system` | Monad token table, chain defaults, WMON |
-| protocols | `@themoss/protocol-*` | one package per protocol |
-| product | `@themoss/mcp-server` | the four tools, batteries included |
-
-Why it is layered this way: [ADR 0006](./adr/0006-protocol-packages-and-manifests.md)
-and [ADR 0009](./adr/0009-erc-interface-layer-and-composition.md). Every other
-design decision lives in [docs/adr/](./adr/); the project's vocabulary lives
-in [CONTEXT.md](../CONTEXT.md).
+- [Protocol template](../packages/protocols/_template)
+- [Kuru Protocol](../packages/protocols/kuru/src/kuru.ts)
+- [WMON Protocol](../packages/system/src/wmon.ts)
+- [Agent/signer example](../examples/agent-swap/README.md)
+- [Security model](../SECURITY.md)
+- [Architecture decisions](./adr/)

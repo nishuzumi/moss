@@ -1,190 +1,85 @@
-import { getAddress, parseUnits } from "viem";
-import { Token, type TokenSource } from "./token.js";
-import { type Address, NATIVE, type TokenRef } from "./types.js";
+import { isAddress, type Address as ViemAddress } from "viem";
+import { z } from "zod/v4";
+import { type JsonSafeValue, NATIVE, type TokenRef } from "./types.js";
 
-/**
- * Context available to a semantic type while decoding one parameter.
- * `decoded` only contains parameters declared *before* this one — contextual
- * types (e.g. an amount scaled by its sibling asset's decimals) must have
- * their dependency declared first. This ordering rule is documented in the
- * protocol onboarding guide.
- */
-export interface DecodeCtx {
-  /** Raw agent-supplied sibling arguments. */
-  args: Record<string, unknown>;
-  /** Siblings already decoded (declaration order). */
-  decoded: Record<string, unknown>;
-  /** The account the capability is being built for. */
-  account: Address;
-  /** Resolve a symbol, token address, or "native" to a Token with metadata. */
-  token: TokenSource;
+export type Address = ViemAddress;
+
+export interface ParameterDeclaration<T extends z.ZodType = z.ZodType> {
+  type: T;
+  description: string;
 }
 
-/**
- * A parameter type with two faces: `describe` is shown to agents via `load`,
- * `decode` turns the agent-supplied value into a runtime value.
- */
-export interface SemanticType<T> {
-  describe: string;
-  decode(value: unknown, ctx: DecodeCtx): T | Promise<T>;
-}
+export type ParamsSpec = Record<string, ParameterDeclaration>;
 
-// biome-ignore lint/suspicious/noExplicitAny: params spec is heterogeneous by design
-export type ParamsSpec = Record<string, SemanticType<any>>;
-
-export type DecodedParams<S extends ParamsSpec> = {
-  [K in keyof S]: S[K] extends SemanticType<infer T> ? T : never;
+export type InferParams<S extends ParamsSpec> = {
+  [K in keyof S]: z.output<S[K]["type"]>;
 };
 
-export class DecodeError extends Error {
-  constructor(
-    readonly param: string,
-    message: string,
-  ) {
-    super(`invalid parameter "${param}": ${message}`);
-    this.name = "DecodeError";
+export class ParameterError extends Error {
+  constructor(message: string) {
+    super(`invalid parameters: ${message}`);
+    this.name = "ParameterError";
   }
 }
 
-/** An EVM address, checksummed on the way in. */
-export const address: SemanticType<Address> = {
-  describe: "A 20-byte EVM address, 0x-prefixed.",
-  decode(value) {
-    if (typeof value !== "string")
-      throw new Error(`expected 0x address string, got ${typeof value}`);
-    return getAddress(value); // throws on malformed input, returns checksummed
-  },
-};
+export const Address = z
+  .string()
+  .refine((value) => isAddress(value, { strict: false }), "Expected a 20-byte 0x address.")
+  .describe(
+    "A 20-byte EVM address encoded as a 0x-prefixed hexadecimal string.",
+  ) as z.ZodType<ViemAddress>;
 
-/**
- * A token reference: a well-known symbol, an EVM address, or "native".
- * Symbols resolve ONLY against the curated catalog — never via on-chain
- * symbol() lookups, which same-symbol scam tokens would spoof (ADR 0005).
- */
-export const token: SemanticType<TokenRef> = {
-  describe:
-    "A token: a well-known symbol registered by the loaded packages, " +
-    `a 20-byte 0x address, or "${NATIVE}" for the chain's native coin.`,
-  async decode(value, ctx) {
-    if (value === NATIVE) return NATIVE;
-    if (typeof value !== "string") {
-      throw new Error(`expected a token symbol or 0x address, got ${typeof value}`);
-    }
-    if (value.startsWith("0x")) {
-      return address.decode(value, ctx) as TokenRef;
-    }
-    // Symbols resolve through the registry's token table (ctx.token throws
-    // loudly for unknown symbols — never an on-chain symbol() fallback).
-    return (await ctx.token(value)).ref;
-  },
-};
+export const TokenReference = z
+  .union([Address, z.literal(NATIVE)])
+  .describe('An EVM token address or the literal "native" for native MON.') as z.ZodType<TokenRef>;
 
-/** A non-negative integer (e.g. an NFT token id), as a decimal string or number. */
-export const uint: SemanticType<bigint> = {
-  describe: 'A non-negative integer (e.g. an NFT token id), as a decimal string like "42".',
-  decode(value) {
-    if (typeof value !== "string" && typeof value !== "number") {
-      throw new Error(`expected an integer, got ${typeof value}`);
-    }
-    let n: bigint;
-    try {
-      n = BigInt(value);
-    } catch {
-      throw new Error(`expected an integer, got "${value}"`);
-    }
-    if (n < 0n) throw new Error("must be non-negative");
-    return n;
-  },
-};
+export const PositiveDecimalString = z
+  .string()
+  .regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/, "Expected a decimal string.")
+  .refine((value) => /[1-9]/.test(value), "Expected a positive value.")
+  .describe('A positive base-10 decimal string, such as "1" or "1.5".');
 
-/**
- * A human-readable amount of the token named by the sibling parameter
- * `assetParam`. Agents pass "1.5", not pre-scaled base units — the runtime
- * scales by the token's on-chain decimals (18 for native MON).
- */
-export function tokenAmount(assetParam: string): SemanticType<bigint> {
-  return {
-    describe: `A human-decimal amount of the token in "${assetParam}" (e.g. "1.5"). Do not pre-scale; the runtime applies the token's decimals.`,
-    async decode(value, ctx) {
-      if (typeof value !== "string" && typeof value !== "number") {
-        throw new Error(`expected a decimal string like "1.5", got ${typeof value}`);
-      }
-      const asset = ctx.decoded[assetParam] ?? ctx.args[assetParam];
-      if (asset === undefined) {
-        throw new Error(`references sibling parameter "${assetParam}", which is missing`);
-      }
-      const resolved = await ctx.token(asset as TokenRef);
-      const amount = resolved.scale(value);
-      if (amount <= 0n) throw new Error("amount must be positive");
-      return amount;
-    },
-  };
-}
+export const UnsignedIntegerString = z
+  .string()
+  .regex(/^(?:0|[1-9]\d*)$/, "Expected a non-negative integer string.")
+  .describe('A non-negative base-10 integer string, such as "0" or "42".');
 
-/** A human-readable amount of a token whose decimals are known at authoring time. */
-export function fixedAmount(decimals: number, label: string): SemanticType<bigint> {
-  return {
-    describe: `A human-decimal amount of ${label} (e.g. "1.5"). Do not pre-scale; ${decimals} decimals are applied by the runtime.`,
-    decode(value) {
-      if (typeof value !== "string" && typeof value !== "number") {
-        throw new Error(`expected a decimal string like "1.5", got ${typeof value}`);
-      }
-      const scaled = parseUnits(String(value), decimals);
-      if (scaled <= 0n) throw new Error("amount must be positive");
-      return scaled;
-    },
-  };
-}
+export const BasisPoints = z
+  .number()
+  .int()
+  .min(0)
+  .max(10_000)
+  .describe("An integer basis-point count from 0 through 10000; 1 bps equals 0.01%.");
 
-/** A human-readable amount of native MON (18 decimals). */
-export const nativeAmount: SemanticType<bigint> = {
-  describe: 'A human-decimal amount of native MON (e.g. "0.5"). Do not pre-scale to wei.',
-  decode(value) {
-    if (typeof value !== "string" && typeof value !== "number") {
-      throw new Error(`expected a decimal string like "0.5", got ${typeof value}`);
-    }
-    const amount = Token.native().scale(value);
-    if (amount <= 0n) throw new Error("amount must be positive");
-    return amount;
-  },
-};
-
-/** Slippage tolerance in basis points (100 = 1%). */
-export function slippageBps(defaultBps: number): SemanticType<number> {
-  return {
-    describe: `Slippage tolerance in basis points (100 = 1%). Optional, default ${defaultBps}.`,
-    decode(value) {
-      if (value === undefined || value === null) return defaultBps;
-      const bps = Number(value);
-      if (!Number.isInteger(bps) || bps < 0 || bps > 10_000) {
-        throw new Error("expected an integer between 0 and 10000");
-      }
-      return bps;
-    },
-  };
-}
-
-/**
- * Decode agent-supplied args against a spec, in declaration order, so
- * contextual types can reference earlier siblings via ctx.decoded.
- */
-export async function decodeParams<S extends ParamsSpec>(
+export async function parseParams<S extends ParamsSpec>(
   spec: S,
   raw: Record<string, unknown>,
-  ctx: Omit<DecodeCtx, "args" | "decoded">,
-): Promise<DecodedParams<S>> {
-  const decoded: Record<string, unknown> = {};
-  const full: DecodeCtx = { ...ctx, args: raw, decoded };
-  for (const [name, type] of Object.entries(spec)) {
-    try {
-      decoded[name] = await type.decode(raw[name], full);
-    } catch (err) {
-      throw new DecodeError(name, err instanceof Error ? err.message : String(err));
-    }
+): Promise<InferParams<S>> {
+  const schema = z
+    .object(Object.fromEntries(Object.entries(spec).map(([name, field]) => [name, field.type])))
+    .strict();
+  const result = await schema.safeParseAsync(raw);
+  if (!result.success) {
+    throw new ParameterError(z.prettifyError(result.error));
   }
-  const unknown = Object.keys(raw).filter((k) => !(k in spec));
-  if (unknown.length > 0) {
-    throw new DecodeError(unknown[0] as string, "not a declared parameter of this capability");
-  }
-  return decoded as DecodedParams<S>;
+  return result.data as InferParams<S>;
+}
+
+export function describeParams(
+  spec: ParamsSpec,
+): Record<string, { type: JsonSafeValue; description: string }> {
+  return Object.fromEntries(
+    Object.entries(spec).map(([name, field]) => [
+      name,
+      {
+        type: z.toJSONSchema(field.type) as JsonSafeValue,
+        description: field.description,
+      },
+    ]),
+  );
+}
+
+export function parameterTypeDescription(type: z.ZodType): string | undefined {
+  const description = z.toJSONSchema(type).description;
+  return typeof description === "string" ? description : undefined;
 }

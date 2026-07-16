@@ -1,27 +1,39 @@
-## What & why
+## What and why
 
-<!-- What does this PR change, and what problem does it solve? Link the issue if there is one. -->
+<!-- What does this PR change, and what user or Protocol problem does it solve? Link the issue when one exists. -->
 
 ## Type of change
 
-- [ ] New protocol adapter / capability / query
-- [ ] Core / MCP server change
-- [ ] Docs / examples
-- [ ] Bugfix
+- [ ] Protocol / Capability / Query
+- [ ] Core / simulator / MCP server
+- [ ] Bug fix
+- [ ] Documentation / example
+- [ ] Tooling / dependency
 
-## Checklist
+## Framework and package impact
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm build && pnpm test` passes locally
-- [ ] Includes a changeset (`pnpm changeset`) if user-facing
+<!-- Public types, package boundaries, Capability tree, Change/Receipt behavior, or "none". -->
 
-### For new capabilities (required)
+## Verification
 
-- [ ] `intent`, `params` (semantic types), and `risk` labels are all declared
-- [ ] The Plan declares `expects` (funds out / in, approvals) built from decoded params
-- [ ] Discoverable & loadable: shows up in `discover` and `load` output
-- [ ] A reproducible example or e2e test runs `discover → load → action → simulate` against Monad mainnet
-- [ ] Simulation produces no warnings for the happy path
+- [ ] `pnpm build`
+- [ ] `pnpm typecheck`
+- [ ] `pnpm lint`
+- [ ] `pnpm test`
+- [ ] User-facing package changes include a changeset
+- [ ] Docs and examples match the implemented API
+
+### Protocol changes
+
+<!-- Mark N/A for non-Protocol PRs. -->
+
+- [ ] Parameters separate reusable Zod value types from field-purpose descriptions
+- [ ] Every Capability owns one direct TransactionNode and one typed Receipt
+- [ ] Receipt tests preserve every original Change object in exact length and order
+- [ ] Positive and `@ts-expect-error` fixtures cover exported type behavior
+- [ ] Fixed addresses and ABIs include sources and verification
+- [ ] A live Monad happy path returns zero Warnings
 
 ## Evidence
 
-<!-- Test output, simulate effects summary, or a short recording. -->
+<!-- Relevant output, structured Receipt Outcomes, screenshots, or reproduction steps. -->

@@ -1,33 +1,35 @@
 # Security
 
-## The model
+Moss builds and verifies unsigned transactions. It never signs, sends, stores keys, or replaces wallet review.
 
-Moss builds and verifies transactions; it **never signs and never sends**. There are no keys anywhere in this codebase. The final gate is always the wallet and its user.
+## Verification model
 
-Within that boundary, Moss enforces a verification pipeline in front of every signature:
+1. A write is an ordered Capability tree. Every Capability owns exactly one direct transaction and one Receipt parser.
+2. Simulation executes transactions in depth-first order against chained Monad state.
+3. Each successful transaction produces an immutable ordered Change array containing every raw Event and native MON transfer, including positive value moved by `CALL`, `CREATE`, `CREATE2`, or `SELFDESTRUCT`.
+4. The owning Protocol parses those Changes into a structured Receipt. Nested Receipts may interpret continuous intervals through another Protocol.
+5. Core recursively flattens Receipt leaves and requires exact original-object identity, length, and order. Missing, duplicated, replaced, or reordered Changes halt the flow.
+6. An MCP Agent compares every ordered Receipt leaf text with the user's original intent; SDK consumers may compare the complete structured Outcomes.
 
-1. A capability's Plan carries **quantified expectations** (`expects`): which assets may leave (with maximums), which must arrive (with minimums), which approvals may be granted (token, spender, cap). Risk labels classify the danger; expects bound it numerically ([ADR 0004](./docs/adr/0004-quantified-expects-in-plans.md)).
-2. **Simulation** replays the unsigned transactions against live chain state via `debug_traceCall` (dual tracers, state chained across transactions and across plans — [ADR 0002](./docs/adr/0002-simulation-via-debug-tracecall.md)) and extracts actual effects: ERC-20/721 transfers, approvals, operator grants, **native MON flows from call frames** (they emit no events), wrapped-native mints/burns.
-3. **Effects reconciliation** warns on any *undeclared* difference: undeclared outflow, outflow above the declared max, undeclared or over-cap approval, unmet minimum inflow, undeclared NFT movement, any NFT operator grant, plan tampering (`planHash` mismatch), reverts.
-4. **The halt rule**: any warning means the transactions must not be handed to a signer. This is encoded in the MCP tool contract and the [agent skill guide](./docs/agent-skill.md).
-5. **Intent alignment** stays with the agent: even a warning-free plan must be compared against what the user actually asked for. Moss cannot see the user's words; the agent must not skip this.
+A reverted transaction has no Receipt. Simulation preserves Receipts from earlier successful transactions, records revert diagnostics, and does not execute later transactions. A failed internal frame is excluded with its entire subtree, even when an RPC returns logs for that frame.
 
-Simulation pre-funds the account with virtual balance (like `eth_simulateV1` with validation off): it answers *"what would this plan do"*, not *"can the account afford it"* — affordability is re-checked by the wallet at signing time.
+Any Warning is terminal. MCP exposes text only after the complete structured Receipt passes exact coverage verification.
 
-## Boundaries (v1) — deliberately unsupported
+## Trust boundaries
 
-- **Permit / EIP-2612 / typed-data signature flows.** Plans contain transactions only. A future `steps` extension may add sign-typed-data steps (still never signed by Moss).
-- **Cross-chain bridging.** Destination-chain effects cannot be verified by simulation; "declared" could never become "verified".
-- **Flash loans / atomic multi-protocol composition inside one transaction.** Requires deployed executor contracts, outside the "agent assembles transactions" model. Multi-*transaction* composition is supported and verified via chained simulation.
+- Registered Protocol packages are trusted executable code. Protect them with package provenance, review, compile-time fixtures, runtime validation, and live tests.
+- Receipt parsing is pure: it receives only the successful transaction's Changes and may not read Runtime, Handle, Query, or RPC state.
+- An unauthenticated hash is not tamper protection. A future signer attestation would require an authenticated signature and verifier.
+- Runtime verifies that its RPC reports Monad mainnet chain ID `143`. Moss v1 rejects every other chain.
+- Fixed official addresses require a canonical source, deployed bytecode verification, and expected token metadata where applicable. Dynamic addresses must be derived and validated from chain state.
 
-6. **Token identity is catalog-resolved.** Symbols ("USDC") resolve only against the curated well-known token catalog — never via on-chain `symbol()` lookups, which same-symbol scam tokens spoof trivially. Unknown symbols fail loudly; out-of-catalog tokens require an explicit address ([ADR 0005](./docs/adr/0005-curated-token-catalog.md)).
+## Deliberate limits
 
-## Known caveats
-
-- Simulation runs against **latest** state; the chain moves. A plan that simulated clean can still land differently (e.g. orderbook fills). On-chain protections (like `minAmountOut`) are therefore part of every plan the adapters build — the simulation is a preview, the on-chain check is the guarantee.
-- `debug_traceCall` availability varies by RPC provider. When unavailable, Moss fails loudly with endpoint suggestions — it never silently skips simulation.
-- Protocol contracts may be upgradeable proxies (Kuru's are). Adapters pin behavior with live e2e tests, but upgrades between releases can change semantics.
+- Simulation is a snapshot, not a promise of later execution. On-chain slippage and authorization checks remain mandatory.
+- Cross-chain outcomes cannot be verified by a Monad-only simulation.
+- Protocol upgrades can change behavior after a package release; address provenance and live tests reduce but do not remove that risk.
+- Unsupported trace evidence fails closed. Moss never invents Change order or silently skips unavailable evidence.
 
 ## Reporting a vulnerability
 
-Please use GitHub **private vulnerability reporting** on this repository (Security → Report a vulnerability). Do not open public issues for security reports. We aim to acknowledge within 72 hours.
+Use GitHub private vulnerability reporting. Do not disclose a vulnerability in a public issue. We aim to acknowledge reports within 72 hours.

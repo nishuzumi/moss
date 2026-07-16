@@ -1,6 +1,6 @@
 /**
  * Offline regeneration: derive src/abis/kuru.ts from the COMMITTED abis-src/
- * files. Use after editing the allowlist in ./abis.ts — no network involved.
+ * files. Use after changing the deterministic generator in ./abis.ts — no network involved.
  * test/abis.test.ts enforces that the committed output matches this exactly.
  */
 import { writeFileSync } from "node:fs";

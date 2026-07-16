@@ -1,95 +1,113 @@
-/**
- * CHANGEME: <Protocol> — one sentence on what it is and what this adapter
- * covers. Document quirks the next maintainer must know: upgradeable proxies?
- * fee-on-transfer tokens? cooldown periods? cleanup calls?
- *
- * Authoring rules worth re-reading before you start (full guide:
- * docs/protocol-onboarding.md):
- *
- *   - Verbs are USER-PERSPECTIVE fund semantics from the closed set — never
- *     protocol function names. WMON's deposit() is `wrap`; a lending deposit
- *     is `supply`; a CLOB market order is `swap` + tags: ["clob"].
- *   - Params are human-readable; semantic types do the scaling. Contextual
- *     types (tokenAmount("asset")) must come AFTER the param they reference.
- *   - Every capability returns plan(steps, flows) with QUANTIFIED expects —
- *     max out, min in. Approvals via Token.approveStep are auto-declared.
- *   - Writes with a meaningful on-chain receipt declare it: @Event renders
- *     a protocol-authored observation, and `confirms` makes simulation fail
- *     loudly (CONFIRMATION_MISSING) when the receipt doesn't appear.
- *   - Verify every address on-chain and note how in a comment.
- */
 import {
-  type Address,
-  address,
+  Address,
+  type AddressValue,
   Capability,
-  type DecodedEvent,
-  Event,
+  type Change,
   type Handle,
-  NATIVE,
-  nativeAmount,
-  type ObserveCtx,
+  type Hex,
+  type InferParams,
+  type ParamsSpec,
+  PositiveDecimalString,
   Protocol,
-  plan,
   Query,
+  Receipt,
+  type ReceiptResult,
 } from "@themoss/core";
+import { decodeEventLog, parseUnits } from "viem";
 import { ExampleVaultAbi } from "./abis/example.js";
 
-// CHANGEME: verified on-chain how? (bytecode present, metadata matches, source?)
-export const EXAMPLE_VAULT_ADDRESS: Address = "0x0000000000000000000000000000000000000001";
+// CHANGEME: replace with an address verified on Monad mainnet.
+export const EXAMPLE_VAULT_ADDRESS: AddressValue = "0x0000000000000000000000000000000000000001";
+
+const depositParams = {
+  amount: {
+    type: PositiveDecimalString,
+    description: "Human-readable native MON amount to deposit; MON uses 18 decimals.",
+  },
+} satisfies ParamsSpec;
+
+const balanceParams = {
+  owner: { type: Address, description: "Address whose vault balance is read." },
+} satisfies ParamsSpec;
+
+type DepositOutcome = { operation: "deposit"; account: AddressValue; amount: string };
 
 @Protocol({
-  name: "template", // CHANGEME: unique lowercase slug — the discover coordinate
-  category: "token", // closed set: dex lending staking rewards token nft
-  description: "CHANGEME: one line an agent can understand.",
-  contracts: {
-    // Key must match the `declare` field below. For protocols that operate on
-    // caller-supplied addresses, use `contracts: {}` and `declare runtime` —
-    // see the generic erc20 protocol in @themoss/erc.
-    vault: { abi: ExampleVaultAbi, addr: EXAMPLE_VAULT_ADDRESS },
-  },
+  name: "template",
+  category: "token",
+  description: "CHANGEME: describe this Protocol in one sentence.",
+  contracts: { vault: { abi: ExampleVaultAbi, addr: EXAMPLE_VAULT_ADDRESS } },
 })
 export class ExampleProtocol {
   declare vault: Handle<typeof ExampleVaultAbi>;
 
-  @Capability({
-    intent: "Deposit {amount} MON into the example vault",
+  @Capability<ExampleProtocol, typeof depositParams>({
+    intent: "Deposit native MON into the example vault",
     verb: "supply",
-    params: { amount: nativeAmount },
+    params: depositParams,
+    receipt: "depositReceipt",
     risk: ["fundOut"],
-    tags: ["example"], // CHANGEME: long-tail semantics (clob, lst, ...)
-    confirms: ["depositReceipt"], // this write must produce the receipt below
+    tags: ["example"],
   })
-  async deposit({ amount }: { amount: bigint }) {
-    const step = this.vault.deposit([], { value: amount });
-    return plan([step], {
-      out: [{ token: NATIVE, amountMax: amount }],
-      // CHANGEME: declare what must arrive (receipt tokens? nothing for a
-      // pure deposit that only creates a position — that's legitimate).
+  async deposit(params: InferParams<typeof depositParams>) {
+    return [this.vault.deposit([], { value: parseUnits(params.amount, 18) })];
+  }
+
+  @Query({ intent: "Read an example vault balance", params: balanceParams })
+  async balanceOf(params: InferParams<typeof balanceParams>) {
+    const balance = await this.vault.read.balanceOf([params.owner]);
+    return { owner: params.owner, balance: balance.toString() };
+  }
+
+  @Receipt()
+  depositReceipt(changes: readonly Change[]): ReceiptResult<DepositOutcome> {
+    let event: DepositOutcome | undefined;
+    let native: Extract<Change, { kind: "nativeTransfer" }> | undefined;
+    const parsed = changes.map((change) => {
+      if (change.kind === "nativeTransfer") {
+        if (native) throw new Error("example deposit emitted multiple native transfers");
+        native = change;
+        return {
+          kind: "change" as const,
+          change,
+          data: { operation: "nativeTransfer", value: change.value },
+          text: `Native MON Transfer: ${change.value} from ${change.from} to ${change.to}`,
+        };
+      }
+      let decoded: ReturnType<typeof decodeEventLog<typeof ExampleVaultAbi>>;
+      try {
+        decoded = decodeEventLog({
+          abi: ExampleVaultAbi,
+          topics: change.topics as [Hex, ...Hex[]],
+          data: change.data,
+          strict: true,
+        });
+      } catch {
+        throw new Error("Unexpected Change: unsupported example vault event");
+      }
+      if (decoded.eventName !== "Deposited" || event) {
+        throw new Error(`Unexpected Change: example vault emitted ${decoded.eventName}`);
+      }
+      event = {
+        operation: "deposit",
+        account: decoded.args.account,
+        amount: decoded.args.amount.toString(),
+      };
+      return {
+        kind: "change" as const,
+        change,
+        data: event,
+        text: `Example Deposit: ${event.amount} by ${event.account}`,
+      };
     });
-  }
-
-  // The observation plane (ADR 0008): after simulation, this plan's logs are
-  // decoded against your ABIs and handed here; the returned values fill the
-  // intent template's {placeholders}. Return null to skip. A `dealer` option
-  // (method name or function) can filter/aggregate events first, sharing
-  // scratch state via ctx.shared — see Kuru's countFills.
-  @Event<ExampleProtocol>({
-    events: { vault: ["Deposited"] }, // contract-handle key → ABI event names
-    intent: "Deposited {amount} MON into the example vault",
-  })
-  async depositReceipt(events: DecodedEvent[], ctx: ObserveCtx) {
-    const hit = events.find((e) => e.name === "Deposited");
-    if (!hit) return null;
-    const { amount } = hit.args as { account: Address; amount: bigint };
-    return { amount: (await ctx.token(NATIVE)).format(amount) };
-  }
-
-  @Query({
-    intent: "Example vault balance of {owner}",
-    params: { owner: address },
-  })
-  async balanceOf({ owner }: { owner: Address }) {
-    const balance = await this.vault.read.balanceOf([owner]);
-    return { balance: balance.toString() };
+    if (!event || !native || event.amount !== native.value) {
+      throw new Error("example deposit Receipt requires matching Deposited and native Changes");
+    }
+    return {
+      kind: "receipt",
+      outcome: event,
+      text: `Example Deposit: ${event.amount} by ${event.account}`,
+      changes: parsed,
+    };
   }
 }

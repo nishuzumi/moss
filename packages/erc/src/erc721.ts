@@ -1,83 +1,126 @@
-/**
- * The generic ERC-721 protocol: transfer any NFT by collection address and
- * token id, plus ownership queries. Fills the `nft` category the same way
- * the generic erc20 protocol fills `transfer` for fungibles.
- *
- * Interface-layer resident by the ADR 0009 test: the collection address is
- * naturally a call-time parameter (which NFT to move is the user's input),
- * so this is a DYNAMIC-ADDRESS protocol — `contracts: {}`, injected
- * `runtime`, Handles built per call. Collections are NOT in the token table
- * (that catalog is fungible-only); agents pass the 0x address explicitly.
- */
 import {
   type ActionCtx,
-  type Address,
-  address,
+  Address,
+  type AddressValue,
   Capability,
+  type Change,
   createHandle,
+  type Hex,
+  type InferParams,
+  type ReceiptResult as MossReceipt,
   type MossRuntime,
+  type ParamsSpec,
   Protocol,
-  plan,
   Query,
-  uint,
+  Receipt,
+  UnsignedIntegerString,
 } from "@themoss/core";
+import { decodeEventLog } from "viem";
 import { ierc721Abi } from "./abis/erc.js";
+
+const tokenParams = {
+  collection: { type: Address, description: "Collection containing the requested token." },
+  tokenId: { type: UnsignedIntegerString, description: "Token selected within the collection." },
+} satisfies ParamsSpec;
+
+const transferParams = {
+  ...tokenParams,
+  to: { type: Address, description: "Address that receives the NFT." },
+} satisfies ParamsSpec;
+
+const balanceParams = {
+  collection: { type: Address, description: "Collection whose balance is requested." },
+  owner: { type: Address, description: "Address whose collection balance is read." },
+} satisfies ParamsSpec;
+
+export type ERC721TransferOutcome = {
+  operation: "transfer";
+  collection: AddressValue;
+  from: AddressValue;
+  to: AddressValue;
+  tokenId: string;
+};
 
 @Protocol({
   name: "erc721",
   category: "nft",
-  description:
-    "Generic ERC-721 (NFT) operations for any collection: transfer by token id, " +
-    "ownership and balance queries. Takes the collection's 0x address.",
-  contracts: {}, // dynamic: the collection address is a parameter
+  description: "Generic ERC-721 transfers, ownership, and balance queries.",
+  contracts: {},
 })
 export class ERC721 {
   declare runtime: MossRuntime;
 
-  #handle(collection: Address) {
-    return createHandle(ierc721Abi, collection, this.runtime.client);
+  #handle(collection: AddressValue, account: AddressValue) {
+    return createHandle(ierc721Abi, collection, this.runtime.client, account);
   }
 
-  @Capability({
-    intent: "Transfer {collection} #{tokenId} to {to}",
+  @Capability<ERC721, typeof transferParams>({
+    intent: "Transfer an ERC-721 token",
     verb: "transfer",
-    params: {
-      collection: address,
-      tokenId: uint,
-      to: address,
-    },
+    params: transferParams,
+    receipt: "transferReceipt",
     risk: ["fundOut"],
     tags: ["nft", "payment"],
   })
-  async transfer(
-    { collection, tokenId, to }: { collection: Address; tokenId: bigint; to: Address },
-    ctx: ActionCtx,
-  ) {
-    // safeTransferFrom refuses receivers that can't handle ERC-721 — exactly
-    // the mistake a bare transferFrom would let through. `from` must be the
-    // caller in calldata, hence ctx.account (simulation enforces ownership).
-    const step = this.#handle(collection).safeTransferFrom([ctx.account, to, tokenId]);
-    return plan([step], {
-      nfts: [{ collection, count: 1, direction: "out" }],
-    });
+  async transfer(params: InferParams<typeof transferParams>, ctx: ActionCtx) {
+    return [
+      this.#handle(params.collection, ctx.account).safeTransferFrom([
+        ctx.account,
+        params.to,
+        BigInt(params.tokenId),
+      ]),
+    ];
   }
 
-  @Query({
-    intent: "Owner of {collection} #{tokenId}",
-    params: { collection: address, tokenId: uint },
-  })
-  async ownerOf({ collection, tokenId }: { collection: Address; tokenId: bigint }) {
-    const owner = await this.#handle(collection).read.ownerOf([tokenId]);
-    return { collection, tokenId: tokenId.toString(), owner };
+  @Query({ intent: "Read the owner of an ERC-721 token", params: tokenParams })
+  async ownerOf(params: InferParams<typeof tokenParams>, ctx: ActionCtx) {
+    const owner = await this.#handle(params.collection, ctx.account).read.ownerOf([
+      BigInt(params.tokenId),
+    ]);
+    return { ...params, owner };
   }
 
-  @Query({
-    intent: "NFT balance of {owner} in {collection}",
-    params: { collection: address, owner: address },
-    tags: ["balance"],
-  })
-  async balanceOf({ collection, owner }: { collection: Address; owner: Address }) {
-    const balance = await this.#handle(collection).read.balanceOf([owner]);
-    return { collection, owner, balance: balance.toString() };
+  @Query({ intent: "Read an ERC-721 collection balance", params: balanceParams, tags: ["balance"] })
+  async balanceOf(params: InferParams<typeof balanceParams>, ctx: ActionCtx) {
+    const balance = await this.#handle(params.collection, ctx.account).read.balanceOf([
+      params.owner,
+    ]);
+    return { ...params, balance: balance.toString() };
+  }
+
+  @Receipt()
+  transferReceipt(changes: readonly Change[]): MossReceipt<ERC721TransferOutcome> {
+    if (changes.length !== 1 || changes[0]?.kind !== "event") {
+      throw new Error("ERC721 transfer Receipt requires exactly one Transfer event");
+    }
+    const change = changes[0];
+    let decoded: ReturnType<typeof decodeEventLog<typeof ierc721Abi>>;
+    try {
+      decoded = decodeEventLog({
+        abi: ierc721Abi,
+        topics: change.topics as [Hex, ...Hex[]],
+        data: change.data,
+        strict: true,
+      });
+    } catch {
+      throw new Error(`Unexpected Change: ${change.address} emitted an unsupported ERC-721 event`);
+    }
+    if (decoded.eventName !== "Transfer") {
+      throw new Error(`Unexpected Change: expected ERC721 Transfer, received ${decoded.eventName}`);
+    }
+    const outcome: ERC721TransferOutcome = {
+      operation: "transfer",
+      collection: change.address,
+      from: decoded.args.from,
+      to: decoded.args.to,
+      tokenId: decoded.args.tokenId.toString(),
+    };
+    const text = `ERC721 Transfer: ${outcome.collection} #${outcome.tokenId} from ${outcome.from} to ${outcome.to}`;
+    return {
+      kind: "receipt",
+      outcome,
+      text,
+      changes: [{ kind: "change", change, data: outcome, text }],
+    };
   }
 }

@@ -2,83 +2,58 @@
 
 **English** | [中文](./README.zh-CN.md)
 
-Moss turns complex DApp/protocol interactions on [Monad](https://monad.xyz) into uniform, agent-callable capabilities — `discover → load → action → simulate` — with the system, not the agent, responsible for assembling correct transactions.
-
-- **Agents stop hand-rolling calldata.** No ABIs, no contract addresses, no multicall/cleanup plumbing, no decimals arithmetic — capabilities take human-readable parameters and return ready-built unsigned transactions.
-- **Every write is verified before it reaches a signer.** A built Plan declares exactly what may move (`expects`); simulation replays it against live chain state and warns on any undeclared difference.
-- **Moss never signs and never sends.** It builds and verifies. Keys stay in the wallet; the last word stays with the user.
+Moss turns Monad protocol interactions into Agent-callable Capabilities through `discover → load → action → simulate`. It builds and verifies unsigned transactions; it never signs or sends them.
 
 > [!WARNING]
-> **Moss is alpha software, released for testing and evaluation.** It has not been audited, and APIs, Plan formats, and package layout may change without notice.
->
-> Understand the risk model before trusting it with real decisions: simulation is a safety net, not a guarantee — results reflect chain state at simulation time, and prices, liquidity, and contract state can move between simulating and signing. Moss never signs or sends transactions, but whatever **you** sign is your responsibility: review every transaction in your wallet, use small amounts while testing, and never read a zero-warning simulation as a promise of execution results. The software is provided "as is", without warranty of any kind ([MIT](./LICENSE)). Guarantees, boundaries, and how to report vulnerabilities: [SECURITY.md](./SECURITY.md).
+> Moss is unaudited alpha software. Do not use it with production funds.
 
-## Why
+## Why Moss
 
-Consider a "simple" swap on a typical DEX: router addresses, exact-in vs exact-out variants, wrapping and unwrapping the native token, refund and sweep cleanup calls, slippage math in the right decimals. An agent that assembles this by reading ABIs will eventually get one of those wrong — and an agent-built transaction that is *almost* right is how funds get lost.
+- **Agents call Protocol-owned operations.** Protocol packages own addresses, ABIs, calldata construction, parameter rules, and Receipt parsing.
+- **Simulation produces evidence.** Each successful transaction yields ordered raw Changes and a structured Receipt that must cover every Change exactly once and in order.
+- **Signing stays separate.** MCP Agents compare every ordered Receipt text with the user's request; SDK consumers may use structured Outcomes before a wallet sees the unsigned transactions.
 
-Moss moves that complexity behind a uniform capability layer maintained per protocol, and adds a mechanical safety gate in front of every signature.
+## Supported Protocols
 
-## Core flow
-
-```
-discover(verb?, category?)   → find capabilities across protocols
-load(coordinates)            → intent, parameters, risk labels
-action(protocol, method,     → queries: data
-       account, params)      → capabilities: a Plan of UNSIGNED txs + declared expects
-simulate(plans[])            → actual effects + warnings (declared vs actual reconciliation)
-```
-
-Two safety rules, enforced in different places:
-
-1. **Effects reconciliation** (in the server, mechanical): simulation extracts what actually happens — assets out/in, approvals, recipients, including native MON flows and wrapped-token mints that emit no Transfer events — and warns on anything the Plan didn't declare. Any warning: stop.
-2. **Intent alignment** (in the agent): compare the effects summary against what the user actually asked for. Only the agent holds the user's words.
-
-`simulate` accepts an ordered list of Plans and chains state across them — plan B can spend tokens that only exist because plan A produced them. That is the primitive multi-step flows (claim → swap → supply) build on.
-
-## Status
-
-Alpha. Monad mainnet (chain id 143). Moss builds and simulates transactions; it never signs or sends them.
+Moss currently targets Monad mainnet, chain ID `143`.
 
 | Protocol | Package | Capabilities | Queries |
 | --- | --- | --- | --- |
-| WMON (canonical wrapped MON) | `@themoss/system` | `wrap`, `unwrap` | `balanceOf` |
-| erc20 (generic — any token, native MON included) | `@themoss/erc` | `transfer` | `balanceOf`, `allowance` |
-| erc721 (generic — any NFT collection) | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
-| [Kuru](https://kuru.io) (on-chain CLOB DEX) | `@themoss/protocol-kuru` | `swap` (market orders, MON/USDC & MON/AUSD) | `quote`, `markets` |
-
-One protocol = one package. Registries assemble explicitly from package manifests — nothing registers itself by import; the MCP server lists its served catalog in one array in `server.ts` ([ADR 0006](./docs/adr/0006-protocol-packages-and-manifests.md)).
-
-Not supported yet, by design: Permit/typed-data signature flows, cross-chain bridging (destination-chain effects are unverifiable by simulation), flash-loan atomic composition. See [SECURITY.md](./SECURITY.md).
+| WMON | `@themoss/system` | `wrap`, `unwrap` | `balanceOf` |
+| ERC-20 and native MON | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `allowance`, `metadata` |
+| ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
+| Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
 
 ## Quickstart
 
-Requires Node ≥ 22 and pnpm. Everything below runs with **zero funds and zero keys** — simulation is free.
+Requires Node 22 or newer and pnpm 11. The examples use live Monad state but need no key or funded account because Moss only simulates.
 
 ```bash
-git clone https://github.com/nishuzumi/moss && cd moss
+git clone https://github.com/nishuzumi/moss
+cd moss
 pnpm install
 pnpm build
 
-# the canonical flow: discover → load → action → simulate
+# discover → load → action → simulate a WMON wrap
 pnpm --filter @themoss/example-simple-flow wrap
 
-# cross-plan composition on a live orderbook: MON → USDC → MON
+# quote and simulate a Kuru MON → USDC swap
 pnpm --filter @themoss/example-simple-flow swap
 ```
 
-Want to see a trade actually land? [examples/agent-swap](./examples/agent-swap)
-runs a Claude Code subagent that drives the MCP tools end to end and — only
-after a clean simulation — signs and sends on a **local anvil fork of Monad
-mainnet**. Real orderbook state, zero real funds, zero configuration.
+Run the test suite without live RPC calls:
 
-New here? [docs/getting-started.md](./docs/getting-started.md) walks the whole
-system one layer at a time — run first, then open each stage up.
+```bash
+MOSS_SKIP_E2E=1 pnpm test
+```
+
+The full tutorial is [Getting started](./docs/getting-started.md). It opens every stage, configures MCP, and finishes by creating a Protocol package.
 
 ### Use as an MCP server
 
+Build the repo, then add the stdio server to an MCP client:
+
 ```jsonc
-// e.g. in your MCP client config
 {
   "mcpServers": {
     "moss": {
@@ -90,64 +65,88 @@ system one layer at a time — run first, then open each stage up.
 }
 ```
 
-The agent gets four tools: `discover`, `load`, `action`, `simulate` — full tool contracts in [docs/mcp-tools.md](./docs/mcp-tools.md). Tool descriptions encode the safety rules; the full agent-facing contract is in [docs/agent-skill.md](./docs/agent-skill.md).
-
-> The default endpoint `https://rpc.monad.xyz` supports the `debug_traceCall` simulation Moss needs. Roughly half of third-party free tiers do not — if simulation fails loudly, switch endpoints (see [ADR 0002](./docs/adr/0002-simulation-via-debug-tracecall.md)).
+The server exposes exactly `discover`, `load`, `action`, and `simulate`. See [MCP tool contracts](./docs/mcp-tools.md).
 
 ### Use as a library
 
 ```ts
-import { Registry } from "@themoss/core";
-import { erc20MetadataSource, ercManifest } from "@themoss/erc";
-import { kuruManifest } from "@themoss/protocol-kuru";
+import { NATIVE, Registry } from "@themoss/core";
+import * as erc from "@themoss/erc";
+import * as kuru from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime, systemManifest } from "@themoss/system";
+import * as system from "@themoss/system";
+import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
 
-const runtime = monadRuntime();
-const registry = new Registry(runtime, { tokenFallback: erc20MetadataSource(runtime.client) });
-for (const m of [systemManifest, ercManifest, kuruManifest]) registry.use(m); // only what you want
-
-const plan = await registry.action("kuru", "swap", account, {
-  tokenIn: "MON", tokenOut: "USDC", amount: "1",  // symbols resolve via the curated catalog
+const runtime = await monadRuntime();
+const registry = new Registry(runtime).use(system, erc, kuru);
+const account = "0xcccccccccccccccccccccccccccccccccccccccc";
+const simulator = createTraceSimulator(runtime, {
+  receipt: (capability, changes) => registry.parseReceipt(capability, changes),
 });
-const { results } = await createTraceSimulator(runtime).simulate([plan]);
-// results[0].effects, results[0].warnings
+
+const result = await registry.action("kuru", "swap", account, {
+  tokenIn: NATIVE,
+  tokenOut: USDC_ADDRESS,
+  amountIn: "1",
+  slippage: 50,
+});
+if (result.kind !== "capability") throw new Error("expected a Capability");
+
+const simulation = await simulator.simulate(result);
+if (simulation.halted || simulation.results.some((item) => item.warnings.length)) {
+  throw new Error("simulation failed; do not sign");
+}
 ```
+
+## How verification works
+
+Every Capability owns one direct unsigned transaction and one named typed Receipt parser. Additional transactions belong to nested Capabilities, which core validates and flattens in deterministic depth-first order.
+
+Simulation records successful Events and native MON transfers as immutable Changes in exact execution order. Receipt leaves must retain the original Change objects with identical length and order.
+
+Any revert, trace failure, Receipt failure, or coverage mismatch is a terminal Warning. The library exposes complete Receipt trees and structured Outcomes; MCP returns only their verified ordered leaf texts and Warnings to Agents.
 
 ## Repository layout
 
-Machinery at the bottom, standards above it, instances above that, the product surface at the top — each package boundary keeps a dependency out of somewhere it doesn't belong ([ADR 0006](./docs/adr/0006-protocol-packages-and-manifests.md)):
+| Package | Responsibility |
+| --- | --- |
+| `@themoss/core` | Decorators, Registry, parameter contracts, Capability trees, Receipt validation |
+| `@themoss/simulator` | `debug_traceCall`, state chaining, ordered Change extraction |
+| `@themoss/erc` | Address-free ERC Protocols, ABIs, and Receipt semantics |
+| `@themoss/system` | Monad Runtime, official constants, and system Protocols |
+| `@themoss/protocol-*` | Protocol-specific ABIs, Capabilities, Queries, and Receipts |
+| `@themoss/mcp-server` | MCP transport and application composition |
 
-| Package | Role | Depends on |
-| --- | --- | --- |
-| `@themoss/core` | Pure machinery — zero chain data, zero ABIs. Only dependency: viem | — |
-| `@themoss/simulator` | The verification engine: `debug_traceCall` simulation, effects extraction, expects reconciliation | core |
-| `@themoss/erc` | The interface layer: compiled standard ABIs (`ERC20Abi`, `ERC721Abi`, `WETH9Abi`), address-free generic behavior (`erc20`/`erc721` protocols, `approveStep`) — [ADR 0009](./docs/adr/0009-erc-interface-layer-and-composition.md) | core |
-| `@themoss/system` | Monad instances: token data, chain defaults (`monadRuntime`), address-bearing system adapters (WMON) | core, erc |
-| `@themoss/protocol-*` | One package per protocol (`packages/protocols/*`; start from `_template`) | core (+ erc/system as needed) |
-| `@themoss/mcp-server` | The four MCP tools over stdio, batteries included — assembles the served catalog itself | all of the above |
+## Development
+
+```bash
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+Build must precede typecheck because workspace packages resolve generated declarations. Use `MOSS_SKIP_E2E=1 pnpm test` when offline.
 
 ## Documentation
 
-| Guide | What it covers |
+| Guide | Purpose |
 | --- | --- |
-| [Getting started](./docs/getting-started.md) ([中文](./docs/getting-started.zh-CN.md)) | The whole system, one layer at a time — run first, then open each stage up |
-| [MCP tools reference](./docs/mcp-tools.md) | The `discover` / `load` / `action` / `simulate` contracts, Plan anatomy, warning codes |
-| [Protocol onboarding](./docs/protocol-onboarding.md) | Writing and submitting an adapter, ABIs to receipts |
-| [Agent skill guide](./docs/agent-skill.md) | The rules an agent must follow: mandatory simulation, halt on warnings, intent alignment |
-| [Agent swap example](./examples/agent-swap/README.md) | A Claude Code subagent trading for real on a local Monad mainnet fork |
-| [ADRs](./docs/adr/) | Every design decision with its trade-offs |
-| [Glossary](./CONTEXT.md) | The project's ubiquitous language |
+| [Getting started](./docs/getting-started.md) ([中文](./docs/getting-started.zh-CN.md)) | Run and develop with Moss step by step |
+| [MCP tool contracts](./docs/mcp-tools.md) | Inputs and outputs of the four MCP tools |
+| [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package |
+| [Agent safety rules](./docs/agent-skill.md) | Mandatory simulation and intent-alignment rules |
+| [Agent swap example](./examples/agent-swap/README.md) | Separate Agent and signer on a local Monad fork |
+| [Architecture decisions](./docs/adr/) | Current design decisions and trade-offs |
+| [Domain language](./CONTEXT.md) | Shared framework vocabulary |
 
 ## Contributing
 
-Protocol adapters are the heart of Moss and are designed to be contributed — one protocol, one package. Copy the self-verifying template ([`packages/protocols/_template`](./packages/protocols/_template)) and follow its checklist; the reference adapter is [`packages/system/src/wmon.ts`](./packages/system/src/wmon.ts) (deliberately over-commented). Full guide: [docs/protocol-onboarding.md](./docs/protocol-onboarding.md); workflow: [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-Want a protocol supported but don't want to write it? Open a [protocol onboarding issue](./.github/ISSUE_TEMPLATE/protocol_onboarding.md).
+Read [CONTRIBUTING.md](./CONTRIBUTING.md). Protocol additions start from [`packages/protocols/_template`](./packages/protocols/_template) and follow [Protocol onboarding](./docs/protocol-onboarding.md).
 
 ## Security
 
-Moss's guarantees, boundaries, and how to report vulnerabilities: [SECURITY.md](./SECURITY.md). Design decisions with their trade-offs are recorded in [docs/adr/](./docs/adr/).
+Read [SECURITY.md](./SECURITY.md) for guarantees, limits, and private vulnerability reporting.
 
 ## License
 

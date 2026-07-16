@@ -3,7 +3,7 @@
  * from the committed abis-src/ files + VENDOR.json metadata. No network, no
  * clock — same inputs, same bytes. This is what makes the provenance chain
  * enforceable: test/abis.test.ts asserts generate() === the committed file,
- * so hand-edits to the generated TS, allowlist edits without regeneration,
+ * so hand-edits to the generated TS, generator edits without regeneration,
  * and abis-src edits without regeneration all fail the suite.
  */
 import { readFileSync } from "node:fs";
@@ -15,7 +15,7 @@ export interface SourceSpec {
 }
 
 /** Full upstream ABIs are exported (ADR 0007) — the adapter's callable surface
- * is reviewed where capabilities live, and simulate/expects reconciliation is
+ * is reviewed where Capabilities and Receipt parsers live, and simulation is
  * the enforcement layer. */
 export const SOURCES: SourceSpec[] = [
   { file: "Router.json", exportName: "KuruRouterAbi" },
