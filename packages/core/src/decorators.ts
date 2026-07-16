@@ -30,6 +30,7 @@ export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Reco
   category: Category;
   description: string;
   contracts: Record<string, ContractConfig>;
+  labels?: Record<string, Address>;
   protocols?: Dependencies;
 }
 
@@ -67,7 +68,7 @@ export const RECEIPT_META = Symbol.for("moss.receipt");
 export function Protocol<Dependencies extends ProtocolDependencies = Record<never, never>>(
   config: ProtocolConfig<Dependencies>,
 ) {
-  if (!/^[a-z][a-z0-9-]*$/.test(config.name)) {
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
   }
   return <T extends new () => object & InjectedProtocols<Dependencies>>(

@@ -39,6 +39,9 @@ A package exports its public `@Protocol` classes directly from its entry point. 
   contracts: {
     router: { abi: RouterAbi, addr: ROUTER_ADDRESS },
   },
+  labels: {
+    Router: ROUTER_ADDRESS,
+  },
   protocols: {
     erc20: ERC20,
   },
@@ -50,6 +53,8 @@ export class MyProtocol {
 ```
 
 Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
+
+`labels` names fixed Package addresses independently of Handles. Registry prefixes the local name with the title-cased Protocol slug (`Myprotocol Router` above), validates the final safe name, and exposes it only to this Protocol and Protocols that declare it as a dependency. Receipt parsers still emit raw evidence-backed addresses; Registry owns presentation.
 
 ## 3. Define parameter contracts
 
@@ -134,6 +139,8 @@ Core only flattens ReceiptChange leaves and checks exact object identity, length
 
 Receipt text is presentation. The structured Outcome is authoritative and must use JSON-safe values.
 
+After the root parser returns, Registry replaces standalone addresses in every Receipt and ReceiptChange text once. Trusted labels selected by composition win, followed by the root Protocol's Package label and one unambiguous visible dependency Package label; unrelated, conflicting, and unknown addresses stay raw. Outcomes, data, and Change objects are not rewritten.
+
 ## 6. Export and compose
 
 The package entry point exports the Protocol class:
@@ -142,7 +149,15 @@ The package entry point exports the Protocol class:
 export { MyProtocol } from "./my-protocol.js";
 ```
 
-The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code.
+The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code. A library composition may explicitly select its trusted token catalog:
+
+```ts
+const registry = new Registry(runtime, {
+  trustedTokens: [{ address: OFFICIAL_TOKEN_ADDRESS, label: "Official Token" }],
+}).use(protocols);
+```
+
+Registry never discovers Trusted labels from module exports passed to `use`.
 
 Fixed official Monad constants may be imported from `@themoss/system`. Caller-supplied and chain-discovered token addresses remain explicit; do not introduce a package-level token list.
 

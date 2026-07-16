@@ -24,7 +24,9 @@ export {
   type ProtocolSource,
   type QueryResult,
   Registry,
+  type RegistryOptions,
   type Stub,
+  type TrustedToken,
 } from "./registry.js";
 export { createRuntime, type MossRuntime } from "./runtime.js";
 export {

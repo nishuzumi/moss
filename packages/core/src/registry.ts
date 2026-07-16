@@ -1,3 +1,4 @@
+import { isAddress } from "viem";
 import {
   METHOD_META,
   type MethodMeta,
@@ -62,12 +63,22 @@ export interface QueryResult {
   data: JsonSafeValue;
 }
 
+export interface TrustedToken {
+  address: Address;
+  label: string;
+}
+
+export interface RegistryOptions {
+  trustedTokens?: readonly TrustedToken[];
+}
+
 interface Registered {
   ctor: ProtocolCtor;
   receiptCtor: ProtocolCtor;
   config: ProtocolConfig<ProtocolDependencies>;
   methods: Record<string, MethodMeta>;
   receipts: Set<string>;
+  packageLabels: ReadonlyMap<string, string>;
 }
 
 type CapabilityMethodMeta = Extract<MethodMeta, { kind: "capability" }>;
@@ -88,12 +99,64 @@ function requireMetadataText(value: unknown, path: string): void {
   }
 }
 
+const SAFE_LABEL = /^[A-Za-z0-9 ._-]{1,32}$/;
+const ADDRESS_IN_TEXT = /(?<![0-9a-f])0x[0-9a-f]{40}(?![0-9a-f])/gi;
+
+function collectLabels(
+  entries: Iterable<readonly [name: string, address: Address]>,
+  provenance: "Trusted" | "Package",
+  owner: string,
+  prefix = "",
+): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  for (const [name, address] of entries) {
+    const effectiveName = `${prefix}${name}`;
+    if (!SAFE_LABEL.test(effectiveName)) {
+      throw new Error(`${owner} ${provenance} label must be a 1-32 character safe name`);
+    }
+    if (!isAddress(address, { strict: false })) {
+      throw new Error(`${owner} ${provenance} label has an invalid address`);
+    }
+    const key = address.toLowerCase();
+    if (labels.has(key)) {
+      throw new Error(`${owner} assigns multiple ${provenance} names to address "${address}"`);
+    }
+    labels.set(key, effectiveName);
+  }
+  return labels;
+}
+
+function titleCaseSlug(slug: string): string {
+  return slug
+    .split("-")
+    .map((part) => `${part[0]?.toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function renderReceipt(receipt: Receipt, renderText: (text: string) => string): Receipt {
+  return {
+    ...receipt,
+    text: renderText(receipt.text),
+    changes: receipt.changes.map((child) =>
+      child.kind === "receipt"
+        ? renderReceipt(child, renderText)
+        : { ...child, text: renderText(child.text) },
+    ),
+  };
+}
+
 export class Registry {
   #protocols = new Map<string, Registered>();
+  #trustedLabels: ReadonlyMap<string, string>;
   readonly runtime: MossRuntime;
 
-  constructor(runtime: MossRuntime) {
+  constructor(runtime: MossRuntime, options: RegistryOptions = {}) {
     this.runtime = runtime;
+    this.#trustedLabels = collectLabels(
+      (options.trustedTokens ?? []).map(({ address, label }) => [label, address]),
+      "Trusted",
+      "trusted token catalog",
+    );
   }
 
   use(...sources: ProtocolSource[]): this {
@@ -136,6 +199,12 @@ export class Registry {
     if (stack.includes(config.name)) {
       throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
     }
+    const packageLabels = collectLabels(
+      Object.entries(config.labels ?? {}),
+      "Package",
+      `protocol "${config.name}"`,
+      `${titleCaseSlug(config.name)} `,
+    );
     for (const dependency of Object.values(config.protocols ?? {})) {
       this.register(dependency, [...stack, config.name]);
     }
@@ -199,7 +268,14 @@ export class Registry {
     }
     const receiptCtor =
       (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET] ?? ctor;
-    this.#protocols.set(config.name, { ctor, receiptCtor, config, methods, receipts });
+    this.#protocols.set(config.name, {
+      ctor,
+      receiptCtor,
+      config,
+      methods,
+      receipts,
+      packageLabels,
+    });
   }
 
   discover(filter: { verb?: Verb; category?: Category; protocol?: string } = {}): Coordinate[] {
@@ -265,7 +341,10 @@ export class Registry {
   parseReceipt(node: CapabilityNode, changes: readonly Change[]): Receipt {
     flattenCapabilityTree(node);
     const meta = this.#capabilityMeta(node.protocol, node.method);
-    return this.#runReceipt(node.protocol, meta.spec.receipt, changes);
+    return renderReceipt(
+      this.#runReceipt(node.protocol, meta.spec.receipt, changes),
+      this.#renderText(node.protocol),
+    );
   }
 
   validateCapabilityTree(root: CapabilityNode): void {
@@ -394,6 +473,36 @@ export class Registry {
       throw new Error(`unknown capability "${protocol}.${method}"`);
     }
     return meta;
+  }
+
+  #renderText(protocol: string): (text: string) => string {
+    const root = this.#get(protocol);
+    const dependencies = new Map<string, string | null>();
+    const visited = new Set<string>();
+    const visit = (registered: Registered): void => {
+      for (const dependency of Object.values(registered.config.protocols ?? {})) {
+        const name = configOf(dependency)?.name;
+        if (!name || visited.has(name)) continue;
+        visited.add(name);
+        const visible = this.#get(name);
+        for (const [address, label] of visible.packageLabels) {
+          dependencies.set(address, dependencies.has(address) ? null : label);
+        }
+        visit(visible);
+      }
+    };
+    visit(root);
+
+    return (text) =>
+      text.replace(ADDRESS_IN_TEXT, (address) => {
+        const key = address.toLowerCase();
+        return (
+          this.#trustedLabels.get(key) ??
+          root.packageLabels.get(key) ??
+          dependencies.get(key) ??
+          address
+        );
+      });
   }
 
   #get(protocol: string): Registered {

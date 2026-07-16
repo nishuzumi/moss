@@ -37,6 +37,7 @@ type DepositOutcome = { operation: "deposit"; account: AddressValue; amount: str
   category: "token",
   description: "CHANGEME: describe this Protocol in one sentence.",
   contracts: { vault: { abi: ExampleVaultAbi, addr: EXAMPLE_VAULT_ADDRESS } },
+  labels: { Vault: EXAMPLE_VAULT_ADDRESS },
 })
 export class ExampleProtocol {
   declare vault: Handle<typeof ExampleVaultAbi>;

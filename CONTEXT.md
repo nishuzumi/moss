@@ -84,6 +84,12 @@ _Avoid_: chain map, configurable target chain
 A package exporting one or more self-describing Protocols. Its public Protocol exports are its registration surface.
 _Avoid_: plugin, extension
 
+**Trusted label**:
+A safe display name for a fixed token address selected explicitly by the application composition root. Trusted describes catalog provenance only; the text remains untrusted presentation data. Ordinary Protocol exports cannot supply Trusted labels.
+
+**Package label**:
+A Protocol-owned safe display name for a fixed address declared independently of its Handles. Registry prefixes the local name with the title-cased Protocol slug, and only the root Protocol and its declared dependency graph can see it.
+
 **Package boundary**:
 Core owns framework contracts; simulator owns trace mechanics; ERC and concrete Protocol packages own ABI semantics, Receipts, and protocol-exclusive deployment addresses; system owns the shared Monad Runtime and shared asset instances; MCP server owns transport. New Protocols affect only their package and the composition root.
 
@@ -131,6 +137,9 @@ A Receipt leaf that retains the exact input Change object and adds JSON-safe pro
 
 **Receipt tree**:
 The recursive structure formed when a Receipt parser delegates a continuous Change interval to another parser. Receipts for separate transactions remain separate.
+
+**Receipt label rendering**:
+Registry's one presentation-only pass over every Receipt and ReceiptChange text after the root parser returns. Standalone addresses resolve as Trusted, root Package, one unambiguous visible dependency Package, or remain raw; Outcomes, data, and original Changes are untouched.
 
 **Outcome**:
 A JSON-safe structured statement of facts directly supported by simulation Changes. Chain quantities use decimal strings.
