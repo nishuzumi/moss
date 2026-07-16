@@ -136,6 +136,7 @@ workspace package 的类型来自构建产物，因此必须先 build 再 typech
 | [MCP 工具契约](./docs/mcp-tools.md) | 四个 MCP 工具的输入输出 |
 | [Protocol 接入指南](./docs/protocol-onboarding.md) | 开发并提交一个 Protocol 包 |
 | [Agent 安全规则](./docs/agent-skill.md) | 强制模拟与意图对齐规则 |
+| [Simple-flow 示例](./examples/simple-flow/README.md) | 运行最小真实流程，并对应理解 Moss 的四个阶段 |
 | [Agent swap 示例](./examples/agent-swap/README.md) | 在本地 Monad fork 上分离 Agent 与签名方 |
 | [架构决策](./docs/adr/) | 当前设计与取舍 |
 | [领域词汇](./CONTEXT.md) | framework 统一语言 |
