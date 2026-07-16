@@ -5,7 +5,7 @@ This example separates construction and verification from signing. Moss never re
 The three roles are explicit:
 
 - `swap` records intent, builds and simulates a Kuru Capability, compares the structured Outcome, and writes unsigned JSON;
-- `wallet` validates the tree and sender, then signs and sends on the local fork;
+- `wallet` validates the tree and sender, re-simulates on the same local fork, then signs and sends;
 - an Agent may drive the same `discover → load → action → simulate` flow through MCP, but must perform intent alignment before invoking the wallet.
 
 ## Prerequisites
@@ -39,7 +39,7 @@ The script stops on every Warning. It also compares Capability parameters and th
 
 Review the printed ordered Receipts and the JSON file. Receipt text is presentation; the structured Outcomes are the evidence.
 
-Only after review, send the transactions on the local fork:
+Only after review, send the transactions on the local fork. The wallet re-simulates before broadcasting and stops if the current fork state produces any Warning, revert, missing Receipt, or result-count mismatch.
 
 ```bash
 pnpm --filter @themoss/example-agent-swap wallet -- send verified-capability.json
@@ -67,7 +67,7 @@ pnpm --filter @themoss/example-agent-swap wallet -- balance
 pnpm --filter @themoss/example-agent-swap wallet -- send /absolute/path/to/capability.json
 ```
 
-The wallet refuses trees for a different sender. It also requires the local RPC to report Monad chain ID `143`.
+The wallet refuses trees for a different sender. It also requires the local RPC to report Monad chain ID `143` and re-simulates the Capability immediately before sending.
 
 ## Reset the fork
 
