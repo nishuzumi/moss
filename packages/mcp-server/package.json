@@ -24,8 +24,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@themoss/core": "workspace:*",
-    "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-aave-v3": "workspace:*",
+    "@themoss/protocol-kuru": "workspace:*",
     "zod": "^3.25.0",
     "@themoss/erc": "workspace:*",
     "@themoss/system": "workspace:*",
@@ -34,6 +34,7 @@
   "devDependencies": {
     "tsup": "^8.5.1",
     "typescript": "~5.9.0",
+    "viem": "^2.54.3",
     "vitest": "^3.2.6"
   }
 }

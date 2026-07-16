@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as aaveV3 from "@themoss/protocol-aave-v3";
+import * as erc from "@themoss/erc";
+import * as kuru from "@themoss/protocol-kuru";
+import * as system from "@themoss/system";
+import { monadRuntime } from "@themoss/system";
 import { createMossServer } from "./server.js";
 
-// stdout belongs to the MCP protocol; anything human goes to stderr.
 const rpcUrl = process.env.MOSS_RPC_URL;
-const chainId = process.env.MOSS_CHAIN_ID ? Number(process.env.MOSS_CHAIN_ID) : undefined;
-
+const runtime = await monadRuntime({ ...(rpcUrl ? { rpcUrl } : {}) });
 const { server, registry } = createMossServer({
-  ...(rpcUrl ? { rpcUrl } : {}),
-  ...(chainId !== undefined ? { chainId } : {}),
+  runtime,
+  protocols: [system, erc, aaveV3, kuru],
 });
-
 const catalog = registry.discover();
 console.error(
-  `moss-mcp: ${catalog.length} capabilities/queries across ` +
-    `${new Set(catalog.map((c) => c.protocol)).size} protocols on chain ` +
-    `${registry.runtime.chainId} (${registry.runtime.rpcUrl})`,
+  `moss-mcp: ${catalog.length} operations across ${new Set(catalog.map(({ protocol }) => protocol)).size} Protocols on Monad mainnet (${registry.runtime.rpcUrl})`,
 );
-
 await server.connect(new StdioServerTransport());
