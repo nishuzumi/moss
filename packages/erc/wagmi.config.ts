@@ -12,7 +12,7 @@ export default defineConfig({
   plugins: [
     foundry({
       project: ".",
-      include: ["IERC20.sol/**", "IERC721.sol/**", "IWETH9.sol/**"],
+      include: ["IERC20.sol/**", "IERC721.sol/**", "IERC1155.sol/**", "IWETH9.sol/**"],
       // wagmi's default excludes assume IERC20 is someone else's vendored
       // interface; here it IS our compiled source of truth — override them.
       exclude: ["build-info/**"],
