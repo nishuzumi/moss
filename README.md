@@ -22,6 +22,7 @@ Moss currently targets Monad mainnet, chain ID `143`.
 | WMON | `@themoss/system` | `wrap`, `unwrap` | `balanceOf` |
 | ERC-20 and native MON | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `allowance`, `metadata` |
 | ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
+| ERC-1155 | `@themoss/erc` | `transfer` | `balanceOf`, `isApprovedForAll`, `uri` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
 
 ## Quickstart
