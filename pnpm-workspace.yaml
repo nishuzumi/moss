@@ -2,6 +2,7 @@ packages:
   - packages/*
   - packages/protocols/*
   - examples/*
+shellEmulator: true
 allowBuilds:
   esbuild: true
 # Supply-chain guard: refuse dependency versions younger than 1 day (minutes).

@@ -69,8 +69,5 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test offline runner
-        run: pnpm test:scripts
-
       - name: Offline test
         run: pnpm test:offline

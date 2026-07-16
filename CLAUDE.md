@@ -85,7 +85,7 @@
 
 - Require focused tests for changed behavior and compile-time fixtures for
   exported type contracts. Before approval, run `pnpm lint`, `pnpm build`,
-  `pnpm typecheck`, and `pnpm test` in that order; use `MOSS_SKIP_E2E=1` only
+  `pnpm typecheck`, and `pnpm test` in that order; use `pnpm test:offline` only
   when the review environment cannot reach Monad mainnet, and state that the
   live checks were skipped.
 
@@ -112,7 +112,7 @@
   identity is not configurable or repeated in Protocols and Capability nodes.
 - Verify: `pnpm lint` / `pnpm build` / `pnpm typecheck` / `pnpm test`
   (build precedes typecheck — cross-package types resolve through dist). Tests include live
-  Monad mainnet e2e (free: Moss never signs/sends); `MOSS_SKIP_E2E=1` when
+  Monad mainnet e2e (free: Moss never signs/sends); use `pnpm test:offline` when
   offline; sandboxed/proxied environments need `NODE_USE_ENV_PROXY=1` for
   Node fetch and `HOME=$TMPDIR/forge-home` for forge runs.
 - Toolchain pins (ADR 0001): vitest 3.x (vite 8's oxc can't lower stage-3

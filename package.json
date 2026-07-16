@@ -8,8 +8,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "test:offline": "node scripts/test-offline.mjs",
-    "test:scripts": "node --test scripts/test-offline.test.mjs",
+    "test:offline": "MOSS_SKIP_E2E=1 pnpm test",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
