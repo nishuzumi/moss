@@ -129,7 +129,7 @@ function collectLabels(
 function titleCaseSlug(slug: string): string {
   return slug
     .split("-")
-    .map((part) => `${part[0]?.toUpperCase()}${part.slice(1)}`)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
 }
 
@@ -343,7 +343,7 @@ export class Registry {
     const meta = this.#capabilityMeta(node.protocol, node.method);
     return renderReceipt(
       this.#runReceipt(node.protocol, meta.spec.receipt, changes),
-      this.#renderText(node.protocol),
+      this.#createTextRenderer(node.protocol),
     );
   }
 
@@ -475,7 +475,7 @@ export class Registry {
     return meta;
   }
 
-  #renderText(protocol: string): (text: string) => string {
+  #createTextRenderer(protocol: string): (text: string) => string {
     const root = this.#get(protocol);
     const dependencies = new Map<string, string | null>();
     const visited = new Set<string>();

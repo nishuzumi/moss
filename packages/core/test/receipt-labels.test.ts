@@ -97,12 +97,13 @@ class UnrelatedProtocol {
   category: "token",
   description: "Receipt label root fixture.",
   contracts: {},
-  protocols: { branch: BranchProtocol, other: OtherTokenProtocol },
+  protocols: { branch: BranchProtocol, other: OtherTokenProtocol, deep: DeepTokenProtocol },
   labels: { Router: ROOT, TrustedShadow: TRUSTED },
 })
 class RootProtocol {
   declare branch: ProtocolRef<BranchProtocol>;
   declare other: ProtocolRef<OtherTokenProtocol>;
+  declare deep: ProtocolRef<DeepTokenProtocol>;
 
   @Capability<RootProtocol, typeof noParams>({
     intent: "Render fixture labels",
@@ -263,6 +264,12 @@ describe("Registry Receipt labels", () => {
           ],
         }),
     ).toThrow("multiple Trusted names");
+    expect(
+      () =>
+        new Registry(runtime, {
+          trustedTokens: [{ address: "invalid" as AddressValue, label: "Invalid" }],
+        }),
+    ).toThrow("invalid address");
     expect(() => new Registry(runtime).use(DuplicateLabelsProtocol)).toThrow(
       "multiple Package names",
     );
