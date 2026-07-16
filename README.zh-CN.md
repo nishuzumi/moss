@@ -44,7 +44,7 @@ pnpm --filter @themoss/example-simple-flow swap
 离线运行测试：
 
 ```bash
-MOSS_SKIP_E2E=1 pnpm test
+pnpm test:offline
 ```
 
 [新手上路](./docs/getting-started.zh-CN.md)会逐步打开每个阶段，说明 MCP 配置，并最终带你创建一个 Protocol 包。
@@ -126,7 +126,7 @@ pnpm lint
 pnpm test
 ```
 
-workspace package 的类型来自构建产物，因此必须先 build 再 typecheck。离线时使用 `MOSS_SKIP_E2E=1 pnpm test`。
+workspace package 的类型来自构建产物，因此必须先 build 再 typecheck。离线时使用 `pnpm test:offline`。
 
 ## 文档
 

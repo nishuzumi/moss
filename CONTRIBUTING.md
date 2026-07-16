@@ -20,7 +20,7 @@ pnpm lint
 pnpm test
 ```
 
-`MOSS_SKIP_E2E=1 pnpm test` skips live Monad tests when offline. Build must precede typecheck because cross-package declarations resolve through built output.
+`pnpm test:offline` skips live Monad tests when offline. Build must precede typecheck because cross-package declarations resolve through built output.
 
 Toolchain notes you shouldn't fight:
 

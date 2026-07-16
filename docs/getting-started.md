@@ -20,7 +20,7 @@ pnpm build
 Prove the toolchain without making RPC calls:
 
 ```bash
-MOSS_SKIP_E2E=1 pnpm test
+pnpm test:offline
 ```
 
 Build must run before typecheck because workspace packages resolve generated declarations from `dist`.

@@ -18,7 +18,7 @@ Run checks from the repository root so workspace dependencies are built in order
 pnpm build
 pnpm typecheck
 pnpm lint
-MOSS_SKIP_E2E=1 pnpm test
+pnpm test:offline
 ```
 
 ## Checklist

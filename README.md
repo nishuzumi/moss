@@ -44,7 +44,7 @@ pnpm --filter @themoss/example-simple-flow swap
 Run the test suite without live RPC calls:
 
 ```bash
-MOSS_SKIP_E2E=1 pnpm test
+pnpm test:offline
 ```
 
 The full tutorial is [Getting started](./docs/getting-started.md). It opens every stage, configures MCP, and finishes by creating a Protocol package.
@@ -126,7 +126,7 @@ pnpm lint
 pnpm test
 ```
 
-Build must precede typecheck because workspace packages resolve generated declarations. Use `MOSS_SKIP_E2E=1 pnpm test` when offline.
+Build must precede typecheck because workspace packages resolve generated declarations. Use `pnpm test:offline` when offline.
 
 ## Documentation
 

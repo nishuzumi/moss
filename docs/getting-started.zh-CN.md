@@ -20,7 +20,7 @@ pnpm build
 先在不访问 RPC 的情况下验证工具链：
 
 ```bash
-MOSS_SKIP_E2E=1 pnpm test
+pnpm test:offline
 ```
 
 workspace package 的类型来自 `dist` 中的构建产物，因此必须先 build 再 typecheck。
