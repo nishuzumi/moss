@@ -40,6 +40,10 @@ type MockMarket = {
   sellNumerator: bigint;
   sellDenominator: bigint;
   verified?: boolean;
+  tickSize?: bigint;
+  bestBid?: bigint;
+  bestAsk?: bigint;
+  order?: readonly [`0x${string}`, bigint, number, number, number, number, number, boolean];
 };
 
 const MARKETS: readonly MockMarket[] = [
@@ -49,6 +53,14 @@ const MARKETS: readonly MockMarket[] = [
   market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
   market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
 ];
+
+/** MARKETS with the tick size Kuru limit orders need (10 → 0.00001 quote-per-base per tick). */
+const tickedMarkets = (overrides: Partial<MockMarket> & { address: `0x${string}` }) =>
+  MARKETS.map((entry) => ({
+    ...entry,
+    tickSize: 10n,
+    ...(entry.address === overrides.address ? overrides : {}),
+  }));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -261,6 +273,164 @@ describe("Kuru", () => {
   });
 });
 
+describe("Kuru limit orders", () => {
+  it("discovers limitOrder under verb swap next to the order-book queries", () => {
+    const { registry } = offlineRegistry();
+    const swaps = registry.discover({ verb: "swap" });
+    expect(swaps.map((entry) => entry.method).sort()).toEqual(["limitOrder", "swap"]);
+    expect(swaps.find((entry) => entry.method === "limitOrder")?.tags).toContain("limit");
+    const [stub] = registry.load([{ protocol: "kuru", method: "limitOrder" }]);
+    expect(stub?.risk).toEqual(["fundOut"]);
+    expect(Object.keys(stub?.params ?? {})).toEqual(["tokenIn", "tokenOut", "amount", "price"]);
+    const queries = registry
+      .discover({ protocol: "kuru" })
+      .filter((entry) => entry.kind === "query");
+    expect(queries.map((entry) => entry.method).sort()).toEqual([
+      "bestBidAsk",
+      "orderStatus",
+      "quote",
+    ]);
+  });
+
+  it("places a tick-converted sell on the lowest-address market listing the pair", async () => {
+    const { registry } = offlineRegistry(tickedMarkets({ address: DIRECT_USDC_AUSD }));
+    const capability = await registry.action("kuru", "limitOrder", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amount: "10",
+      price: "1.05",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const [tx, ...rest] = flattenCapabilityTree(capability);
+    expect(rest).toEqual([]);
+    if (!tx) throw new Error("missing Kuru transaction");
+    // Two markets list USDC/AUSD; the deterministic pick is the lowest address.
+    expect(getAddress(tx.transaction.to)).toBe(DIRECT_USDC_AUSD);
+    // price 1.05 * pricePrecision 1e6 / tickSize 10 = 105000; size 10 * 1e6.
+    expect(decodeFunctionData({ abi: KuruOrderbookAbi, data: tx.transaction.data })).toEqual({
+      functionName: "addSellOrder",
+      args: [105_000, 10_000_000n, false],
+    });
+  });
+
+  it("derives the buy size from the quote spend at the tick-aligned price", async () => {
+    const { registry } = offlineRegistry(tickedMarkets({ address: DIRECT_USDC_AUSD }));
+    const capability = await registry.action("kuru", "limitOrder", ACCOUNT, {
+      tokenIn: AUSD_ADDRESS,
+      tokenOut: USDC_ADDRESS,
+      amount: "10.5",
+      price: "1.05",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const [tx] = flattenCapabilityTree(capability);
+    if (!tx) throw new Error("missing Kuru transaction");
+    // Spending 10.5 AUSD at 1.05 AUSD-per-USDC affords 10 USDC of base size.
+    expect(decodeFunctionData({ abi: KuruOrderbookAbi, data: tx.transaction.data })).toEqual({
+      functionName: "addBuyOrder",
+      args: [105_000, 10_000_000n, false],
+    });
+  });
+
+  it("rejects native MON as the committed asset", async () => {
+    const { registry } = offlineRegistry(tickedMarkets({ address: MON_USDC }));
+    await expect(
+      registry.action("kuru", "limitOrder", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amount: "1",
+        price: "0.5",
+      }),
+    ).rejects.toThrow("native MON limit orders are unsupported");
+  });
+
+  it("rejects a price below the market tick size", async () => {
+    const { registry } = offlineRegistry(tickedMarkets({ address: DIRECT_USDC_AUSD }));
+    await expect(
+      registry.action("kuru", "limitOrder", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amount: "10",
+        // 1e-6 * pricePrecision 1e6 = 1 raw, below the 10-raw tick.
+        price: "0.000001",
+      }),
+    ).rejects.toThrow("below the market's tick size");
+  });
+
+  it("parses a resting order Receipt and requires at least one Kuru event", async () => {
+    const { registry } = offlineRegistry(tickedMarkets({ address: DIRECT_USDC_AUSD }));
+    const capability = await registry.action("kuru", "limitOrder", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amount: "10",
+      price: "1.05",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const created = orderCreatedChange(DIRECT_USDC_AUSD, 7n, 10_000_000n, 105_000, false);
+    const receipt = registry.parseReceipt(capability, [created]);
+    expect(receipt.outcome).toEqual({
+      operation: "limitOrder",
+      protocol: "kuru",
+      market: DIRECT_USDC_AUSD,
+      orderId: "7",
+      owner: ACCOUNT,
+      size: "10000000",
+      price: "105000",
+      isBuy: false,
+      fills: [],
+    });
+    expect(() => registry.parseReceipt(capability, [])).toThrow("requires OrderCreated or Trade");
+  });
+
+  it("reads best bid/ask with the combined pricePrecision * sizePrecision scaling", async () => {
+    const { registry } = offlineRegistry(
+      tickedMarkets({ address: DIRECT_USDC_AUSD, bestBid: 1_050_000_000_000n }),
+    );
+    const result = await registry.action("kuru", "bestBidAsk", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+    });
+    if (result.kind !== "query") throw new Error("expected query");
+    // pricePrecision 1e6 * sizePrecision 1e6 → 12 scale digits; zero ask is null.
+    expect(result.data).toMatchObject({
+      market: DIRECT_USDC_AUSD,
+      bestBid: "1.05",
+      bestAsk: null,
+    });
+  });
+
+  it("reports open orders and treats deleted ids as filled_or_cancelled", async () => {
+    const { registry } = offlineRegistry(
+      tickedMarkets({
+        address: DIRECT_USDC_AUSD,
+        order: [ACCOUNT, 5_000_000n, 0, 0, 0, 105_000, 0, true],
+      }),
+    );
+    const open = await registry.action("kuru", "orderStatus", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      orderId: "9",
+    });
+    if (open.kind !== "query") throw new Error("expected query");
+    expect(open.data).toEqual({
+      market: DIRECT_USDC_AUSD,
+      orderId: "9",
+      owner: ACCOUNT,
+      size: "5000000",
+      price: "105000",
+      isBuy: true,
+      status: "open",
+    });
+
+    const gone = await registry.action("kuru", "orderStatus", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      orderId: "1",
+    });
+    if (gone.kind !== "query") throw new Error("expected query");
+    expect(gone.data).toMatchObject({ owner: null, status: "filled_or_cancelled" });
+  });
+});
+
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
   it("has deployed Router bytecode and dynamically quotes a market", {
     timeout: 60_000,
@@ -299,6 +469,59 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
       tokenOut: USDC_ADDRESS,
     });
   });
+
+  it("reads best bid/ask on the live MON/USDC market", { timeout: 60_000 }, async () => {
+    const registry = new Registry(await monadRuntime()).use(Kuru);
+    const result = await registry.action("kuru", "bestBidAsk", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+    });
+    if (result.kind !== "query") throw new Error("expected query");
+    const data = result.data as { bestBid: string | null; bestAsk: string | null };
+    // A live market has orders on at least one side.
+    expect(data.bestBid ?? data.bestAsk).not.toBeNull();
+  });
+
+  it("reports a historical order as filled_or_cancelled", { timeout: 60_000 }, async () => {
+    const registry = new Registry(await monadRuntime()).use(Kuru);
+    const result = await registry.action("kuru", "orderStatus", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      orderId: "1",
+    });
+    if (result.kind !== "query") throw new Error("expected query");
+    expect(result.data).toMatchObject({ status: "filled_or_cancelled" });
+  });
+
+  it("builds a tick-aligned limit buy from the live market params", {
+    timeout: 120_000,
+  }, async () => {
+    const registry = new Registry(await monadRuntime()).use(Kuru);
+    // Quote 1 MON to learn a realistic quote-per-base price for the pair.
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    const { estimatedAmountOut } = quote.data as { estimatedAmountOut: string };
+    const capability = await registry.action("kuru", "limitOrder", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      amount: "5",
+      price: estimatedAmountOut,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const [tx, ...rest] = flattenCapabilityTree(capability);
+    expect(rest).toEqual([]);
+    if (!tx) throw new Error("missing Kuru transaction");
+    const decoded = decodeFunctionData({ abi: KuruOrderbookAbi, data: tx.transaction.data });
+    expect(decoded.functionName).toBe("addBuyOrder");
+    const [price, size, postOnly] = decoded.args as readonly [number, bigint, boolean];
+    expect(price).toBeGreaterThan(0);
+    expect(size).toBeGreaterThan(0n);
+    expect(postOnly).toBe(false);
+  });
 });
 
 function offlineRegistry(markets: readonly MockMarket[] = MARKETS) {
@@ -319,29 +542,37 @@ function offlineRegistry(markets: readonly MockMarket[] = MARKETS) {
   vi.stubGlobal("fetch", fetchMock);
   const client = {
     readContract: async ({
+      address,
       functionName,
       args,
     }: {
+      address: string;
       functionName: string;
       args: readonly unknown[];
     }) => {
-      if (functionName !== "verifiedMarket") throw new Error(`unexpected read ${functionName}`);
-      const entry = byAddress.get(String(args[0]).toLowerCase());
-      if (!entry) throw new Error(`unknown market ${String(args[0])}`);
-      if (entry.verified === false) return [0, 0n, ZERO, 0n, ZERO, 0n, 0, 0n, 0n, 0n, 0n];
-      return [
-        10 ** entry.quoteDecimals,
-        10n ** BigInt(entry.baseDecimals),
-        entry.base,
-        BigInt(entry.baseDecimals),
-        entry.quote,
-        BigInt(entry.quoteDecimals),
-        0,
-        0n,
-        0n,
-        0n,
-        0n,
-      ];
+      if (functionName === "verifiedMarket") {
+        const entry = byAddress.get(String(args[0]).toLowerCase());
+        if (!entry) throw new Error(`unknown market ${String(args[0])}`);
+        if (entry.verified === false) return [0, 0n, ZERO, 0n, ZERO, 0n, 0, 0n, 0n, 0n, 0n];
+        return [
+          10 ** entry.quoteDecimals,
+          10n ** BigInt(entry.baseDecimals),
+          entry.base,
+          BigInt(entry.baseDecimals),
+          entry.quote,
+          BigInt(entry.quoteDecimals),
+          Number(entry.tickSize ?? 0n),
+          0n,
+          0n,
+          0n,
+          0n,
+        ];
+      }
+      const entry = byAddress.get(address.toLowerCase());
+      if (!entry) throw new Error(`unknown market ${address}`);
+      if (functionName === "bestBidAsk") return [entry.bestBid ?? 0n, entry.bestAsk ?? 0n];
+      if (functionName === "s_orders") return entry.order ?? [ZERO, 0n, 0, 0, 0, 0, 0, false];
+      throw new Error(`unexpected read ${functionName}`);
     },
     call: async ({ to, account, data }: { to: string; account: string; data: Hex }) => {
       const entry = byAddress.get(to.toLowerCase());
@@ -442,6 +673,22 @@ function tradeChange(address: `0x${string}`, orderId: bigint): Change {
   );
 }
 
+function orderCreatedChange(
+  address: `0x${string}`,
+  orderId: bigint,
+  size: bigint,
+  price: number,
+  isBuy: boolean,
+): Change {
+  return eventChange(
+    address,
+    KuruOrderbookAbi,
+    "OrderCreated",
+    [orderId, ACCOUNT, size, price, isBuy],
+    ["uint40", "address", "uint96", "uint32", "bool"],
+  );
+}
+
 function routerSwapChange(
   sender: `0x${string}`,
   tokenIn: `0x${string}`,
@@ -479,7 +726,7 @@ function erc20Transfer(
 function eventChange(
   address: `0x${string}`,
   abi: typeof KuruRouterAbi | typeof KuruOrderbookAbi,
-  eventName: "Trade" | "KuruRouterSwap",
+  eventName: "Trade" | "KuruRouterSwap" | "OrderCreated",
   values: readonly unknown[],
   types: readonly string[],
 ): Change {

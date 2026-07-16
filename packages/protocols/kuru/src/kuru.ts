@@ -21,11 +21,14 @@ import {
   type ReceiptResult,
   type TokenRef,
   TokenReference,
+  UnsignedIntegerString,
 } from "@themoss/core";
 import { ERC20 } from "@themoss/erc";
 import { decodeEventLog, formatUnits, getAddress, isAddress, parseUnits } from "viem";
 import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 import type {
+  KuruLimitOrderOutcome,
+  KuruOrderFill,
   KuruQuote,
   KuruSwapOutcome,
   MarketCandidate,
@@ -42,9 +45,16 @@ export const KURU_ROUTER_ADDRESS = "0xd651346d7c789536ebf06dc72aE3C8502cd695CC" 
 const KURU_API_URL = "https://api.kuru.io";
 const KURU_NATIVE = "0x0000000000000000000000000000000000000000" as const;
 const DEFAULT_SLIPPAGE_BPS = 50;
+const UINT32_MAX = (1n << 32n) - 1n;
 
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
+);
+const HumanTokenAmount = PositiveDecimalString.describe(
+  'A positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
+);
+const HumanPrice = PositiveDecimalString.describe(
+  'A positive base-10 decimal price in quote-per-base units, such as "0.022" for 0.022 USDC per MON.',
 );
 const KuruSlippage = BasisPoints.min(50)
   .max(5_000)
@@ -65,6 +75,22 @@ const swapParams = {
     type: KuruSlippage.default(DEFAULT_SLIPPAGE_BPS),
     description: "Maximum adverse movement allowed between quoting and execution.",
   },
+} satisfies ParamsSpec;
+
+const marketPairParams = {
+  tokenIn: { type: TokenReference, description: "Asset offered to the market." },
+  tokenOut: { type: TokenReference, description: "Asset requested from the market." },
+} satisfies ParamsSpec;
+
+const limitOrderParams = {
+  ...marketPairParams,
+  amount: { type: HumanTokenAmount, description: "Quantity of tokenIn committed to the order." },
+  price: { type: HumanPrice, description: "Limit price the order rests at." },
+} satisfies ParamsSpec;
+
+const orderStatusParams = {
+  ...marketPairParams,
+  orderId: { type: UnsignedIntegerString, description: "Kuru order id to look up." },
 } satisfies ParamsSpec;
 
 type InferredSwapParams = InferParams<typeof swapParams>;
@@ -106,6 +132,48 @@ export class Kuru {
       maximumAmountIn: formatUnits(prepared.executionAmountIn, prepared.inputDecimals),
       minimumAmountOut: formatUnits(prepared.minimumAmountOut, prepared.outputDecimals),
       path,
+    };
+  }
+
+  @Query({
+    intent: "Read the best bid and ask prices on a Kuru market",
+    params: marketPairParams,
+    tags: ["clob", "orderbook"],
+  })
+  async bestBidAsk(params: InferParams<typeof marketPairParams>, ctx: ActionCtx) {
+    const { market } = await this.#directMarket(params.tokenIn, params.tokenOut, ctx.account);
+    const [bid, ask] = await market.handle.read.bestBidAsk();
+    // bestBidAsk prices carry the combined pricePrecision * sizePrecision scaling.
+    const scaleDigits =
+      String(market.params.pricePrecision * market.params.sizePrecision).length - 1;
+    return {
+      market: market.address,
+      bestBid: bid === 0n ? null : formatUnits(bid, scaleDigits),
+      bestAsk: ask === 0n ? null : formatUnits(ask, scaleDigits),
+      note: "Prices in quote-per-base units. null means no orders on that side.",
+    };
+  }
+
+  @Query({
+    intent: "Look up a Kuru limit order by id",
+    params: orderStatusParams,
+    tags: ["clob", "orderbook"],
+  })
+  async orderStatus(params: InferParams<typeof orderStatusParams>, ctx: ActionCtx) {
+    const { market } = await this.#directMarket(params.tokenIn, params.tokenOut, ctx.account);
+    const [owner, size, , , , price, , isBuy] = await market.handle.read.s_orders([
+      Number(params.orderId),
+    ]);
+    // Kuru deletes filled and cancelled orders, so a zeroed owner means "gone".
+    const exists = !sameAddress(owner, KURU_NATIVE);
+    return {
+      market: market.address,
+      orderId: params.orderId,
+      owner: exists ? owner : null,
+      size: exists ? size.toString() : null,
+      price: exists ? String(price) : null,
+      isBuy: exists ? isBuy : null,
+      status: exists ? "open" : "filled_or_cancelled",
     };
   }
 
@@ -213,6 +281,136 @@ export class Kuru {
     };
   }
 
+  @Capability<Kuru, typeof limitOrderParams>({
+    intent: "Place a resting limit order on a Kuru market at a caller-chosen price",
+    verb: "swap",
+    params: limitOrderParams,
+    receipt: "limitOrderReceipt",
+    risk: ["fundOut"],
+    tags: ["clob", "orderbook", "limit"],
+  })
+  async limitOrder(
+    params: InferParams<typeof limitOrderParams>,
+    ctx: ActionCtx,
+  ): Promise<CapabilityResult> {
+    // Kuru markets denominate native MON as address(0), but addBuyOrder and
+    // addSellOrder are nonpayable — native MON cannot fund a resting order.
+    if (params.tokenIn === NATIVE) {
+      throw new ParameterError(
+        "native MON limit orders are unsupported — wrap MON first and use WMON as tokenIn",
+      );
+    }
+    const { market, isBuy } = await this.#directMarket(
+      params.tokenIn,
+      params.tokenOut,
+      ctx.account,
+    );
+    const { pricePrecision, sizePrecision, baseDecimals, quoteDecimals, tickSize } = market.params;
+    const price = toKuruPrice(params.price, pricePrecision, tickSize);
+    if (price <= 0n) throw new ParameterError("price is below the market's tick size");
+    if (price > UINT32_MAX) {
+      throw new ParameterError("price exceeds Kuru's uint32 limit after precision conversion");
+    }
+    const amountIn = parseUnits(params.amount, isBuy ? quoteDecimals : baseDecimals);
+    let size: bigint;
+    if (isBuy) {
+      // Buying base with quote: derive the base size the quote spend affords at
+      // the tick-aligned limit price (price * tickSize ≈ humanPrice * pricePrecision).
+      const baseInQuoteUnits = (amountIn * pricePrecision) / (price * tickSize);
+      const baseUnits =
+        (baseInQuoteUnits * 10n ** BigInt(baseDecimals)) / 10n ** BigInt(quoteDecimals);
+      size = toKuruSize(baseUnits, baseDecimals, sizePrecision);
+    } else {
+      size = toKuruSize(amountIn, baseDecimals, sizePrecision);
+    }
+    if (size <= 0n) throw new ParameterError("order size is below the market's size precision");
+    // Kuru limit orders settle against the maker's margin account, not via
+    // transferFrom — no approve step; the account must fund its margin balance
+    // before placement.
+    return isBuy
+      ? market.handle.addBuyOrder([Number(price), size, false])
+      : market.handle.addSellOrder([Number(price), size, false]);
+  }
+
+  @Receipt()
+  limitOrderReceipt(changes: readonly Change[]): ReceiptResult<KuruLimitOrderOutcome> {
+    let created:
+      | {
+          market: AddressValue;
+          orderId: string;
+          owner: AddressValue;
+          size: string;
+          price: string;
+          isBuy: boolean;
+        }
+      | undefined;
+    const fills: KuruOrderFill[] = [];
+    let market: AddressValue | undefined;
+    const parsed = changes.map((change) => {
+      if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
+      const event = tryDecodeKuruEvent(KuruOrderbookAbi, change);
+      if (!event) return this.erc20.changesReceipt([change]);
+      if (event.eventName === "OrderCreated") {
+        if (created) throw new Error("Kuru limit order emitted multiple OrderCreated events");
+        market = change.address;
+        created = {
+          market: change.address,
+          orderId: event.args.orderId.toString(),
+          owner: event.args.owner,
+          size: event.args.size.toString(),
+          price: event.args.price.toString(),
+          isBuy: event.args.isBuy,
+        };
+        return {
+          kind: "change" as const,
+          change,
+          data: created,
+          text: `Kuru Order Created: #${created.orderId} ${created.isBuy ? "buy" : "sell"} size ${created.size} at tick price ${created.price} on ${created.market}`,
+        };
+      }
+      // A non-postOnly order that crosses the book fills immediately as taker.
+      if (event.eventName === "Trade") {
+        market = change.address;
+        const fill: KuruOrderFill = {
+          orderId: event.args.orderId.toString(),
+          maker: event.args.makerAddress,
+          price: event.args.price.toString(),
+          filledSize: event.args.filledSize.toString(),
+        };
+        fills.push(fill);
+        return {
+          kind: "change" as const,
+          change,
+          data: fill,
+          text: `Trade Event: ${fill.filledSize} at ${fill.price} emitted by ${change.address}`,
+        };
+      }
+      throw new Error(`Unexpected Change: Kuru market emitted ${event.eventName}`);
+    });
+
+    if (!market) throw new Error("Kuru limit order Receipt requires OrderCreated or Trade");
+    const outcome: KuruLimitOrderOutcome = {
+      operation: "limitOrder",
+      protocol: "kuru",
+      market,
+      orderId: created?.orderId ?? null,
+      owner: created?.owner ?? null,
+      size: created?.size ?? null,
+      price: created?.price ?? null,
+      isBuy: created?.isBuy ?? null,
+      fills,
+    };
+    const rested = created
+      ? `order #${created.orderId} resting at tick price ${created.price}`
+      : "no resting order";
+    return {
+      kind: "receipt",
+      outcome,
+      text: `Kuru Limit Order: ${rested}; ${fills.length} immediate fill${fills.length === 1 ? "" : "s"}`,
+      changes: parsed,
+    };
+  }
+
   async #prepareSwap(params: SwapParams, account: AddressValue): Promise<PreparedSwap> {
     if (sameToken(params.tokenIn, params.tokenOut)) {
       throw new ParameterError("tokenIn and tokenOut must differ");
@@ -271,6 +469,28 @@ export class Kuru {
     };
   }
 
+  /**
+   * Resolve the single market listing the pair directly (either orientation).
+   * When several verified markets list the same pair the lowest address wins —
+   * a deterministic choice, and the chosen market is exposed in every result.
+   */
+  async #directMarket(tokenIn: TokenRef, tokenOut: TokenRef, account: AddressValue) {
+    if (sameToken(tokenIn, tokenOut)) throw new ParameterError("tokenIn and tokenOut must differ");
+    const kuruIn = toKuru(tokenIn);
+    const kuruOut = toKuru(tokenOut);
+    const candidates = (await fetchMarketCandidates(tokenIn, tokenOut))
+      .filter(
+        (candidate) =>
+          (sameAddress(candidate.base, kuruIn) && sameAddress(candidate.quote, kuruOut)) ||
+          (sameAddress(candidate.base, kuruOut) && sameAddress(candidate.quote, kuruIn)),
+      )
+      .sort((left, right) => left.address.toLowerCase().localeCompare(right.address.toLowerCase()));
+    const [candidate] = candidates;
+    if (!candidate) throw new Error("no verified Kuru market lists this token pair directly");
+    const market = await this.#verifyMarket(candidate, account);
+    return { market, isBuy: sameAddress(market.params.quoteAsset, kuruIn) };
+  }
+
   async #discoverRoutes(tokenIn: TokenRef, tokenOut: TokenRef, account: AddressValue) {
     const candidates = await fetchMarketCandidates(tokenIn, tokenOut);
     const markets = await Promise.all(
@@ -304,8 +524,15 @@ export class Kuru {
   }
 
   async #verifyMarket(candidate: MarketCandidate, account: AddressValue): Promise<VerifiedMarket> {
-    const [pricePrecision, sizePrecision, baseAsset, baseDecimals, quoteAsset, quoteDecimals] =
-      await this.router.read.verifiedMarket([candidate.address]);
+    const [
+      pricePrecision,
+      sizePrecision,
+      baseAsset,
+      baseDecimals,
+      quoteAsset,
+      quoteDecimals,
+      tickSize,
+    ] = await this.router.read.verifiedMarket([candidate.address]);
     if (
       pricePrecision === 0 ||
       sizePrecision === 0n ||
@@ -326,6 +553,7 @@ export class Kuru {
         baseDecimals: parsedBaseDecimals,
         quoteAsset,
         quoteDecimals: parsedQuoteDecimals,
+        tickSize: BigInt(tickSize),
       },
     };
   }
@@ -533,6 +761,27 @@ function amountSide(params: SwapParams) {
     return { kind: "amountOut", amount: params.amountOut } as const;
   }
   throw new ParameterError("provide exactly one of amountIn or amountOut");
+}
+
+/**
+ * Convert a human-readable price ("0.022") to Kuru's tick-denominated uint32
+ * order price: orderPrice = humanPrice * pricePrecision / tickSize.
+ */
+function toKuruPrice(humanPrice: string, pricePrecision: bigint, tickSize: bigint): bigint {
+  if (tickSize <= 0n) throw new Error("Kuru market reports no tick size");
+  const [intPart = "0", fracPart = ""] = humanPrice.split(".");
+  const intVal = BigInt(intPart || "0");
+  const raw =
+    fracPart.length === 0
+      ? intVal * pricePrecision
+      : intVal * pricePrecision +
+        (BigInt(fracPart) * pricePrecision) / 10n ** BigInt(fracPart.length);
+  return raw / tickSize;
+}
+
+/** Convert a token base-unit amount into Kuru's sizePrecision units. */
+function toKuruSize(amount: bigint, decimals: number, sizePrecision: bigint): bigint {
+  return (amount * sizePrecision) / 10n ** BigInt(decimals);
 }
 
 function scaleUnits(amount: bigint, fromDecimals: number, toDecimals: number) {

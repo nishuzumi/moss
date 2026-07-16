@@ -24,6 +24,8 @@ export type MarketParams = {
   baseDecimals: number;
   quoteAsset: AddressValue;
   quoteDecimals: number;
+  /** Kuru order prices are denominated in ticks: orderPrice = humanPrice * pricePrecision / tickSize. */
+  tickSize: bigint;
 };
 
 export type MarketCandidate = {
@@ -69,4 +71,27 @@ export type KuruSwapOutcome = {
   tokenOut: TokenRef;
   amountIn: string;
   amountOut: string;
+};
+
+/** One Trade event observed while a limit order crossed the book on placement. */
+export type KuruOrderFill = {
+  orderId: string;
+  maker: AddressValue;
+  price: string;
+  filledSize: string;
+};
+
+export type KuruLimitOrderOutcome = {
+  operation: "limitOrder";
+  protocol: "kuru";
+  market: AddressValue;
+  /** null when the order fully filled on placement and nothing rested on the book. */
+  orderId: string | null;
+  owner: AddressValue | null;
+  /** Resting size in Kuru sizePrecision units; null when nothing rested. */
+  size: string | null;
+  /** Resting tick price; null when nothing rested. */
+  price: string | null;
+  isBuy: boolean | null;
+  fills: readonly KuruOrderFill[];
 };
