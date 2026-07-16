@@ -4,6 +4,7 @@ import { kuruManifest } from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
 import { monadRuntime, systemManifest } from "@themoss/system";
 import { log, formatAmount, formatWarning } from "./utils/logger.js";
+import { formatUnits } from "viem";
 import { handleError, validateAmount } from "./utils/error-handler.js";
 import { parseArgs, getAmount, getAccount } from "./utils/args.js";
 
@@ -23,7 +24,7 @@ try {
   const registry = new Registry(runtime);
   for (const manifest of [systemManifest, ercManifest, kuruManifest])
     registry.use(manifest);
-  const simulator = createTraceSimulator(runtime, { observer: registry.observer() });
+  const simulator = createTraceSimulator(runtime);
 
   log.step(1, `Plan A: Swap ${AMOUNT} MON → USDC...`);
   const swapPlan = (await registry.action("kuru", "swap", ACCOUNT, {
@@ -34,9 +35,19 @@ try {
   log.info(`Intent: ${swapPlan.intent}`);
   log.info(`Transactions: ${swapPlan.txs.length}`);
 
-  log.step(2, `Plan B: Swap half USDC → MON...`);
-  const minUsdc = swapPlan.expects.in?.[0]?.amountMin ?? "0";
-  const halfUsdc = formatAmount(minUsdc, 6);
+  log.step(2, "Simulating Plan A to get USDC output...");
+  const { results: swapResults, halted: swapHalted } = await simulator.simulate([swapPlan]);
+
+  if (swapHalted) {
+    log.error(`Simulation halted: ${swapHalted.reason}`);
+    process.exit(1);
+  }
+
+  const swapResult = swapResults[0]!;
+  const minUsdc = BigInt(swapResult.effects.assetsOut[0]?.amount ?? "0");
+  const halfUsdc = formatUnits(minUsdc / 2n, 6);
+
+  log.step(3, `Plan B: Swap half USDC → MON (${halfUsdc})...`);
   const swapBackPlan = (await registry.action("kuru", "swap", ACCOUNT, {
     tokenIn: "USDC",
     tokenOut: "MON",
@@ -45,36 +56,46 @@ try {
   log.info(`Intent: ${swapBackPlan.intent}`);
   log.info(`Transactions: ${swapBackPlan.txs.length}`);
 
-  log.step(3, "Simulating both plans as one chain...");
-  const { results, halted } = await simulator.simulate([swapPlan, swapBackPlan]);
+  log.step(4, "Simulating Plan B...");
+  const { results: swapBackResults, halted: swapBackHalted } = await simulator.simulate([swapBackPlan]);
 
-  if (halted) {
-    log.error(`Simulation halted: ${halted.reason}`);
+  if (swapBackHalted) {
+    log.error(`Simulation halted: ${swapBackHalted.reason}`);
     process.exit(1);
   }
 
-  const planNames = ["A", "B"];
-  const planDescriptions = ["MON→USDC", "USDC→MON"];
+  const swapBackResult = swapBackResults[0]!;
 
-  for (const [i, r] of results.entries()) {
-    log.table([
-      {
-        plan: planNames[i] ?? String(i),
-        description: planDescriptions[i] ?? "",
-        intent: r.intent,
-        reverted: r.reverted ? "Yes" : "No",
-        assetsOut: r.effects.assetsOut
-          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
-          .join(", "),
-        assetsIn: r.effects.assetsIn
-          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
-          .join(", "),
-        warnings: r.warnings.length === 0 ? "None" : `${r.warnings.length} warning(s)`,
-      },
-    ]);
-  }
+  log.table([
+    {
+      plan: "A",
+      description: "MON→USDC",
+      intent: swapResult.intent,
+      reverted: swapResult.reverted ? "Yes" : "No",
+      assetsOut: swapResult.effects.assetsOut
+        .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+        .join(", "),
+      assetsIn: swapResult.effects.assetsIn
+        .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+        .join(", "),
+      warnings: swapResult.warnings.length === 0 ? "None" : `${swapResult.warnings.length} warning(s)`,
+    },
+    {
+      plan: "B",
+      description: "USDC→MON",
+      intent: swapBackResult.intent,
+      reverted: swapBackResult.reverted ? "Yes" : "No",
+      assetsOut: swapBackResult.effects.assetsOut
+        .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+        .join(", "),
+      assetsIn: swapBackResult.effects.assetsIn
+        .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+        .join(", "),
+      warnings: swapBackResult.warnings.length === 0 ? "None" : `${swapBackResult.warnings.length} warning(s)`,
+    },
+  ]);
 
-  const clean = results.every((r) => !r.reverted && r.warnings.length === 0);
+  const clean = !swapResult.reverted && swapResult.warnings.length === 0 && !swapBackResult.reverted && swapBackResult.warnings.length === 0;
 
   if (clean) {
     log.section("SUCCESS");
@@ -84,12 +105,16 @@ try {
   } else {
     log.section("WARNING");
     log.warning("Warnings present — STOP. Never hand these txs to a signer.");
-    for (const [i, r] of results.entries()) {
-      if (r.warnings.length > 0) {
-        log.warning(`Plan ${planNames[i]} (${planDescriptions[i]}):`);
-        for (const warning of r.warnings) {
-          log.warning(`  - ${formatWarning(warning)}`);
-        }
+    if (swapResult.warnings.length > 0) {
+      log.warning("Plan A (MON→USDC):");
+      for (const warning of swapResult.warnings) {
+        log.warning(`  - ${formatWarning(warning)}`);
+      }
+    }
+    if (swapBackResult.warnings.length > 0) {
+      log.warning("Plan B (USDC→MON):");
+      for (const warning of swapBackResult.warnings) {
+        log.warning(`  - ${formatWarning(warning)}`);
       }
     }
     log.divider();

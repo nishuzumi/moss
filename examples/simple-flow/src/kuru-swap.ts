@@ -29,7 +29,7 @@ try {
   const registry = new Registry(runtime);
   for (const manifest of [systemManifest, ercManifest, kuruManifest])
     registry.use(manifest);
-  const simulator = createTraceSimulator(runtime, { observer: registry.observer() });
+  const simulator = createTraceSimulator(runtime);
 
   log.step(0, `Getting quote: ${AMOUNT} ${TOKEN_IN} → ${TOKEN_OUT}...`);
   const quote = (await registry.action("kuru", "quote", ACCOUNT, {
@@ -55,60 +55,53 @@ try {
   log.info(`Intent: ${sell.intent}`);
   log.info(`Expects: ${JSON.stringify(sell.expects, null, 2)}`);
 
-  log.step(2, `Building Plan B: Buy back half in ${TOKEN_IN}...`);
-  const minTokenOut = BigInt(sell.expects.in?.[0]?.amountMin ?? "0");
+  log.step(2, "Simulating Plan A to get output amount...");
+  const { results: sellResults, halted: sellHalted } = await simulator.simulate([sell]);
+
+  if (sellHalted) {
+    log.error(`Simulation halted: ${sellHalted.reason}`);
+    process.exit(1);
+  }
+
+  const sellResult = sellResults[0]!;
+  const minTokenOut = BigInt(sellResult.effects.assetsOut[0]?.amount ?? "0");
   const usdcLikeTokens = ["USDC", "AUSD"];
   const decimals = usdcLikeTokens.includes(TOKEN_OUT) ? 6 : 18;
   const half = formatUnits(minTokenOut / 2n, decimals);
 
   if (parseFloat(half) <= 0) {
     log.warning("Output amount too small for Plan B, skipping...");
-    log.step(3, "Simulating Plan A only...");
-    const { results, halted } = await simulator.simulate([sell]);
+    log.step(3, "Displaying Plan A result...");
+    log.table([
+      {
+        plan: "A",
+        intent: sellResult.intent,
+        reverted: sellResult.reverted ? "Yes" : "No",
+        assetsOut: sellResult.effects.assetsOut
+          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+          .join(", "),
+        assetsIn: sellResult.effects.assetsIn
+          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+          .join(", "),
+        warnings: sellResult.warnings.length === 0 ? "None" : `${sellResult.warnings.length} warning(s)`,
+      },
+    ]);
 
-    if (halted) {
-      log.error(`Simulation halted: ${halted.reason}`);
-      process.exit(1);
-    }
-
-    for (const [i, r] of results.entries()) {
-      log.table([
-        {
-          plan: "A",
-          intent: r.intent,
-          reverted: r.reverted ? "Yes" : "No",
-          assetsOut: r.effects.assetsOut
-            .map((a) => `${formatAmount(a.amount)} ${a.token}`)
-            .join(", "),
-          assetsIn: r.effects.assetsIn
-            .map((a) => `${formatAmount(a.amount)} ${a.token}`)
-            .join(", "),
-          warnings: r.warnings.length === 0 ? "None" : `${r.warnings.length} warning(s)`,
-        },
-      ]);
-    }
-
-    const clean = results.every((r) => !r.reverted && r.warnings.length === 0);
-
-    if (clean) {
+    if (!sellResult.reverted && sellResult.warnings.length === 0) {
       log.section("SUCCESS");
       log.success("Plan A verified against live orderbook state — safe to hand to a wallet.");
       log.divider();
     } else {
       log.section("WARNING");
       log.warning("Warnings present — STOP. Never hand these txs to a signer.");
-      for (const [i, r] of results.entries()) {
-        if (r.warnings.length > 0) {
-          log.warning(`Plan ${i === 0 ? "A" : "B"}:`);
-          for (const warning of r.warnings) {
-            log.warning(`  - ${warning}`);
-          }
-        }
+      for (const warning of sellResult.warnings) {
+        log.warning(`  - ${warning}`);
       }
       log.divider();
       process.exit(1);
     }
   } else {
+    log.step(3, `Building Plan B: Buy back half in ${TOKEN_IN}...`);
     const buy = (await registry.action("kuru", "swap", ACCOUNT, {
       tokenIn: TOKEN_OUT,
       tokenOut: TOKEN_IN,
@@ -117,32 +110,45 @@ try {
     log.info(`Intent: ${buy.intent}`);
     log.info(`Transactions: ${buy.txs.length} (approve + swap)`);
 
-    log.step(3, "Simulating both plans as one chain...");
-    const { results, halted } = await simulator.simulate([sell, buy]);
+    log.step(4, "Simulating Plan B...");
+    const { results: buyResults, halted: buyHalted } = await simulator.simulate([buy]);
 
-    if (halted) {
-      log.error(`Simulation halted: ${halted.reason}`);
+    if (buyHalted) {
+      log.error(`Simulation halted: ${buyHalted.reason}`);
       process.exit(1);
     }
 
-    for (const [i, r] of results.entries()) {
-      log.table([
-        {
-          plan: i === 0 ? "A" : "B",
-          intent: r.intent,
-          reverted: r.reverted ? "Yes" : "No",
-          assetsOut: r.effects.assetsOut
-            .map((a) => `${formatAmount(a.amount)} ${a.token}`)
-            .join(", "),
-          assetsIn: r.effects.assetsIn
-            .map((a) => `${formatAmount(a.amount)} ${a.token}`)
-            .join(", "),
-          warnings: r.warnings.length === 0 ? "None" : `${r.warnings.length} warning(s)`,
-        },
-      ]);
-    }
+    const buyResult = buyResults[0]!;
 
-    const clean = results.every((r) => !r.reverted && r.warnings.length === 0);
+    log.step(5, "Displaying both plans results...");
+    log.table([
+      {
+        plan: "A",
+        intent: sellResult.intent,
+        reverted: sellResult.reverted ? "Yes" : "No",
+        assetsOut: sellResult.effects.assetsOut
+          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+          .join(", "),
+        assetsIn: sellResult.effects.assetsIn
+          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+          .join(", "),
+        warnings: sellResult.warnings.length === 0 ? "None" : `${sellResult.warnings.length} warning(s)`,
+      },
+      {
+        plan: "B",
+        intent: buyResult.intent,
+        reverted: buyResult.reverted ? "Yes" : "No",
+        assetsOut: buyResult.effects.assetsOut
+          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+          .join(", "),
+        assetsIn: buyResult.effects.assetsIn
+          .map((a) => `${formatAmount(a.amount)} ${a.token}`)
+          .join(", "),
+        warnings: buyResult.warnings.length === 0 ? "None" : `${buyResult.warnings.length} warning(s)`,
+      },
+    ]);
+
+    const clean = !sellResult.reverted && sellResult.warnings.length === 0 && !buyResult.reverted && buyResult.warnings.length === 0;
 
     if (clean) {
       log.section("SUCCESS");
@@ -151,12 +157,16 @@ try {
     } else {
       log.section("WARNING");
       log.warning("Warnings present — STOP. Never hand these txs to a signer.");
-      for (const [i, r] of results.entries()) {
-        if (r.warnings.length > 0) {
-          log.warning(`Plan ${i === 0 ? "A" : "B"}:`);
-          for (const warning of r.warnings) {
-            log.warning(`  - ${warning}`);
-          }
+      if (sellResult.warnings.length > 0) {
+        log.warning("Plan A:");
+        for (const warning of sellResult.warnings) {
+          log.warning(`  - ${warning}`);
+        }
+      }
+      if (buyResult.warnings.length > 0) {
+        log.warning("Plan B:");
+        for (const warning of buyResult.warnings) {
+          log.warning(`  - ${warning}`);
         }
       }
       log.divider();
