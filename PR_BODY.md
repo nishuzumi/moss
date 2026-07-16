@@ -1,35 +1,44 @@
-<!--
-  Copy the content below into the GitHub PR description body when creating the PR.
-  The section under "What & why" through the end is the PR body.
--->
-
 ## What & why
 
-Closes #12.
+Rebuild of the FastLane shMONAD liquid staking adapter against the PR #31 Capability + Receipt framework.
 
-Adds a FastLane shMONAD liquid staking adapter for Monad mainnet. shMONAD is a combined ERC-4626 vault + ERC-20 receipt token: users stake native MON and receive shMON (a reward-bearing token that grows in value relative to MON over time).
+The original PR (submitted before #31) used the removed Plan/expects, @Event, manifest, and MCP-registration architecture. This rebased version follows the new self-describing @Protocol pattern.
 
-The adapter provides stake/unstake capabilities plus read-only queries, registered into the MCP server catalog.
+shMONAD is a combined ERC-4626 vault + ERC-20 receipt token on Monad: users stake native MON and receive shMON (a reward-bearing token that grows in value relative to MON over time).
+
+## What changed
+
+- **Rebased** onto current main (PR #31 refactored core)
+- **Deleted** `tokens.ts` — token-catalog no longer exists
+- **Rewrote** `adapter.ts` → `fastlane.ts` — new architecture:
+  - `@Capability` decorator with `receipt` field (names a `@Receipt` method)
+  - Capabilities return `[this.vault.deposit(...)]` — direct TransactionNode array, no `plan()`
+  - `@Receipt` methods parse ordered `Change[]` (Deposit/Withdraw events decoded via viem)
+  - Zod-based params (`PositiveDecimalString` for amounts, `Address` for addresses)
+  - Pure `@Receipt` (no Runtime/Handle access) conforming to `verifyReceiptCoverage`
+- **Rewrote** `index.ts` — exports only the `FastLane` Protocol class for `registry.use(FastLane)`
+- **Rewrote** tests — discover → load → action → flattenCapabilityTree → parseReceipt pattern
+- **No MCP server changes** — protocols self-discover via class export
 
 ## Type of change
 
 - [x] New protocol adapter / capability / query
-- [x] Core / MCP server change
+- [ ] Core / MCP server change
 - [ ] Docs / examples
 - [ ] Bugfix
 
 ## Checklist
 
-- [x] `pnpm lint && pnpm typecheck && pnpm build && pnpm test` passes locally
+- [ ] `pnpm lint && pnpm typecheck && pnpm build && pnpm test` passes locally (blocked by erc/system still importing removed APIs — expected transitional state)
 - [x] Includes a changeset (`pnpm changeset`) if user-facing
 
 ### For new capabilities (required)
 
-- [x] `intent`, `params` (semantic types), and `risk` labels are all declared
-- [x] The Plan declares `expects` (funds out / in, approvals) built from decoded params
+- [x] `intent`, `params` (Zod semantic types), and `risk` labels are all declared
+- [x] Each @Capability returns exactly one direct TransactionNode
+- [x] Each @Capability names a @Receipt method for exhaustive ordered Change parsing
+- [x] Protocol class exported for direct Registry discovery
 - [x] Discoverable & loadable: shows up in `discover` and `load` output
-- [x] A reproducible example or e2e test runs `discover → load → action → simulate` against Monad mainnet
-- [x] Simulation produces no warnings for the happy path
 
 ## Architecture
 
@@ -44,10 +53,10 @@ The shMONAD contract is an **ERC-1967 proxy** at `0x1B68626d…` pointing to an 
 
 ## Capabilities
 
-| Method | Verb | Description |
-|--------|------|-------------|
-| `stake` | `stake` | Deposit native MON → mint shMON via ERC-4626 `deposit(assets, receiver)` |
-| `unstake` | `unstake` | Burn shMON → redeem native MON via ERC-4626 `redeem(shares, receiver, owner)` |
+| Method | Verb | Receipt | Description |
+|--------|------|---------|-------------|
+| `stake` | `stake` | `stakeReceipt` | Deposit native MON → mint shMON via ERC-4626 `deposit(assets, receiver)` |
+| `unstake` | `unstake` | `unstakeReceipt` | Burn shMON → redeem native MON via ERC-4626 `redeem(shares, receiver, owner)` |
 
 ## Queries
 
@@ -57,39 +66,27 @@ The shMONAD contract is an **ERC-1967 proxy** at `0x1B68626d…` pointing to an 
 | `exchangeRate` | Current 1 shMON → MON conversion rate via `convertToAssets` |
 | `totalStaked` | Total MON locked in FastLane via `totalAssets` |
 
-## Evidence
+## Receipt parsing
 
-### Build
+Both `stakeReceipt` and `unstakeReceipt` decode the ERC-4626 `Deposit`/`Withdraw` events via `viem.decodeEventLog`, preserving the original Change object identities to satisfy `verifyReceiptCoverage`:
 
-```
-pnpm -r build — passed
-pnpm -r typecheck — passed
-```
+- **stakeReceipt**: Decodes `assets` (MON deposited) and `shares` (shMON minted) from `Deposit` event
+- **unstakeReceipt**: Decodes `assets` (MON received) and `shares` (shMON burned) from `Withdraw` event
 
-### Offline tests (5 passed)
+## Files changed
 
 ```
- ✓ discovers stake and unstake capabilities
- ✓ loads the stake capability stub
- ✓ loads the unstake capability stub
- ✓ builds a stake plan
- ✓ builds an unstake plan
+packages/protocols/fastlane/
+├── src/
+│   ├── abis/fastlane.ts    (unchanged)
+│   ├── fastlane.ts         (new — replaces adapter.ts)
+│   └── index.ts            (rewritten — exports Protocol class only)
+├── test/
+│   └── fastlane.test.ts    (new — replaces adapter.test.ts)
+└── tokens.ts               (deleted — no token-catalog in new framework)
+.changeset/fastlane-shmonad-adapter.md  (updated)
 ```
 
-### Live mainnet e2e tests (4 passed, zero funds required)
+## Changeset
 
-The e2e suite simulates every plan against live Monad mainnet via `debug_traceCall` — no keys, no funds, no signatures required. The simulator pre-funds the test account so native-MON deposits succeed.
-
-```
- ✓ totalStaked query reads TVL            →  real on-chain TVL (> 1 MON)
- ✓ exchangeRate query reads current rate  →  real conversion rate (> 0)
- ✓ stake plan simulates on mainnet        →  no revert, no CONFIRMATION_MISSING,
-                                             @Event decodes "Staked 0.001 MON into shMONAD"
- ✓ unstake with zero balance reverts      →  clean reversion (account has 0 shMON)
-```
-
-The `stake` simulation produced **zero warnings** — the plan is safe to sign.
-
-### Changeset
-
-Valid linked minor release plan covering `@themoss/protocol-fastlane` and `@themoss/mcp-server`.
+Valid linked minor release plan covering `@themoss/protocol-fastlane` only (no MCP server change).
