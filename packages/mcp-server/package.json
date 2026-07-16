@@ -26,6 +26,7 @@
     "@themoss/core": "workspace:*",
     "@themoss/protocol-aave-v3": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/protocol-uniswap-v4": "workspace:*",
     "zod": "^3.25.0",
     "@themoss/erc": "workspace:*",
     "@themoss/system": "workspace:*",

@@ -4,6 +4,7 @@ import * as aaveV3 from "@themoss/protocol-aave-v3";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
 import * as system from "@themoss/system";
+import * as uniswapV4 from "@themoss/protocol-uniswap-v4";
 import { monadRuntime } from "@themoss/system";
 import { createMossServer } from "./server.js";
 
@@ -11,7 +12,7 @@ const rpcUrl = process.env.MOSS_RPC_URL;
 const runtime = await monadRuntime({ ...(rpcUrl ? { rpcUrl } : {}) });
 const { server, registry } = createMossServer({
   runtime,
-  protocols: [system, erc, aaveV3, kuru],
+  protocols: [system, erc, aaveV3, kuru, uniswapV4],
 });
 const catalog = registry.discover();
 console.error(
