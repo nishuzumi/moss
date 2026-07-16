@@ -53,7 +53,6 @@ export interface CapabilityNode {
   protocol: string;
   method: string;
   params: JsonSafeValue;
-  receipt: string;
   children: readonly (CapabilityNode | TransactionNode)[];
 }
 

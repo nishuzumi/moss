@@ -142,7 +142,6 @@ type CapabilityNode = {
   protocol: string;
   method: string;
   params: JsonSafeValue;
-  receipt: string;
   children: readonly (CapabilityNode | TransactionNode)[];
 };
 
@@ -157,7 +156,7 @@ type TransactionNode = {
 };
 ```
 
-Every Capability has exactly one direct TransactionNode and one Receipt name. Extra transactions belong to nested Capabilities. Never edit or reorder the returned tree; call `action` again when inputs change.
+Every Capability has exactly one direct TransactionNode. The typed Receipt parser is resolved by Registry from the registered `protocol + method`; callers do not provide a Receipt name. Extra transactions belong to nested Capabilities. Never edit or reorder the returned tree; call `action` again when inputs change.
 
 ## simulate
 

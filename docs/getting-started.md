@@ -157,7 +157,7 @@ const capability = result;
 console.dir(capability, { depth: null });
 ```
 
-Each Capability owns exactly one direct TransactionNode and one named Receipt parser. Core rejects zero or multiple direct transactions.
+Each Capability owns exactly one direct TransactionNode. Registry resolves its Receipt parser from the registered `protocol + method`; the serialized tree does not carry a caller-supplied Receipt name. Core rejects zero or multiple direct transactions.
 
 An ERC-20 input swap would contain a nested ERC-20 approval Capability before the Kuru transaction. That child owns its own transaction and Receipt; execution order comes from depth-first traversal.
 

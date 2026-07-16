@@ -19,6 +19,10 @@ import { createMossServer, toAgentSimulation } from "../src/server.js";
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
 
 async function connectedClient(simulateOutcome?: SimulateOutcome) {
+  return (await connectedHarness(simulateOutcome)).client;
+}
+
+async function connectedHarness(simulateOutcome?: SimulateOutcome) {
   const { server, simulator } = createMossServer({ runtime, protocols: [system, erc, kuru] });
   if (simulateOutcome) {
     simulator.simulate = async () => simulateOutcome;
@@ -26,7 +30,7 @@ async function connectedClient(simulateOutcome?: SimulateOutcome) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  return client;
+  return { client, simulator };
 }
 
 function parseText(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
@@ -76,13 +80,13 @@ describe("moss MCP server", () => {
           params: { amount: "0.25" },
         },
       }),
-    ) as { kind: string; receipt: string; children: unknown[] };
+    ) as { kind: string; children: unknown[] };
     expect(capability).toMatchObject({
       kind: "capability",
       protocol: "wmon",
       method: "wrap",
-      receipt: "wrapReceipt",
     });
+    expect(capability).not.toHaveProperty("receipt");
     expect(capability.children).toHaveLength(1);
   });
 
@@ -95,6 +99,7 @@ describe("moss MCP server", () => {
       properties: { capability: expect.any(Object) },
     });
     expect(JSON.stringify(simulate?.inputSchema)).not.toContain("plans");
+    expect(JSON.stringify(simulate?.inputSchema)).not.toContain("receipt");
   });
 
   it("projects full SDK Receipts into ordered Agent text only", () => {
@@ -187,17 +192,12 @@ describe("moss MCP server", () => {
         simulationResult(
           "erc20",
           "approve",
-          receiptRegistry.parseReceipt(receiptCapability("erc20", "approve", "approveReceipt"), [
-            approval,
-          ]),
+          receiptRegistry.parseReceipt(receiptCapability("erc20", "approve"), [approval]),
         ),
         simulationResult(
           "kuru",
           "swap",
-          receiptRegistry.parseReceipt(
-            receiptCapability("kuru", "swap", "swapReceipt"),
-            swapChanges,
-          ),
+          receiptRegistry.parseReceipt(receiptCapability("kuru", "swap"), swapChanges),
         ),
       ],
     };
@@ -207,14 +207,7 @@ describe("moss MCP server", () => {
       await client.callTool({
         name: "simulate",
         arguments: {
-          capability: {
-            kind: "capability",
-            protocol: "kuru",
-            method: "swap",
-            params: {},
-            receipt: "swapReceipt",
-            children: [],
-          },
+          capability: receiptCapability("kuru", "swap"),
         },
       }),
     );
@@ -245,19 +238,60 @@ describe("moss MCP server", () => {
       ],
     });
   });
+
+  it("rejects unregistered simulate Capabilities before tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: {
+        capability: receiptCapability("kuru", "missing"),
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    const content = response.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain(
+      'Error: Capability references unknown capability "kuru.missing"',
+    );
+    expect(simulated).toBe(false);
+  });
+
+  it("rejects caller-supplied Receipt names before tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: {
+        capability: { ...receiptCapability("kuru", "swap"), receipt: "swapReceipt" },
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    expect(simulated).toBe(false);
+  });
 });
 
 function eventChange(address: `0x${string}`): Change {
   return { kind: "event", address, topics: ["0x01"], data: "0x02" };
 }
 
-function receiptCapability(protocol: string, method: string, receipt: string): CapabilityNode {
+function receiptCapability(protocol: string, method: string): CapabilityNode {
   return {
     kind: "capability",
     protocol,
     method,
     params: {},
-    receipt,
     children: [
       {
         kind: "transaction",

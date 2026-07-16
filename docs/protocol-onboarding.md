@@ -88,7 +88,7 @@ Registry parses action input with the composed schemas. `load` returns JSON-safe
 
 ## 4. Author one transaction per Capability
 
-Every Capability owns exactly one direct transaction and one named Receipt parser. More transactions require nested Capabilities.
+Every Capability owns exactly one direct transaction and one registered Receipt parser. More transactions require nested Capabilities. The serialized Capability tree carries `protocol + method`; Registry resolves the Receipt name from the registered Capability metadata.
 
 ```ts
 @Capability<MyProtocol, typeof swapParams>({

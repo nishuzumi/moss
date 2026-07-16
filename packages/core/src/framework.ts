@@ -70,7 +70,6 @@ export function flattenCapabilityTree(root: CapabilityNode): ExecutableCapabilit
     }
     requireText(node.protocol, `${path}.protocol`);
     requireText(node.method, `${path}.method`);
-    requireText(node.receipt, `${path}.receipt`);
     assertJsonSafe(node.params, `${path}.params`);
     if (!Array.isArray(node.children)) throw new Error(`${path}.children must be an array`);
     const direct = node.children.filter(

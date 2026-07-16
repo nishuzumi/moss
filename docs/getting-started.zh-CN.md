@@ -157,7 +157,7 @@ const capability = result;
 console.dir(capability, { depth: null });
 ```
 
-每个 Capability 恰好拥有一个直接 TransactionNode 和一个指定的 Receipt parser。直接交易为零或多于一笔时，core 会拒绝整棵树。
+每个 Capability 恰好拥有一个直接 TransactionNode。Registry 会根据已注册的 `protocol + method` 解析对应的 Receipt parser；序列化 tree 不携带由调用方提供的 Receipt 名称。直接交易为零或多于一笔时，core 会拒绝整棵树。
 
 如果输入是 ERC-20，swap 会在 Kuru 交易前包含一个嵌套的 ERC-20 approve Capability。子节点拥有自己的交易和 Receipt，执行顺序来自深度优先遍历。
 

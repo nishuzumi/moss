@@ -100,7 +100,7 @@ if (simulation.halted || simulation.results.some((item) => item.warnings.length)
 
 ## 验证流程
 
-每个 Capability 拥有一笔直接的未签名交易和一个指定的 typed Receipt parser。其他交易只能属于嵌套 Capability；core 会验证整棵树并按确定的深度优先顺序展开。
+每个 Capability 拥有一笔直接的未签名交易，以及由其 `protocol + method` 注册得到的 typed Receipt parser。序列化 tree 不携带调用方提供的 Receipt 名称。其他交易只能属于嵌套 Capability；core 会验证整棵树并按确定的深度优先顺序展开。
 
 模拟器按真实执行顺序，把成功的 Event 与 native MON transfer 记录为不可变 Change。Receipt 叶子必须保留原始 Change 对象，并保持相同长度与顺序。
 

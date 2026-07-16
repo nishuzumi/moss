@@ -18,7 +18,6 @@ describe("Protocol template", () => {
     const registry = new Registry(runtime).use(ExampleProtocol);
     const capability = await registry.action("template", "deposit", ACCOUNT, { amount: "1" });
     if (capability.kind !== "capability") throw new Error("expected capability");
-    expect(capability.receipt).toBe("depositReceipt");
     expect(flattenCapabilityTree(capability)[0]?.transaction).toMatchObject({
       to: EXAMPLE_VAULT_ADDRESS,
       value: "0xde0b6b3a7640000",

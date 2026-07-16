@@ -100,7 +100,7 @@ if (simulation.halted || simulation.results.some((item) => item.warnings.length)
 
 ## How verification works
 
-Every Capability owns one direct unsigned transaction and one named typed Receipt parser. Additional transactions belong to nested Capabilities, which core validates and flattens in deterministic depth-first order.
+Every Capability owns one direct unsigned transaction and one typed Receipt parser registered for its `protocol + method`. The serialized tree does not carry a caller-supplied Receipt name. Additional transactions belong to nested Capabilities, which core validates and flattens in deterministic depth-first order.
 
 Simulation records successful Events and native MON transfers as immutable Changes in exact execution order. Receipt leaves must retain the original Change objects with identical length and order.
 

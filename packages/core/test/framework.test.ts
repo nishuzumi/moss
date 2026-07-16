@@ -339,7 +339,6 @@ describe("framework core seam", () => {
       protocol: "testvault",
       method: "wrap",
       params: { amount: "1.5" },
-      receipt: "wrapReceipt",
       children: [
         {
           kind: "transaction",
@@ -407,7 +406,6 @@ describe("framework core seam", () => {
       protocol: "fixture",
       method: "execute",
       params: null,
-      receipt: "executeReceipt",
       children,
     });
     expect(() => flattenCapabilityTree(capability([]))).toThrow("got 0");
@@ -416,6 +414,28 @@ describe("framework core seam", () => {
     ).toThrow("got 2");
     const malformed = { kind: "transaction" } as unknown as TransactionNode;
     expect(() => flattenCapabilityTree(capability([malformed]))).toThrow("UnsignedTx");
+  });
+
+  it("validates every Capability node against registered protocol methods", async () => {
+    const registry = new Registry(runtime).use(ComposedProtocol);
+    const result = await registry.action("composed", "swap", ACCOUNT, {});
+    if (result.kind !== "capability") throw new Error("expected Capability");
+
+    expect(() => registry.validateCapabilityTree(result)).not.toThrow();
+    expect(() =>
+      registry.validateCapabilityTree({ ...result, method: "inspect" } satisfies CapabilityNode),
+    ).toThrow('Capability references unknown capability "composed.inspect"');
+
+    const [approval, ownTransaction] = result.children;
+    if (approval?.kind !== "capability" || ownTransaction?.kind !== "transaction") {
+      throw new Error("unexpected fixture shape");
+    }
+    expect(() =>
+      registry.validateCapabilityTree({
+        ...result,
+        children: [{ ...approval, method: "missing" }, ownTransaction],
+      }),
+    ).toThrow('Capability.children[0] references unknown capability "approval.missing"');
   });
 
   it("requires Receipt leaves to retain every original Change object in order", () => {

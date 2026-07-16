@@ -53,7 +53,6 @@ describe("ERC20", () => {
     if (approval.kind !== "capability") throw new Error("expected capability");
     const [approvalTx] = flattenCapabilityTree(approval);
     if (!approvalTx) throw new Error("missing approval transaction");
-    expect(approval.receipt).toBe("approveReceipt");
     expect(
       decodeFunctionData({
         abi: ierc20Abi,
