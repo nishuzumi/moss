@@ -269,14 +269,9 @@ export class Registry {
   }
 
   validateCapabilityTree(root: CapabilityNode): void {
-    flattenCapabilityTree(root);
-    const visit = (node: CapabilityNode, path = "Capability"): void => {
-      this.#capabilityMeta(node.protocol, node.method, path);
-      for (const [index, child] of node.children.entries()) {
-        if (child.kind === "capability") visit(child, `${path}.children[${index}]`);
-      }
-    };
-    visit(root);
+    for (const { capability } of flattenCapabilityTree(root)) {
+      this.#capabilityMeta(capability.protocol, capability.method);
+    }
   }
 
   async #buildCapability(
@@ -393,18 +388,10 @@ export class Registry {
     return Object.freeze(dependency);
   }
 
-  #capabilityMeta(protocol: string, method: string, path = "Capability"): CapabilityMethodMeta {
-    const registered = this.#protocols.get(protocol);
-    if (!registered) {
-      throw new Error(
-        `${path} references unknown protocol "${protocol}" (registered: ${[
-          ...this.#protocols.keys(),
-        ].join(", ")})`,
-      );
-    }
-    const meta = registered.methods[method];
+  #capabilityMeta(protocol: string, method: string): CapabilityMethodMeta {
+    const meta = this.#get(protocol).methods[method];
     if (meta?.kind !== "capability") {
-      throw new Error(`${path} references unknown capability "${protocol}.${method}"`);
+      throw new Error(`unknown capability "${protocol}.${method}"`);
     }
     return meta;
   }

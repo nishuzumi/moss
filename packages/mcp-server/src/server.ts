@@ -31,19 +31,15 @@ const jsonValueSchema: z.ZodType<unknown> = z.lazy(() =>
   ]),
 );
 
-const transactionSchema = z
-  .object({
-    kind: z.literal("transaction"),
-    transaction: z
-      .object({
-        from: addressSchema,
-        to: addressSchema,
-        data: hexSchema,
-        value: hexSchema,
-      })
-      .strict(),
-  })
-  .strict();
+const transactionSchema = z.object({
+  kind: z.literal("transaction"),
+  transaction: z.object({
+    from: addressSchema,
+    to: addressSchema,
+    data: hexSchema,
+    value: hexSchema,
+  }),
+});
 
 const capabilitySchema: z.ZodType<CapabilityNode> = z.lazy(() =>
   z

@@ -256,9 +256,7 @@ describe("moss MCP server", () => {
 
     expect(response.isError).toBe(true);
     const content = response.content as { type: string; text: string }[];
-    expect(content[0]?.text).toContain(
-      'Error: Capability references unknown capability "kuru.missing"',
-    );
+    expect(content[0]?.text).toContain('Error: unknown capability "kuru.missing"');
     expect(simulated).toBe(false);
   });
 

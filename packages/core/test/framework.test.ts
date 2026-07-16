@@ -424,7 +424,7 @@ describe("framework core seam", () => {
     expect(() => registry.validateCapabilityTree(result)).not.toThrow();
     expect(() =>
       registry.validateCapabilityTree({ ...result, method: "inspect" } satisfies CapabilityNode),
-    ).toThrow('Capability references unknown capability "composed.inspect"');
+    ).toThrow('unknown capability "composed.inspect"');
 
     const [approval, ownTransaction] = result.children;
     if (approval?.kind !== "capability" || ownTransaction?.kind !== "transaction") {
@@ -435,7 +435,7 @@ describe("framework core seam", () => {
         ...result,
         children: [{ ...approval, method: "missing" }, ownTransaction],
       }),
-    ).toThrow('Capability.children[0] references unknown capability "approval.missing"');
+    ).toThrow('unknown capability "approval.missing"');
   });
 
   it("requires Receipt leaves to retain every original Change object in order", () => {
