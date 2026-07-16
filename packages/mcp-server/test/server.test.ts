@@ -103,38 +103,8 @@ describe("moss MCP server", () => {
   });
 
   it("projects full SDK Receipts into ordered Agent text only", () => {
-    const first = eventChange("0x1111111111111111111111111111111111111111");
-    const second = eventChange("0x2222222222222222222222222222222222222222");
-    const nested: ReceiptResult = {
-      kind: "receipt",
-      outcome: { operation: "transfer" },
-      text: "nested summary",
-      changes: [{ kind: "change", change: second, data: { amount: "2" }, text: "second" }],
-    };
-    const receipt: ReceiptResult = {
-      kind: "receipt",
-      outcome: { operation: "swap" },
-      text: "root summary",
-      changes: [{ kind: "change", change: first, data: { amount: "1" }, text: "first" }, nested],
-    };
     const outcome: SimulateOutcome = {
-      results: [
-        {
-          protocol: "kuru",
-          method: "swap",
-          transaction: {
-            from: "0xcccccccccccccccccccccccccccccccccccccccc",
-            to: "0xdddddddddddddddddddddddddddddddddddddddd",
-            data: "0x",
-            value: "0x0",
-          },
-          reverted: false,
-          receipt,
-          changes: [first, second],
-          warnings: [],
-          gas: "1",
-        },
-      ],
+      results: [successfulSimulationResult()],
     };
 
     const projected = toAgentSimulation(outcome);
@@ -144,7 +114,45 @@ describe("moss MCP server", () => {
         "Compare every ordered Receipt text with the user's intent before handing transactions to a signer.",
       results: [{ protocol: "kuru", method: "swap", texts: ["first", "second"], warnings: [] }],
     });
-    expect(JSON.stringify(projected)).not.toMatch(/"(?:outcome|change|data|transaction|gas)":/);
+  });
+
+  it("projects halted simulations into stop guidance without leaking SDK evidence", () => {
+    const outcome: SimulateOutcome = {
+      halted: { transactionIndex: 1, reason: "execution reverted" },
+      results: [
+        successfulSimulationResult(),
+        {
+          protocol: "kuru",
+          method: "swap",
+          transaction: {
+            from: "0xcccccccccccccccccccccccccccccccccccccccc",
+            to: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            data: "0xabcd",
+            value: "0x0",
+          },
+          reverted: true,
+          revertReason: "execution reverted",
+          warnings: [{ code: "REVERTED", message: "transaction reverted: execution reverted" }],
+          gas: null,
+        },
+      ],
+    };
+
+    const projected = toAgentSimulation(outcome);
+    expect(projected).toEqual({
+      ok: false,
+      guidance: "Stop. Do not sign; report the warning and failed transaction.",
+      halted: { transactionIndex: 1, reason: "execution reverted" },
+      results: [
+        { protocol: "kuru", method: "swap", texts: ["first", "second"], warnings: [] },
+        {
+          protocol: "kuru",
+          method: "swap",
+          texts: [],
+          warnings: [{ code: "REVERTED", message: "transaction reverted: execution reverted" }],
+        },
+      ],
+    });
   });
 
   it("shows the exact Kuru simulation response an Agent receives", async () => {
@@ -282,6 +290,39 @@ describe("moss MCP server", () => {
 
 function eventChange(address: `0x${string}`): Change {
   return { kind: "event", address, topics: ["0x01"], data: "0x02" };
+}
+
+function successfulSimulationResult(): SimulateOutcome["results"][number] {
+  const first = eventChange("0x1111111111111111111111111111111111111111");
+  const second = eventChange("0x2222222222222222222222222222222222222222");
+  const nested: ReceiptResult = {
+    kind: "receipt",
+    outcome: { operation: "transfer" },
+    text: "nested summary",
+    changes: [{ kind: "change", change: second, data: { amount: "2" }, text: "second" }],
+  };
+  const receipt: ReceiptResult = {
+    kind: "receipt",
+    outcome: { operation: "swap" },
+    text: "root summary",
+    changes: [{ kind: "change", change: first, data: { amount: "1" }, text: "first" }, nested],
+  };
+
+  return {
+    protocol: "kuru",
+    method: "swap",
+    transaction: {
+      from: "0xcccccccccccccccccccccccccccccccccccccccc",
+      to: "0xdddddddddddddddddddddddddddddddddddddddd",
+      data: "0x",
+      value: "0x0",
+    },
+    reverted: false,
+    receipt,
+    changes: [first, second],
+    warnings: [],
+    gas: "1",
+  };
 }
 
 function receiptCapability(protocol: string, method: string): CapabilityNode {
