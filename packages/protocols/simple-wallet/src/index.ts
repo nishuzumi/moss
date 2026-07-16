@@ -1,0 +1,1 @@
+export { SimpleWallet } from "./adapter.js";
