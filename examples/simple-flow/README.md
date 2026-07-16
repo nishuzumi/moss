@@ -38,8 +38,12 @@ examples read current Monad mainnet state.
 
 ## The workflow
 
-The examples start after an application or Agent has already recorded the
-user's request. Moss does not turn natural language into an intent by itself.
+For the WMON example, the recorded user request is:
+
+> Wrap 1.5 MON into WMON for this account.
+
+The examples start after an application or Agent has recorded the user's
+request. Moss does not turn natural language into an intent by itself.
 
 ```text
 Recorded user request
