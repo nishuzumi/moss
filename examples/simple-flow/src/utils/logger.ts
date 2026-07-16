@@ -1,48 +1,19 @@
-import chalk from "chalk";
-
 export const log = {
-  info: (message: string) => console.log(chalk.blue("[INFO]"), message),
-  success: (message: string) => console.log(chalk.green("[OK]"), message),
-  warning: (message: string) => console.log(chalk.yellow("[WARN]"), message),
-  error: (message: string) => console.log(chalk.red("[ERROR]"), message),
-  step: (number: number, message: string) =>
-    console.log(chalk.cyan(`[${number}]`), message),
+  info: (message: string) => console.log(`[INFO] ${message}`),
+  success: (message: string) => console.log(`[OK] ${message}`),
+  warning: (message: string) => console.warn(`[WARN] ${message}`),
+  error: (message: string) => console.error(`[ERROR] ${message}`),
+  step: (number: number, message: string) => console.log(`[${number}] ${message}`),
   section: (title: string) => {
-    console.log("");
-    console.log(chalk.bold(chalk.magenta("═".repeat(60))));
-    console.log(chalk.bold(chalk.magenta(` ${title} `)));
-    console.log(chalk.bold(chalk.magenta("═".repeat(60))));
-    console.log("");
+    console.log("\n");
+    console.log(`=== ${title} ===`);
   },
-  table: (rows: { [key: string]: string | number | boolean }[]) => {
+  table: (rows: Record<string, string | number | boolean>[]) => {
     if (rows.length === 0) return;
-    const firstRow = rows[0] as { [key: string]: string | number | boolean };
-    const headers = Object.keys(firstRow);
-    const colWidths = headers.map((header) => {
-      const headerLen = header.length;
-      const maxRowLen = rows.reduce((max, row) => {
-        const valLen = String(row[header]).length;
-        return valLen > max ? valLen : max;
-      }, 0);
-      return Math.max(headerLen, maxRowLen);
-    });
-    const line = colWidths.map((w) => "-".repeat(w)).join(" | ");
-    const headerLine = headers
-      .map((h, i) => chalk.bold(h.padEnd(colWidths[i] as number)))
-      .join(" | ");
-    console.log(headerLine);
-    console.log(line);
-    for (const row of rows) {
-      const rowLine = headers
-        .map((h, i) => String(row[h]).padEnd(colWidths[i] as number))
-        .join(" | ");
-      console.log(rowLine);
-    }
-    console.log("");
+    console.log(JSON.stringify(rows, null, 2));
   },
-  json: (obj: unknown, indent = 2) =>
-    console.log(JSON.stringify(obj, null, indent)),
-  divider: () => console.log(chalk.gray("-".repeat(60))),
+  json: (obj: unknown, indent = 2) => console.log(JSON.stringify(obj, null, indent)),
+  divider: () => console.log("---"),
 };
 
 export const formatAmount = (amount: string, decimals = 18): string => {

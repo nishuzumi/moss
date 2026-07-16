@@ -17,7 +17,6 @@
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
-    "chalk": "^5.4.1",
     "viem": "^2.54.3"
   },
   "devDependencies": {
