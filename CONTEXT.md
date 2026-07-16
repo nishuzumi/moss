@@ -31,7 +31,7 @@ The sole executable structure for a write: an ordered tree of CapabilityNode com
 _Avoid_: Plan, transaction bundle
 
 **CapabilityNode**:
-A serializable node identifying one Capability, its canonical parameters, Receipt parser, and ordered children. Exactly one child is its direct TransactionNode; the others are nested CapabilityNodes.
+A serializable node identifying one Capability by protocol + method, with its canonical parameters and ordered children. Registry resolves its Receipt parser from the registered Capability metadata. Exactly one child is its direct TransactionNode; the others are nested CapabilityNodes.
 
 **TransactionNode**:
 A Capability-tree leaf containing one unsigned transaction. A contract-level multicall is still one TransactionNode.
