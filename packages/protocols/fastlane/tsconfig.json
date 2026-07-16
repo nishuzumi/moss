@@ -1,0 +1,12 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@themoss/core": ["packages/core/src/index.ts"],
+      "@themoss/core/*": ["packages/core/src/*"]
+    }
+  },
+  "include": ["src", "test"]
+}
