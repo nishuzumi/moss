@@ -15,8 +15,12 @@ import { MetaMorphoV1_1Abi } from "./abis/metamorpho-v1.1.js";
  * Strategy, fees, and conversion may change on-chain. Supply, withdraw, APY,
  * and additional vaults are outside this partial #9 scope.
  *
- * Verified 2026-07-15: deployed bytecode, name, symbol, decimals, AUSD asset,
- * and MetaMorpho V1.1 factory membership. Canonical records:
+ * Verified on-chain 2026-07-16: deployed bytecode, name, symbol, decimals, and
+ * AUSD asset. Morpho's documented Monad MetaMorpho V1.1 factory at
+ * 0x33f20973275B2F574488b18929cd7DCBf1AbF275 returned true from
+ * isMetaMorpho(vault). Official vault record: POST https://api.morpho.org/graphql
+ * with vaultByAddress(address: "0x32841A8511D5c2c5b253f45668780B99139e476D",
+ * chainId: 143) returned this address, name, symbol, and AUSD asset.
  * https://docs.morpho.org/developers/contracts/addresses/
  * https://docs.morpho.org/developers/api/morpho-vaults/
  */

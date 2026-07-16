@@ -138,6 +138,9 @@ importers:
       '@themoss/protocol-kuru':
         specifier: workspace:*
         version: link:../protocols/kuru
+      '@themoss/protocol-morpho':
+        specifier: workspace:*
+        version: link:../protocols/morpho
       '@themoss/simulator':
         specifier: workspace:*
         version: link:../simulator

@@ -10,6 +10,7 @@ import {
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
+import * as morpho from "@themoss/protocol-morpho";
 import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
@@ -23,7 +24,10 @@ async function connectedClient(simulateOutcome?: SimulateOutcome) {
 }
 
 async function connectedHarness(simulateOutcome?: SimulateOutcome) {
-  const { server, simulator } = createMossServer({ runtime, protocols: [system, erc, kuru] });
+  const { server, simulator } = createMossServer({
+    runtime,
+    protocols: [system, erc, kuru, morpho],
+  });
   if (simulateOutcome) {
     simulator.simulate = async () => simulateOutcome;
   }
@@ -57,6 +61,9 @@ describe("moss MCP server", () => {
     expect(discovered).toEqual([
       expect.objectContaining({ protocol: "wmon", method: "wrap", kind: "capability" }),
     ]);
+    expect(
+      parseText(await client.callTool({ name: "discover", arguments: { protocol: "morpho" } })),
+    ).toEqual([expect.objectContaining({ protocol: "morpho", method: "position", kind: "query" })]);
     const loaded = parseText(
       await client.callTool({
         name: "load",

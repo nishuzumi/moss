@@ -9,3 +9,6 @@ on Monad mainnet.
 
 Vault strategy, fees, and conversion can change on-chain. Supply, withdraw,
 APY, and other vaults remain follow-up work in issue #9.
+
+Address provenance uses Morpho's official API and factory records; live tests
+verify deployed bytecode and metadata.
