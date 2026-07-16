@@ -132,6 +132,7 @@ workspace package 的类型来自构建产物，因此必须先 build 再 typech
 
 | 文档 | 用途 |
 | --- | --- |
+| [Moss 新手教程](./docs/tutorials/zh-CN/) | 环境配置、入门、PR、Protocol 接入、AI Agent Demo 与 FAQ |
 | [新手上路](./docs/getting-started.zh-CN.md)（[English](./docs/getting-started.md)） | 逐步运行并开发 Moss |
 | [MCP 工具契约](./docs/mcp-tools.md) | 四个 MCP 工具的输入输出 |
 | [Protocol 接入指南](./docs/protocol-onboarding.md) | 开发并提交一个 Protocol 包 |
