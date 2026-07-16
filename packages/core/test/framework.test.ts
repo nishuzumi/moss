@@ -497,6 +497,6 @@ describe("framework core seam", () => {
         ...receipt,
         changes: [{ ...nested, changes: [{ ...leaf, text: 1 as unknown as string }] }],
       }),
-    ).toThrow("text must be a string");
+    ).toThrow("text must be a non-empty string");
   });
 });

@@ -134,13 +134,13 @@ function flattenReceipt(
   if (seen.has(receipt)) throw new Error(`${path} contains a Receipt cycle`);
   seen.add(receipt);
   assertJsonSafe(receipt.outcome, `${path}.outcome`);
-  if (typeof receipt.text !== "string") throw new Error(`${path}.text must be a string`);
+  requireText(receipt.text, `${path}.text`);
   if (!Array.isArray(receipt.changes)) throw new Error(`${path}.changes must be an array`);
   const leaves: ReceiptChange[] = [];
   for (const [index, child] of receipt.changes.entries()) {
     const childPath = `${path}.changes[${index}]`;
     if (child?.kind === "change") {
-      if (typeof child.text !== "string") throw new Error(`${childPath}.text must be a string`);
+      requireText(child.text, `${childPath}.text`);
       assertJsonSafe(child.data, `${childPath}.data`);
       leaves.push(child);
     } else if (child?.kind === "receipt") {
