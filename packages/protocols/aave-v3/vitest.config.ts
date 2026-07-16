@@ -7,10 +7,12 @@ export default defineConfig({
   // why the repo pins vitest 3 — vite 8's oxc does not lower them.
   esbuild: { target: "es2022" },
   resolve: {
-    // Tests run against core's source, not its dist, so a stale build can
+    // Tests run against workspace source, not dist, so a stale build can
     // never produce phantom failures.
     alias: {
       "@themoss/core": fileURLToPath(new URL("../../core/src/index.ts", import.meta.url)),
+      "@themoss/erc": fileURLToPath(new URL("../../erc/src/index.ts", import.meta.url)),
+      "@themoss/system": fileURLToPath(new URL("../../system/src/index.ts", import.meta.url)),
     },
   },
 });

@@ -180,6 +180,31 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@22.20.0)(tsx@4.23.0)
 
+  packages/protocols/aave-v3:
+    dependencies:
+      '@themoss/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@themoss/erc':
+        specifier: workspace:*
+        version: link:../../erc
+      viem:
+        specifier: ^2.54.3
+        version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
+    devDependencies:
+      '@themoss/system':
+        specifier: workspace:*
+        version: link:../../system
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/node@22.20.0)(tsx@4.23.0)
+
   packages/protocols/kuru:
     dependencies:
       '@themoss/core':
@@ -204,6 +229,31 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/node@22.20.0)(tsx@4.23.0)
+
+  packages/protocols/uniswap-v4:
+    dependencies:
+      '@themoss/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@themoss/erc':
+        specifier: workspace:*
+        version: link:../../erc
+      '@themoss/system':
+        specifier: workspace:*
+        version: link:../../system
+      viem:
+        specifier: ^2.54.3
+        version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
+    devDependencies:
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3

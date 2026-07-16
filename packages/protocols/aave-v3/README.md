@@ -1,44 +1,49 @@
-# Protocol package template
+# Aave v3 — Lending on Monad
 
-The starting point for every new Moss protocol adapter. This template is a
-real workspace package that CI builds and tests, so it can never rot — if you
-copied it, it compiled.
+Moss protocol adapter for [Aave v3](https://aave.com) on Monad mainnet.
+The canonical lending protocol: supply assets as collateral, borrow against
+them, withdraw, and repay.
 
-## Usage
+## Pool contract
 
-```bash
-cp -r packages/protocols/_template packages/protocols/<yourprotocol>
-cd packages/protocols/<yourprotocol>
-```
+| Role | Address | Verification |
+|------|---------|-------------|
+| Pool (ERC-1967 proxy) | `0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef` | Verified on-chain 2026-07-15 |
+| Implementation | `0x9539531ea4f6563a66421a7449506152609985be` | 21KB code, matching Aave v3 |
 
-Then work through this checklist:
+> **⚠️ Native MON not supported.** All Pool entrypoints (supply/withdraw/borrow/repay)
+> are `nonpayable`. Supply WMON (`0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A`)
+> instead. The adapter rejects native MON with a clear error.
 
-- [ ] `package.json`: set `name` to `@themoss/protocol-<yourprotocol>`, fix
-      `description`, and **delete the `"private": true` line**.
-- [ ] `src/abis/`: replace `example.ts` with your contract ABIs. Every file
-      needs an **ABI origin header** — `compiled` (from contract source, add
-      a foundry setup + `gen:abis` script like `packages/erc`), `explorer`
-      (verified-contract ABI with the explorer URL), or `vendored` (SDK/npm
-      source with version + how you verified behavior on-chain). See ADR 0007.
-- [ ] `src/adapter.ts`: rename and implement your protocol. Read the comments
-      in this file and in `packages/system/src/wmon.ts` (the reference
-      adapter); a real-world example with reads-before-build is
-      `packages/protocols/kuru`.
-- [ ] `src/tokens.ts`: list tokens your protocol introduces (receipt tokens,
-      LP tokens, LSTs) — leave empty otherwise. Every entry needs on-chain
-      verification noted in a comment.
-- [ ] `src/index.ts`: export your manifest; rename `templateManifest`.
-- [ ] `@Event` receipts: writes with a meaningful on-chain receipt declare it
-      (`depositReceipt` here is the skeleton) and gate on it via `confirms` —
-      see ADR 0008 and the onboarding guide's "Declare on-chain receipts".
-- [ ] `test/`: keep the offline shape tests, add a live e2e that simulates
-      your happy path against Monad mainnet with **zero warnings** (free —
-      nothing is signed or sent). Wire the observer and assert your receipt
-      renders. Chain plans if your flow needs tokens the test account lacks
-      (see the Kuru round-trip test).
-- [ ] List in the served catalog: add your package to `packages/mcp-server`
-      (dependency + your manifest in the `use()` array in `server.ts`).
-- [ ] `pnpm install && pnpm -r build && pnpm lint && pnpm -r typecheck && pnpm -r test`
+## Capabilities
 
-Full guide: [docs/protocol-onboarding.md](../../../docs/protocol-onboarding.md).
-Definition of Done: [CONTRIBUTING.md](../../../CONTRIBUTING.md).
+| Method   | Verb      | Description                        | Risk          |
+|----------|-----------|------------------------------------|---------------|
+| `supply` | `supply`  | Deposit WMON → mint aToken         | fundOut, approval |
+| `withdraw` | `withdraw` | Burn aToken → withdraw WMON      | fundOut       |
+| `borrow` | `borrow`  | Borrow asset at variable rate      | fundOut       |
+| `repay`  | `repay`   | Repay borrowed asset               | fundOut, approval |
+
+Supply and repay compose an `erc20.approve` capability before the Pool
+interaction — both share `approval` risk.
+
+## Queries
+
+| Method             | Description                                    |
+|--------------------|------------------------------------------------|
+| `userAccountData`  | Health factor, LTV, total collateral/debt base |
+| `reserveData`      | aToken/debt token addresses, liquidity rate    |
+
+## Architecture
+
+The adapter uses the PR #31 Capability + Receipt framework:
+
+- `@Capability` decorators define each operation with typed Zod params,
+  risk labels, and metadata
+- `@Receipt` methods decode Aave Pool events (Supply/Withdraw/Borrow/Repay)
+  from simulation `Change[]` output
+- Supply/repay return composed trees: `[erc20.approve, pool.<method>]`
+- Withdraw/borrow return single-transaction capabilities
+- `registry.use(AaveV3)` — no manifest wrapper needed
+
+See `src/aave-v3.ts` for the full implementation.
