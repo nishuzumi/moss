@@ -250,7 +250,7 @@ describe("Bound Protocol Registry seam", () => {
     const asyncRegistry = new Registry(runtime).use(AsyncBoundFixture);
     await expect(
       asyncRegistry.action("async-bound-fixture", "inspect", ACCOUNT, {}, { contract: FIRST }),
-    ).rejects.toThrow("binding schemas must be synchronous");
+    ).rejects.toThrow("Encountered Promise during synchronous parse");
     expect(asyncBindingExecutions).toBe(0);
 
     expect(() => protocolFactory(BoundFixture, { ...fixtureBinding })).toThrow(

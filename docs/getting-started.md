@@ -123,6 +123,8 @@ For `slippage`, the type explains basis points and the valid range. The field de
 
 Always call `load` before `action`. Do not guess units, defaults, addresses, or field meaning from the parameter name.
 
+Kuru is unbound, so this result has only method `params`. A parameterized Protocol also returns a `binding` schema for deployment identity. In the library API, pass that value separately as the fifth `Registry.action` argument; it is not part of the Query or Capability parameters.
+
 ## 6. Run a Query
 
 Queries execute immediately and do not produce a Capability:
@@ -234,7 +236,7 @@ Then work in this order:
 
 1. rename the package and replace every `CHANGEME` marker;
 2. add source-backed ABIs and verified fixed addresses;
-3. declare `@Protocol`, typed Handles, and Protocol dependencies;
+3. declare `@Protocol`, typed Handles, and Protocol dependencies; if deployments are caller-selected, add a binding schema and export a `protocolFactory` alias;
 4. define Zod parameter contracts, Capabilities, Queries, and pure Receipts;
 5. add positive and negative type fixtures, failure tests, and one live happy path;
 6. export the Protocol and add it to the application composition root.

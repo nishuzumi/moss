@@ -98,6 +98,8 @@ if (simulation.halted || simulation.results.some((item) => item.warnings.length)
 }
 ```
 
+参数化 Protocol 的 `Registry.load` 会在方法 `params` 旁单独返回 `binding` schema。library 调用方把 binding 作为 `Registry.action` 的第五个参数传入；Registry 会同步校验它、派生该实例的动态 Handle，并把它独立保存在 CapabilityNode 上。不带 binding 的 Protocol 调用保持不变。
+
 ## 验证流程
 
 每个 Capability 拥有一笔直接的未签名交易，以及由其 `protocol + method` 注册得到的 typed Receipt parser。序列化 tree 不携带调用方提供的 Receipt 名称。其他交易只能属于嵌套 Capability；core 会验证整棵树并按确定的深度优先顺序展开。

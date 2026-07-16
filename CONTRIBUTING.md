@@ -41,6 +41,7 @@ Toolchain notes you shouldn't fight:
 
 - [ ] The package exports one or more top-level self-describing `@Protocol` classes. There is no separate registration object or import-time registration.
 - [ ] Protocol dependencies are declared explicitly and injected into typed instance fields. Cross-Protocol writes use injected Capabilities; reads use injected Queries.
+- [ ] Parameterized Protocols declare a synchronous, context-free binding schema, derive dynamic Handles from it, and export a typed `protocolFactory` alias; consumers use `create(binding)` and binding-free `receipts`.
 - [ ] Every Capability and Query parameter is `{ type, description }`: a reusable context-free Zod value contract plus a method-specific field description.
 - [ ] Generated JSON Schema shown by `load` preserves the type description separately from the field description.
 - [ ] Every Capability owns exactly one direct TransactionNode and names exactly one typed Receipt parser. Additional transactions belong to nested Capabilities.

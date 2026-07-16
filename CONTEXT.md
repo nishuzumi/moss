@@ -14,6 +14,14 @@ _Avoid_: integration, connector, plugin
 A Protocol explicitly required by another Protocol. Its Capabilities compose into the caller's Capability tree, while its Queries return data directly.
 _Avoid_: global service locator, import side effect
 
+**Protocol binding**:
+The reusable, context-free parameter contract that identifies one concrete deployment of a parameterized Protocol. Registry validates it synchronously before Protocol code or RPC executes, derives that instance's Handles, and keeps it separate from Capability or Query parameters.
+_Avoid_: method parameters, constructor arguments, deployment config
+
+**Protocol factory**:
+An injected, uncached reference for a parameterized Protocol. `create(binding)` returns only its bound Capabilities and Queries; `receipts` exposes only its pure Receipt parsers. The Protocol exports a `protocolFactory` alias so TypeScript retains the schema-derived binding type.
+_Avoid_: callable factory, cached instance, service locator
+
 **Capability**:
 A Protocol's write intent, owning exactly one direct unsigned transaction and one Receipt parser. Additional transactions belong to nested Capabilities; a Capability never signs or sends.
 _Avoid_: action (that's the MCP tool), function, method
@@ -31,7 +39,7 @@ The sole executable structure for a write: an ordered tree of CapabilityNode com
 _Avoid_: Plan, transaction bundle
 
 **CapabilityNode**:
-A serializable node identifying one Capability by protocol + method, with its canonical parameters and ordered children. Registry resolves its Receipt parser from the registered Capability metadata. Exactly one child is its direct TransactionNode; the others are nested CapabilityNodes.
+A serializable node identifying one Capability by protocol + method, with its optional canonical Protocol binding, canonical method parameters, and ordered children. Registry resolves its Receipt parser from the registered Capability metadata. Exactly one child is its direct TransactionNode; the others are nested CapabilityNodes.
 
 **TransactionNode**:
 A Capability-tree leaf containing one unsigned transaction. A contract-level multicall is still one TransactionNode.

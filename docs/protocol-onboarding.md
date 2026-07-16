@@ -49,7 +49,61 @@ export class MyProtocol {
 }
 ```
 
-Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
+Protocol dependencies are explicit. Registry recursively registers them and injects typed references. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
+
+### Parameterized Protocols
+
+Use a Protocol binding when the same implementation must target caller-selected deployments. Binding describes deployment identity, not one method call, and must derive Handles synchronously:
+
+```ts
+const marketBinding = {
+  market: {
+    type: Address,
+    description: "Market contract used by this Protocol instance.",
+  },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "market",
+  category: "dex",
+  description: "A caller-selected market deployment.",
+  contracts: {},
+  binding: {
+    params: marketBinding,
+    contracts: ({ market }) => ({ market: { abi: MarketAbi, addr: market } }),
+  },
+})
+export class MarketProtocol {
+  declare market: Handle<typeof MarketAbi>;
+}
+
+export const MarketFactory = protocolFactory(MarketProtocol, marketBinding);
+```
+
+The explicit schema argument is deliberate: TypeScript decorators cannot change the class's static type, so the alias is the smallest safe way to retain the inferred binding type and attach the runtime dependency marker.
+
+A consumer declares the alias as its dependency and receives an uncached factory:
+
+```ts
+@Protocol({
+  name: "consumer",
+  category: "dex",
+  description: "Composes caller-selected markets.",
+  contracts: {},
+  protocols: { market: MarketFactory },
+})
+class ConsumerProtocol {
+  declare market: ProtocolFactory<typeof MarketFactory>;
+
+  async example(binding: InferParams<typeof marketBinding>) {
+    const market = this.market.create(binding);
+    // market exposes bound Capabilities and Queries.
+    // this.market.receipts exposes only pure Receipt parsers.
+  }
+}
+```
+
+`create(binding)` never caches instances. Registry validates the binding before Protocol code or RPC runs. Receipt references need no binding because parsers receive only Changes.
 
 ## 3. Define parameter contracts
 
@@ -84,7 +138,7 @@ type SwapParams = InferParams<typeof swapParams>;
 
 `BasisPoints` describes only the value: an integer basis-point count, `1 bps = 0.01%`, valid range, and examples. It does not mention swaps or slippage. The field description supplies that purpose. A default of `50` means `0.5%`.
 
-Registry parses action input with the composed schemas. `load` returns JSON-safe generated schemas and both descriptions; Zod objects never cross MCP.
+Registry parses action input with the composed schemas. `load` returns JSON-safe generated schemas and both descriptions; for a parameterized Protocol it returns `binding` beside method `params`. The library passes binding as the fifth `Registry.action` argument, and every resulting CapabilityNode retains it separately from method parameters. Zod objects never cross a transport boundary.
 
 ## 4. Author one transaction per Capability
 
@@ -136,10 +190,11 @@ Receipt text is presentation. The structured Outcome is authoritative and must u
 
 ## 6. Export and compose
 
-The package entry point exports the Protocol class:
+The package entry point exports the Protocol class. A parameterized Protocol also exports its factory alias:
 
 ```ts
 export { MyProtocol } from "./my-protocol.js";
+export { MarketFactory, MarketProtocol } from "./market.js";
 ```
 
 The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code.
@@ -148,7 +203,7 @@ Fixed official Monad constants may be imported from `@themoss/system`. Caller-su
 
 ## 7. Tests required for review
 
-- A compile-time fixture proves valid inferred parameter and Receipt names, plus invalid cases marked with `@ts-expect-error`.
+- A compile-time fixture proves valid inferred parameter and Receipt names, plus invalid cases marked with `@ts-expect-error`. Parameterized Protocols also prove binding inference, bound-reference method types, and the separation between bound methods and Receipt references.
 - Unit tests cover Registry metadata validation and the Capability's exactly-one-direct-transaction invariant.
 - Receipt tests prove complete ordered coverage using the original Change object references, including nested Receipts.
 - Failure tests cover missing, duplicated, replaced, and reordered Changes.

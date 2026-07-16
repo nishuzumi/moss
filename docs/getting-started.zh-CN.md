@@ -123,6 +123,8 @@ console.dir(swap, { depth: null });
 
 必须在 `action` 前调用 `load`。不要根据参数名猜测单位、默认值、地址或字段含义。
 
+Kuru 不需要 binding，因此这里的结果只有方法 `params`。参数化 Protocol 还会返回标识具体部署的 `binding` schema；在 library API 中，把它作为 `Registry.action` 的第五个参数独立传入，不要混入 Query 或 Capability 参数。
+
 ## 6. 执行 Query
 
 Query 立即执行，不会生成 Capability：
@@ -234,7 +236,7 @@ cp -R packages/protocols/_template packages/protocols/myprotocol
 
 1. 重命名 package，并替换所有 `CHANGEME`；
 2. 添加有来源的 ABI 和经过验证的固定地址；
-3. 声明 `@Protocol`、typed Handle 和 Protocol 依赖；
+3. 声明 `@Protocol`、typed Handle 和 Protocol 依赖；如果部署由调用方选择，再添加 binding schema 并导出 `protocolFactory` alias；
 4. 定义 Zod 参数契约、Capability、Query 与纯 Receipt；
 5. 添加正反类型 fixture、失败测试和一个真实链 happy path；
 6. 导出 Protocol，并加入 application composition root。

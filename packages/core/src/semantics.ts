@@ -72,14 +72,9 @@ export function parseBinding<S extends ParamsSpec>(
   spec: S,
   raw: Record<string, unknown>,
 ): InferParams<S> {
-  try {
-    const result = paramsSchema(spec).safeParse(raw);
-    if (!result.success) throw new TypeError(`invalid binding: ${z.prettifyError(result.error)}`);
-    return result.data as InferParams<S>;
-  } catch (error) {
-    if (error instanceof TypeError && error.message.startsWith("invalid binding:")) throw error;
-    throw new TypeError("invalid binding: binding schemas must be synchronous", { cause: error });
-  }
+  const result = paramsSchema(spec).safeParse(raw);
+  if (!result.success) throw new TypeError(`invalid binding: ${z.prettifyError(result.error)}`);
+  return result.data as InferParams<S>;
 }
 
 export function describeParams(

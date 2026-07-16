@@ -98,8 +98,10 @@
   Receipts; `mcp-server` owns transport and application composition only.
 - Protocol packages export self-describing `@Protocol` classes. Registry scans
   selected top-level module exports, recursively registers declared Protocol
-  dependencies, and injects typed instances. There is no import-time
-  registration or separate package registration object.
+  dependencies, and injects typed references. Parameterized dependencies use
+  explicit `protocolFactory` aliases; their uncached factories create bound
+  Capability/Query references and expose pure Receipt references separately.
+  There is no import-time registration or separate package registration object.
 - Every Capability owns exactly one direct TransactionNode and one typed pure
   Receipt parser. More transactions come from nested Capabilities. Core alone
   validates and depth-first flattens the tree.
@@ -108,6 +110,8 @@
   length, and order. Any Warning halts.
 - Capability and Query fields use `{ type, description }`: a reusable
   context-free Zod value contract plus a method-specific field purpose.
+  Optional Protocol bindings use the same field contract, validate
+  synchronously, derive dynamic Handles, and remain separate from method params.
 - Moss v1 is Monad-mainnet only. Runtime verifies RPC chain ID 143; chain
   identity is not configurable or repeated in Protocols and Capability nodes.
 - Verify: `pnpm lint` / `pnpm build` / `pnpm typecheck` / `pnpm test`

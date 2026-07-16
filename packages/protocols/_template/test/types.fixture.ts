@@ -1,17 +1,20 @@
 import {
+  Address,
   Capability,
   type Change,
   type Handle,
   type InferParams,
   type ParamsSpec,
   Protocol,
+  type ProtocolFactory,
   type ProtocolRef,
+  protocolFactory,
   Query,
   Receipt,
   type ReceiptResult,
   UnsignedIntegerString,
 } from "@themoss/core";
-import type { ExampleVaultAbi } from "../src/abis/example.js";
+import { ExampleVaultAbi } from "../src/abis/example.js";
 import { ExampleProtocol } from "../src/adapter.js";
 
 const fixtureParams = {
@@ -65,6 +68,64 @@ class InvalidDependencyFixture {}
 })
 class InvalidConstructorFixture {
   constructor(_required: string) {}
+}
+
+const bindingParams = {
+  vault: { type: Address, description: "Vault bound to the compile-time fixture." },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "bound-template-fixture",
+  category: "token",
+  description: "Compile-time bound Protocol fixture.",
+  contracts: {},
+  binding: {
+    params: bindingParams,
+    contracts: ({ vault }) => ({ vault: { abi: ExampleVaultAbi, addr: vault } }),
+  },
+})
+class BoundTemplateFixture {
+  declare vault: Handle<typeof ExampleVaultAbi>;
+
+  @Query({ intent: "Inspect a bound fixture", params: fixtureParams })
+  async inspect(params: InferParams<typeof fixtureParams>) {
+    return { address: this.vault.address, amount: params.amount };
+  }
+
+  @Receipt()
+  boundReceipt(changes: readonly Change[]): ReceiptResult<{ ok: true }> {
+    return {
+      kind: "receipt",
+      outcome: { ok: true },
+      text: "Fixture Receipt: valid",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+}
+
+const BoundTemplateFactory = protocolFactory(BoundTemplateFixture, bindingParams);
+const boundFactory = null as unknown as ProtocolFactory<typeof BoundTemplateFactory>;
+const boundReference = boundFactory.create({
+  vault: "0x1111111111111111111111111111111111111111",
+});
+void boundReference.inspect({ amount: "42" });
+void boundFactory.receipts.boundReceipt([]);
+// @ts-expect-error Factory bindings retain the schema-derived address type.
+boundFactory.create({ vault: 42 });
+// @ts-expect-error Bound references exclude pure Receipt parsers.
+void boundReference.boundReceipt([]);
+// @ts-expect-error Receipt references exclude Capabilities and Queries.
+void boundFactory.receipts.inspect({ amount: "42" });
+
+@Protocol({
+  name: "bound-consumer-fixture",
+  category: "token",
+  description: "Compile-time factory dependency fixture.",
+  contracts: {},
+  protocols: { bound: BoundTemplateFactory },
+})
+class BoundConsumerFixture {
+  declare bound: ProtocolFactory<typeof BoundTemplateFactory>;
 }
 
 class ReceiptNameFixture extends ExampleProtocol {
@@ -137,4 +198,5 @@ void handleFixture;
 void ValidDependencyFixture;
 void InvalidDependencyFixture;
 void InvalidConstructorFixture;
+void BoundConsumerFixture;
 void ReceiptNameFixture;

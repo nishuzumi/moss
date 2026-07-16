@@ -167,7 +167,7 @@ export function protocolFactory<ProtocolInstance extends object, Binding extends
   }
   return Object.freeze({
     [PROTOCOL_FACTORY_TARGET]: ctor,
-  }) as ProtocolFactorySource<ProtocolInstance, InferParams<Binding>>;
+  });
 }
 
 function recordMethod(

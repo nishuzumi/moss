@@ -98,6 +98,8 @@ if (simulation.halted || simulation.results.some((item) => item.warnings.length)
 }
 ```
 
+Parameterized Protocols expose a `binding` schema beside method `params` from `Registry.load`. Library callers pass the binding as the fifth `Registry.action` argument; Registry validates it synchronously, derives the instance's dynamic Handles, and stores it separately on the CapabilityNode. Unbound Protocol calls remain unchanged.
+
 ## How verification works
 
 Every Capability owns one direct unsigned transaction and one typed Receipt parser registered for its `protocol + method`. The serialized tree does not carry a caller-supplied Receipt name. Additional transactions belong to nested Capabilities, which core validates and flattens in deterministic depth-first order.
