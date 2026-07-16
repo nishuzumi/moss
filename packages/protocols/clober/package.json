@@ -1,0 +1,36 @@
+{
+  "name": "@themoss/protocol-clober",
+  "version": "0.0.0",
+  "description": "Moss protocol adapter for Clober V2 on-chain orderbook swaps on Monad",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "update:abis": "tsx scripts/update-abis.ts",
+    "gen:abis": "tsx scripts/gen-abis.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "@themoss/system": "workspace:*",
+    "viem": "^2.54.3"
+  },
+  "devDependencies": {
+    "@themoss/simulator": "workspace:*",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}
