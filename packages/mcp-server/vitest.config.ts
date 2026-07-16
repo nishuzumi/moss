@@ -16,7 +16,6 @@ export default defineConfig({
       "@themoss/simulator": src("../simulator/src/index.ts"),
       "@themoss/erc": src("../erc/src/index.ts"),
       "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
-      "@themoss/protocol-morpho": src("../protocols/morpho/src/index.ts"),
       "@themoss/system": src("../system/src/index.ts"),
     },
   },
