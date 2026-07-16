@@ -136,6 +136,7 @@ Build must precede typecheck because workspace packages resolve generated declar
 | [MCP tool contracts](./docs/mcp-tools.md) | Inputs and outputs of the four MCP tools |
 | [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package |
 | [Agent safety rules](./docs/agent-skill.md) | Mandatory simulation and intent-alignment rules |
+| [Simple-flow examples](./examples/simple-flow/README.md) | Run the smallest real workflow and map it to the four Moss stages |
 | [Agent swap example](./examples/agent-swap/README.md) | Separate Agent and signer on a local Monad fork |
 | [Architecture decisions](./docs/adr/) | Current design decisions and trade-offs |
 | [Domain language](./CONTEXT.md) | Shared framework vocabulary |
