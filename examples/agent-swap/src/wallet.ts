@@ -1,22 +1,13 @@
-/**
- * The demo wallet: the one component in this example that Moss deliberately
- * is not. It holds the (publicly known) dev key, and it signs and sends —
- * nothing else. It takes a Plan exactly as `action` returned it and refuses
- * anything that isn't addressed to its own account on its own chain.
- *
- * Usage:
- *   pnpm --filter @themoss/example-agent-swap wallet address
- *   pnpm --filter @themoss/example-agent-swap wallet balance
- *   pnpm --filter @themoss/example-agent-swap wallet send <plan.json>
- */
+/** Local-fork signer. It accepts only a validated Capability tree from the Agent example. */
 import { readFileSync } from "node:fs";
-import { NATIVE, type Plan } from "@themoss/core";
+import { type CapabilityNode, flattenCapabilityTree, NATIVE } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
-import { MONAD_TOKENS } from "@themoss/system";
+import { AUSD_ADDRESS, MONAD_CHAIN_ID, USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
 import { createPublicClient, createWalletClient, defineChain, formatUnits, http } from "viem";
 import { devAccount, FORK_RPC_URL, rpc } from "./dev-wallet.js";
 
 const chainId = Number(await rpc<string>("eth_chainId"));
+if (chainId !== MONAD_CHAIN_ID) throw new Error(`wallet requires Monad chain ${MONAD_CHAIN_ID}`);
 const chain = defineChain({
   id: chainId,
   name: "monad-fork",
@@ -25,9 +16,15 @@ const chain = defineChain({
 });
 const wallet = createWalletClient({ account: devAccount, chain, transport: http() });
 const reader = createPublicClient({ chain, transport: http() });
+const balanceTokens = [
+  { ref: NATIVE, symbol: "MON", decimals: 18 },
+  { ref: WMON_ADDRESS, symbol: "WMON", decimals: 18 },
+  { ref: USDC_ADDRESS, symbol: "USDC", decimals: 6 },
+  { ref: AUSD_ADDRESS, symbol: "AUSD", decimals: 6 },
+] as const;
 
 async function printBalances(): Promise<void> {
-  for (const token of MONAD_TOKENS) {
+  for (const token of balanceTokens) {
     const raw =
       token.ref === NATIVE
         ? await reader.getBalance({ address: devAccount.address })
@@ -41,55 +38,31 @@ async function printBalances(): Promise<void> {
   }
 }
 
-const [command, planPath] = process.argv.slice(2);
-
-switch (command) {
-  case "address":
-    console.log(devAccount.address);
-    break;
-
-  case "balance":
-    console.log(`balances of ${devAccount.address} (chain ${chainId}):`);
-    await printBalances();
-    break;
-
-  case "send": {
-    if (!planPath) {
-      console.error("usage: wallet send <plan.json — a Plan exactly as `action` returned it>");
-      process.exit(1);
-    }
-    const plan = JSON.parse(readFileSync(planPath, "utf8")) as Plan;
-    if (plan.kind !== "plan") {
-      console.error(`${planPath} is not a Plan (kind: ${JSON.stringify(plan.kind)})`);
-      process.exit(1);
-    }
-    if (plan.chainId !== chainId) {
-      console.error(`plan targets chain ${plan.chainId}, this wallet is on chain ${chainId}`);
-      process.exit(1);
-    }
-    const me = devAccount.address.toLowerCase();
-    if (plan.txs.some((tx) => tx.from.toLowerCase() !== me)) {
-      console.error(`plan contains transactions not from this wallet (${devAccount.address})`);
-      process.exit(1);
-    }
-
-    console.log(`sending ${plan.txs.length} tx(s): ${plan.intent}`);
-    for (const [i, tx] of plan.txs.entries()) {
-      const hash = await wallet.sendTransaction({
-        to: tx.to,
-        data: tx.data,
-        value: BigInt(tx.value),
-      });
-      const receipt = await reader.waitForTransactionReceipt({ hash });
-      console.log(`  tx ${i + 1}/${plan.txs.length} ${hash} → ${receipt.status}`);
-      if (receipt.status !== "success") process.exitCode = 1;
-    }
-    console.log(`balances of ${devAccount.address} after:`);
-    await printBalances();
-    break;
+const [command, capabilityPath] = process.argv.slice(2);
+if (command === "address") {
+  console.log(devAccount.address);
+} else if (command === "balance") {
+  await printBalances();
+} else if (command === "send") {
+  if (!capabilityPath) throw new Error("usage: wallet send <verified-capability.json>");
+  const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as CapabilityNode;
+  if (capability.kind !== "capability") throw new Error("input is not a Capability");
+  const executable = flattenCapabilityTree(capability);
+  const sender = devAccount.address.toLowerCase();
+  if (executable.some(({ transaction }) => transaction.from.toLowerCase() !== sender)) {
+    throw new Error(`Capability contains a transaction not sent by ${devAccount.address}`);
   }
-
-  default:
-    console.error("usage: wallet <address|balance|send <plan.json>>");
-    process.exit(1);
+  for (const [index, { transaction }] of executable.entries()) {
+    const hash = await wallet.sendTransaction({
+      to: transaction.to,
+      data: transaction.data,
+      value: BigInt(transaction.value),
+    });
+    const receipt = await reader.waitForTransactionReceipt({ hash });
+    console.log(`${index + 1}/${executable.length} ${hash} → ${receipt.status}`);
+    if (receipt.status !== "success") throw new Error(`transaction ${hash} failed`);
+  }
+  await printBalances();
+} else {
+  throw new Error("usage: wallet <address|balance|send <verified-capability.json>>");
 }

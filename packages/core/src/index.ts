@@ -7,64 +7,56 @@ export {
   type ProtocolCtor,
   Query,
   type QuerySpec,
+  Receipt,
 } from "./decorators.js";
-export { createHandle, type Handle, type TxStep } from "./handle.js";
-export { defineProtocolPackage, type ProtocolPackage } from "./manifest.js";
 export {
-  type DealerFn,
-  type DecodedEvent,
-  Event,
-  type EventSpec,
-  type ObserveCtx,
-  type ObserverHook,
-  type Placeholders,
-  type PlanObservation,
-} from "./observe.js";
-export {
-  computePlanHash,
-  type DeclaredFlows,
-  finalizePlan,
-  type PlanDraft,
-  plan,
-  stableStringify,
-} from "./plan.js";
+  type ExecutableCapability,
+  flattenCapabilityTree,
+  ReceiptCoverageError,
+  toJsonSafe,
+  verifyReceiptCoverage,
+} from "./framework.js";
+export { createHandle, type Handle, transaction } from "./handle.js";
 export {
   type ActionCtx,
   type Coordinate,
+  type LoadedParameter,
+  type ProtocolSource,
   type QueryResult,
   Registry,
-  type RegistryOptions,
   type Stub,
 } from "./registry.js";
 export { createRuntime, type MossRuntime } from "./runtime.js";
 export {
-  address,
-  type DecodeCtx,
-  type DecodedParams,
-  DecodeError,
-  decodeParams,
-  fixedAmount,
-  nativeAmount,
+  Address,
+  BasisPoints,
+  describeParams,
+  type InferParams,
+  type ParameterDeclaration,
+  ParameterError,
   type ParamsSpec,
-  type SemanticType,
-  slippageBps,
-  token,
-  tokenAmount,
-  uint,
+  PositiveDecimalString,
+  parseParams,
+  TokenReference,
+  UnsignedIntegerString,
 } from "./semantics.js";
-export { Token, type TokenSource } from "./token.js";
-export { type KnownToken, TokenTable } from "./tokens.js";
 export {
-  type Address,
+  type Address as AddressValue,
   CATEGORIES,
+  type CapabilityNode,
+  type CapabilityResult,
   type Category,
-  type Expects,
+  type Change,
   type Hex,
+  type JsonSafeValue,
   NATIVE,
-  type Plan,
+  type ProtocolRef,
+  type Receipt as ReceiptResult,
+  type ReceiptChange,
   RISK_LABELS,
   type RiskLabel,
   type TokenRef,
+  type TransactionNode,
   type UnsignedTx,
   VERBS,
   type Verb,

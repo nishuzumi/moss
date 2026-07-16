@@ -1,103 +1,115 @@
-import { type MossRuntime, NATIVE, type Plan, Registry } from "@themoss/core";
-import { erc20MetadataSource, ercManifest } from "@themoss/erc";
+import {
+  type Change,
+  flattenCapabilityTree,
+  type Hex,
+  type MossRuntime,
+  Registry,
+} from "@themoss/core";
+import { ERC20Abi, WETH9Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { monadRuntime, systemManifest, WMON_ADDRESS } from "../src/index.js";
+import { AUSD_ADDRESS, monadRuntime, USDC_ADDRESS, WMON, WMON_ADDRESS } from "../src/index.js";
 
-const ACCOUNT = "0xCcCccCCCcCCcccCcCccccCcCCCCcccccCcCCcCcC";
-const RECIPIENT = "0x1111111111111111111111111111111111111111";
-const AMOUNT = 1_500_000_000_000_000_000n; // 1.5 MON
+const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
 
-function offlineRegistry(): Registry {
-  const runtime: MossRuntime = {
-    chainId: 143,
-    rpcUrl: "http://offline",
-    // biome-ignore lint/suspicious/noExplicitAny: reads are unused in offline tests
-    client: {} as any,
+function depositChange(amount: bigint): Change {
+  return {
+    kind: "event",
+    address: WMON_ADDRESS,
+    topics: encodeEventTopics({
+      abi: WETH9Abi,
+      eventName: "Deposit",
+      args: { dst: ACCOUNT },
+    }) as readonly Hex[],
+    data: encodeAbiParameters([{ type: "uint256" }], [amount]),
   };
-  const registry = new Registry(runtime);
-  registry.use(systemManifest);
-  return registry;
 }
 
-describe("wmon system protocol (offline)", () => {
-  it("ships via systemManifest: discoverable by verb, loadable params", () => {
-    const registry = offlineRegistry();
-    expect(registry.discover({ verb: "wrap" })).toHaveLength(1);
-    const [stub] = registry.load([{ protocol: "wmon", method: "wrap" }]);
-    expect(stub?.risk).toEqual(["fundOut"]);
-    expect(stub?.params.amount).toContain("MON");
+describe("WMON", () => {
+  it("registers directly and builds one transaction per operation", async () => {
+    const registry = new Registry(runtime).use(WMON);
+    const wrap = await registry.action("wmon", "wrap", ACCOUNT, { amount: "1.5" });
+    if (wrap.kind !== "capability") throw new Error("expected capability");
+    expect(flattenCapabilityTree(wrap)[0]?.transaction).toMatchObject({
+      to: WMON_ADDRESS,
+      data: "0xd0e30db0",
+      value: "0x14d1120d7b160000",
+    });
+
+    const unwrap = await registry.action("wmon", "unwrap", ACCOUNT, { amount: "1.5" });
+    if (unwrap.kind !== "capability") throw new Error("expected capability");
+    const [unwrapTransaction] = flattenCapabilityTree(unwrap);
+    if (!unwrapTransaction) throw new Error("missing unwrap transaction");
+    expect(
+      decodeFunctionData({
+        abi: WETH9Abi,
+        data: unwrapTransaction.transaction.data,
+      }),
+    ).toEqual({ functionName: "withdraw", args: [1_500_000_000_000_000_000n] });
   });
 
-  it("builds the wrap plan: value-carrying deposit, symmetric expects", async () => {
-    const registry = offlineRegistry();
-    const built = (await registry.action("wmon", "wrap", ACCOUNT, { amount: "1.5" })) as Plan;
-    expect(built.txs).toEqual([
-      {
-        from: ACCOUNT,
-        to: WMON_ADDRESS,
-        data: "0xd0e30db0", // deposit()
-        value: "0x14d1120d7b160000", // 1.5e18 — the amount rides on tx.value
-      },
+  it("matches the WMON Deposit to the ordered native transfer", async () => {
+    const registry = new Registry(runtime).use(WMON);
+    const capability = await registry.action("wmon", "wrap", ACCOUNT, { amount: "1.5" });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const native = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: WMON_ADDRESS,
+      value: "1500000000000000000",
+    } satisfies Change;
+    const deposit = depositChange(1_500_000_000_000_000_000n);
+    const receipt = registry.parseReceipt(capability, [native, deposit]);
+    expect(receipt.outcome).toEqual({
+      operation: "wrap",
+      account: ACCOUNT,
+      amount: "1500000000000000000",
+    });
+    expect(receipt.changes).toEqual([
+      expect.objectContaining({ kind: "change", change: native }),
+      expect.objectContaining({ kind: "change", change: deposit }),
     ]);
-    expect(built.expects.out).toEqual([{ token: NATIVE, amountMax: AMOUNT.toString() }]);
-    expect(built.expects.in).toEqual([{ token: WMON_ADDRESS, amountMin: AMOUNT.toString() }]);
-    expect(built.verb).toBe("wrap");
-  });
-
-  it("builds the unwrap plan with the mirrored expectations", async () => {
-    const registry = offlineRegistry();
-    const built = (await registry.action("wmon", "unwrap", ACCOUNT, { amount: "1.5" })) as Plan;
-    expect(built.txs[0]?.data.startsWith("0x2e1a7d4d")).toBe(true); // withdraw(uint256)
-    expect(built.expects.out).toEqual([{ token: WMON_ADDRESS, amountMax: AMOUNT.toString() }]);
-    expect(built.expects.in).toEqual([{ token: NATIVE, amountMin: AMOUNT.toString() }]);
   });
 });
 
-// Live e2e against Monad mainnet with zero funds. Set MOSS_SKIP_E2E=1 offline.
-describe.skipIf(!!process.env.MOSS_SKIP_E2E)("system layer (Monad mainnet e2e)", () => {
-  it("wrap → unwrap chain simulates with zero warnings", { timeout: 120_000 }, async () => {
-    const runtime = monadRuntime();
-    const registry = new Registry(runtime);
-    registry.use(systemManifest);
-    const simulator = createTraceSimulator(runtime);
-
-    const wrap = (await registry.action("wmon", "wrap", ACCOUNT, { amount: "1.5" })) as Plan;
-    const unwrap = (await registry.action("wmon", "unwrap", ACCOUNT, { amount: "1.5" })) as Plan;
-
-    const { results, halted } = await simulator.simulate([wrap, unwrap]);
-    expect(halted).toBeUndefined();
-    expect(results.map((r) => r.warnings)).toEqual([[], []]);
-    expect(results[0]?.effects.assetsIn).toEqual([
-      { token: WMON_ADDRESS.toLowerCase(), amount: AMOUNT.toString() },
-    ]);
-    expect(results[1]?.effects.assetsIn).toEqual([{ token: NATIVE, amount: AMOUNT.toString() }]);
+describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad official token constants", () => {
+  it("have deployed bytecode and the documented metadata", { timeout: 60_000 }, async () => {
+    const { client } = await monadRuntime();
+    const tokens = [
+      { address: WMON_ADDRESS, symbol: "WMON", decimals: 18 },
+      { address: USDC_ADDRESS, symbol: "USDC", decimals: 6 },
+      { address: AUSD_ADDRESS, symbol: "AUSD", decimals: 6 },
+    ] as const;
+    for (const token of tokens) {
+      const [bytecode, symbol, decimals] = await Promise.all([
+        client.getCode({ address: token.address }),
+        client.readContract({ address: token.address, abi: ERC20Abi, functionName: "symbol" }),
+        client.readContract({ address: token.address, abi: ERC20Abi, functionName: "decimals" }),
+      ]);
+      expect(bytecode?.length).toBeGreaterThan(2);
+      expect(symbol).toBe(token.symbol);
+      expect(Number(decimals)).toBe(token.decimals);
+    }
   });
 
-  // Cross-package composition: system's wmon mints simulated WMON, erc's
-  // generic erc20 protocol transfers it — chained state, zero warnings.
-  it("wrap → erc20-transfer WMON chain simulates cleanly", { timeout: 120_000 }, async () => {
-    const runtime = monadRuntime();
-    const registry = new Registry(runtime, {
-      tokenFallback: erc20MetadataSource(runtime.client),
+  it("simulates a wrap with exhaustive ordered Receipt coverage", {
+    timeout: 120_000,
+  }, async () => {
+    const runtime = await monadRuntime();
+    const registry = new Registry(runtime).use(WMON);
+    const capability = await registry.action("wmon", "wrap", ACCOUNT, { amount: "0.25" });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+    const outcome = await createTraceSimulator(runtime, {
+      receipt: (node, changes) => registry.parseReceipt(node, changes),
+    }).simulate(capability);
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.results[0]?.warnings).toEqual([]);
+    expect(outcome.results[0]?.receipt?.outcome).toEqual({
+      operation: "wrap",
+      account: ACCOUNT,
+      amount: "250000000000000000",
     });
-    registry.use(systemManifest);
-    registry.use(ercManifest);
-    const simulator = createTraceSimulator(runtime);
-
-    const wrap = (await registry.action("wmon", "wrap", ACCOUNT, { amount: "1" })) as Plan;
-    const send = (await registry.action("erc20", "transfer", ACCOUNT, {
-      token: "WMON",
-      to: RECIPIENT,
-      amount: "0.5",
-    })) as Plan;
-
-    const { results, halted } = await simulator.simulate([wrap, send]);
-    expect(halted).toBeUndefined();
-    expect(results.map((r) => r.warnings)).toEqual([[], []]);
-    expect(results[1]?.effects.assetsOut).toEqual([
-      { token: WMON_ADDRESS.toLowerCase(), amount: (5n * 10n ** 17n).toString() },
-    ]);
-    expect(results[1]?.effects.recipients).toContain(RECIPIENT.toLowerCase());
   });
 });

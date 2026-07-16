@@ -1,143 +1,171 @@
 import type { Abi } from "viem";
 import { createHandle } from "./handle.js";
 import type { MossRuntime } from "./runtime.js";
-import type { ParamsSpec } from "./semantics.js";
-import type { Address, Category, RiskLabel, Verb } from "./types.js";
+import type { InferParams, ParamsSpec } from "./semantics.js";
+import type {
+  Address,
+  CapabilityResult,
+  Category,
+  Change,
+  JsonSafeValue,
+  ProtocolRef,
+  Receipt as ReceiptResult,
+  RiskLabel,
+  Verb,
+} from "./types.js";
 
 export interface ContractConfig {
   abi: Abi;
-  /** Deployment address. Moss v1 is single-chain (Monad mainnet) by design. */
   addr: Address;
 }
 
-export interface ProtocolConfig {
-  /** Unique lowercase slug used as the discover coordinate, e.g. "wmon". */
+export type ProtocolCtor = new () => object;
+export type ProtocolDependencies = Record<string, ProtocolCtor>;
+type InjectedProtocols<Dependencies extends ProtocolDependencies> = {
+  [K in keyof Dependencies]: ProtocolRef<InstanceType<Dependencies[K]>>;
+};
+
+export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Record<never, never>> {
   name: string;
   category: Category;
   description: string;
-  /**
-   * May be empty for protocols that operate on caller-supplied addresses
-   * (e.g. the generic erc20 protocol): declare `runtime` and build handles
-   * dynamically with createHandle.
-   */
   contracts: Record<string, ContractConfig>;
+  protocols?: Dependencies;
 }
 
-export interface CapabilitySpec {
-  /** Template shown to agents, with {param} placeholders: "Wrap {amount} MON". */
+type ReceiptNames<This> = {
+  [K in keyof This]: This[K] extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>
+    ? K
+    : never;
+}[keyof This] &
+  string;
+
+export interface CapabilitySpec<This, Params extends ParamsSpec = ParamsSpec> {
   intent: string;
   verb: Verb;
-  params: ParamsSpec;
+  params: Params;
+  receipt: ReceiptNames<This>;
   risk: RiskLabel[];
   tags?: string[];
-  /**
-   * Names of this protocol's @Event observations expected to appear when the
-   * plan simulates (the on-chain receipt). Missing confirmation → warning.
-   * Observation-plane strictness only tightens — never replaces audit
-   * (ADR 0008). Hash-covered so it can't be stripped in transit.
-   */
-  confirms?: string[];
 }
 
-export interface QuerySpec {
+export interface QuerySpec<Params extends ParamsSpec = ParamsSpec> {
   intent: string;
-  params: ParamsSpec;
+  params: Params;
   tags?: string[];
 }
 
 export type MethodMeta =
-  | { kind: "capability"; spec: CapabilitySpec }
+  | { kind: "capability"; spec: CapabilitySpec<object> }
   | { kind: "query"; spec: QuerySpec };
 
-/**
- * Metadata is attached as symbol-keyed marker properties on the class and its
- * method functions, NOT via decorator `context.metadata` — Symbol.metadata
- * lowering is still uneven across transpilers (esbuild, oxc), while a marker
- * property compiles identically everywhere. See ADR 0001.
- */
 export const PROTOCOL_META = Symbol.for("moss.protocol");
+export const PROTOCOL_TARGET = Symbol.for("moss.protocol.target");
 export const METHOD_META = Symbol.for("moss.method");
+export const RECEIPT_META = Symbol.for("moss.receipt");
 
-/** Constructor shape the registry instantiates adapters with. */
-export type ProtocolCtor = new (runtime: MossRuntime) => object;
-
-/**
- * Class decorator: subclasses the adapter so contract Handles are injected at
- * construction — `declare pool: Handle<typeof PoolAbi>` is type-only; the
- * value appears here. There is no compiler step (ADR 0001).
- *
- * Note the config key and the `declare` field name must match; a typo'd
- * declare surfaces as "this.X is undefined" at first build, since erased
- * declarations cannot be enumerated at runtime.
- */
-export function Protocol(config: ProtocolConfig) {
+export function Protocol<Dependencies extends ProtocolDependencies = Record<never, never>>(
+  config: ProtocolConfig<Dependencies>,
+) {
   if (!/^[a-z][a-z0-9-]*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
   }
-  // biome-ignore lint/suspicious/noExplicitAny: mixin constructor pattern
-  return <T extends new (...args: any[]) => object>(
+  return <T extends new () => object & InjectedProtocols<Dependencies>>(
     target: T,
     context: ClassDecoratorContext<T>,
   ): T => {
     if (context.kind !== "class") throw new Error("@Protocol decorates classes");
-    // biome-ignore lint/suspicious/noExplicitAny: mixin constructor pattern
-    const injected = class extends (target as new (...args: any[]) => object) {
-      // biome-ignore lint/suspicious/noExplicitAny: mixin constructor pattern
-      constructor(...args: any[]) {
-        super(...args);
-        const runtime = args[0] as MossRuntime;
-        if (!runtime || typeof runtime.chainId !== "number") {
-          throw new Error(
-            `protocol "${config.name}" must be constructed with a MossRuntime (use the registry)`,
-          );
+    const Base = target as new () => object;
+    const injected = class extends Base {
+      constructor(...args: unknown[]) {
+        super();
+        const [runtime, account, dependencies = {}] = args as [
+          MossRuntime,
+          Address,
+          Record<string, object>?,
+        ];
+        if (!runtime?.client || !account) {
+          throw new Error(`protocol "${config.name}" must be constructed by Registry`);
         }
         for (const [key, contract] of Object.entries(config.contracts)) {
           Object.defineProperty(this, key, {
-            value: createHandle(contract.abi, contract.addr, runtime.client),
+            value: createHandle(contract.abi, contract.addr, runtime.client, account),
             writable: false,
-            enumerable: false,
           });
         }
-        // Always injected alongside the handles: dynamic-address protocols
-        // (`declare runtime: MossRuntime`) build their own handles from it.
-        Object.defineProperty(this, "runtime", {
-          value: runtime,
-          writable: false,
-          enumerable: false,
-        });
+        Object.defineProperty(this, "runtime", { value: runtime, writable: false });
+        for (const key of Object.keys(config.protocols ?? {})) {
+          const dependency = dependencies[key];
+          if (!dependency) {
+            throw new Error(`protocol "${config.name}" dependency "${key}" was not injected`);
+          }
+          Object.defineProperty(this, key, { value: dependency, writable: false });
+        }
       }
     };
     Object.defineProperty(injected, "name", { value: target.name });
-    Object.defineProperty(injected, PROTOCOL_META, { value: config, enumerable: false });
+    Object.defineProperty(injected, PROTOCOL_META, { value: config });
+    Object.defineProperty(injected, PROTOCOL_TARGET, { value: target });
     return injected as unknown as T;
   };
 }
 
-function recordMethod(kind: MethodMeta["kind"], spec: CapabilitySpec | QuerySpec) {
-  // biome-ignore lint/suspicious/noExplicitAny: decorator target is untyped by design
-  return (method: any, context: ClassMethodDecoratorContext): void => {
-    if (context.kind !== "method" || context.static) {
-      throw new Error(
-        `@${kind === "capability" ? "Capability" : "Query"} decorates instance methods`,
-      );
-    }
-    // kind/spec arrive correlated from Capability()/Query(); TS can't see that.
-    Object.defineProperty(method, METHOD_META, {
-      value: { kind, spec } as MethodMeta,
-      enumerable: false,
-    });
+function recordMethod(
+  method: (...args: never[]) => unknown,
+  context: ClassMethodDecoratorContext,
+  kind: MethodMeta["kind"],
+  spec: CapabilitySpec<object> | QuerySpec,
+): void {
+  if (context.kind !== "method" || context.static) {
+    throw new Error(`@${kind === "capability" ? "Capability" : "Query"} decorates methods`);
+  }
+  Object.defineProperty(method, METHOD_META, { value: { kind, spec } as MethodMeta });
+}
+
+type CapabilityMethod<Params extends ParamsSpec> = (
+  params: InferParams<Params>,
+  context: { account: Address },
+) => CapabilityResult | Promise<CapabilityResult>;
+
+type QueryMethod<Params extends ParamsSpec> = (
+  params: InferParams<Params>,
+  context: { account: Address },
+) => unknown;
+
+export function Capability<This, Params extends ParamsSpec>(spec: CapabilitySpec<This, Params>) {
+  return <Method extends CapabilityMethod<Params>>(
+    method: Method,
+    context: ClassMethodDecoratorContext<This, Method>,
+  ): void => {
+    recordMethod(
+      method,
+      context as ClassMethodDecoratorContext,
+      "capability",
+      spec as unknown as CapabilitySpec<object>,
+    );
   };
 }
 
-/**
- * A write-intent method: decoded params in, PlanDraft out. Never signs,
- * never sends — the draft becomes a Plan of unsigned transactions.
- */
-export function Capability(spec: CapabilitySpec) {
-  return recordMethod("capability", spec);
+export function Query<Params extends ParamsSpec>(spec: QuerySpec<Params>) {
+  return <This, Method extends QueryMethod<Params>>(
+    method: Method,
+    context: ClassMethodDecoratorContext<This, Method>,
+  ): void => {
+    recordMethod(method, context as ClassMethodDecoratorContext, "query", spec);
+  };
 }
 
-/** A read-only method: decoded params in, JSON-safe data out. */
-export function Query(spec: QuerySpec) {
-  return recordMethod("query", spec);
+export function Receipt() {
+  return <This, Method extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>>(
+    method: Method,
+    context: ClassMethodDecoratorContext<This, Method>,
+  ): void => {
+    if (context.kind !== "method" || context.static) {
+      throw new Error("@Receipt decorates instance methods");
+    }
+    Object.defineProperty(method, RECEIPT_META, { value: true });
+  };
 }
+
+/** Result type returned by a method decorated with `@Receipt()`. */
+export type Receipt<TOutcome extends JsonSafeValue = JsonSafeValue> = ReceiptResult<TOutcome>;

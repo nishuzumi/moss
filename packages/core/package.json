@@ -1,7 +1,7 @@
 {
   "name": "@themoss/core",
   "version": "0.1.0",
-  "description": "Moss core: semantic types, protocol decorators, Plan model, and the debug_traceCall simulator",
+  "description": "Moss Protocol registration, Capability, parameter, and Receipt contracts",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -19,7 +19,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "viem": "^2.54.3"
+    "viem": "^2.54.3",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

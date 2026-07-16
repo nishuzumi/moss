@@ -1,92 +1,252 @@
 # MCP tools reference
 
-The Moss MCP server exposes exactly four tools. It is **stateless**: everything `simulate` needs travels inside the Plan object `action` returned. Nothing in this server signs or sends transactions.
+The Moss stdio server exposes exactly four tools: `discover`, `load`, `action`, and `simulate`. It builds and verifies unsigned transactions and never signs or sends them.
 
-Server binary: `packages/mcp-server` → `moss-mcp` (stdio). Configuration via env: `MOSS_RPC_URL` (default `https://rpc.monad.xyz`), `MOSS_CHAIN_ID` (default `143`).
+Build the server before configuring a client:
 
-## discover
-
+```bash
+pnpm build
 ```
-discover(verb?, category?, protocol?) → Coordinate[]
-```
-
-Finds capabilities (writes) and queries (reads) across registered protocols.
-
-- `verb` — user-perspective fund semantic, closed set: `swap wrap unwrap supply withdraw borrow repay stake unstake claim mint transfer`. Verbs never mirror protocol function names (WMON's `deposit()` is verb `wrap`).
-- `category` — protocol domain, closed set: `dex lending staking rewards token nft`.
-- Long-tail semantics (`clob`, `lst`, …) appear in each coordinate's free-form `tags`.
-
-Returns coordinates: `{ protocol, method, kind: "capability"|"query", verb?, category, tags, summary }`.
-
-## load
-
-```
-load(items: {protocol, method}[]) → Stub[]
-```
-
-Fetches the calling contract for coordinates: the intent template, per-parameter semantics, and risk labels.
-
-Parameter descriptions are written for agents. Two conventions matter most:
-
-- **Amounts are human-readable decimals** ("1.5"), never pre-scaled base units — the runtime applies token decimals. Contextual parameters (an amount whose token is another parameter) resolve automatically.
-- **Tokens go by well-known symbol** ("MON", "WMON", "USDC", "AUSD") wherever possible; symbols resolve only through the curated catalog, never from on-chain names (spoofable). An address is accepted for tokens outside the catalog; unknown symbols error loudly with the catalog list.
-
-## action
-
-```
-action(protocol, method, account, params) → QueryResult | Plan
-```
-
-- `account` — the user's address; it becomes the sender of every transaction in a Plan. Standardized here so no protocol invents its own `user`/`recipient`/`owner` parameter.
-- Queries return data immediately: `{ kind: "query", data }`.
-- Capabilities return a **Plan**:
 
 ```jsonc
 {
-  "kind": "plan",
-  "protocol": "kuru",
-  "method": "swap",
-  "verb": "swap",
-  "chainId": 143,
-  "account": "0x…",
-  "intent": "Swap 1 native into 0x…USDC at market on Kuru, tolerating 100 bps slippage",
-  "declaredRisk": ["fundOut", "approval", "priceImpact"],
-  "expects": {
-    "out":       [{ "token": "native", "amountMax": "1000000000000000000" }],
-    "in":        [{ "token": "0x…USDC", "amountMin": "23933" }],
-    "approvals": [ /* {token, spender, amountMax} */ ],
-    "nfts":      [ /* {collection, count, direction} */ ]
-  },
-  "confirms": ["swapResult"],   // receipts this write must produce in simulation
-  "txs": [ { "from": "0x…", "to": "0x…", "data": "0x…", "value": "0x0" } ],
-  "planHash": "0x…"   // keccak256 over {chainId, account, txs, expects, confirms}
+  "mcpServers": {
+    "moss": {
+      "command": "node",
+      "args": ["<path-to-moss>/packages/mcp-server/dist/cli.js"],
+      "env": { "MOSS_RPC_URL": "https://rpc.monad.xyz" }
+    }
+  }
 }
 ```
 
-The Plan is self-contained by design — pass it around freely; `simulate` re-derives `planHash` and flags tampering.
+The RPC must report Monad mainnet chain ID `143`. All MCP values are JSON-safe; chain quantities in structured data use decimal strings.
 
-**Rule: a Plan must go through `simulate` before it is shown to a user or signer.**
+## discover
+
+Find Capabilities and Queries before loading their full calling contracts.
+
+### Input
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `verb` | closed string | no | User operation such as `swap`, `wrap`, `transfer`, or `approve` |
+| `category` | closed string | no | Protocol domain such as `dex`, `token`, or `nft` |
+| `protocol` | string | no | Exact Protocol slug |
+
+```json
+{ "verb": "swap" }
+```
+
+### Output
+
+```ts
+type Coordinate = {
+  protocol: string;
+  method: string;
+  kind: "capability" | "query";
+  verb?: Verb;
+  category: Category;
+  tags: string[];
+  summary: string;
+};
+```
+
+Pass the selected `{ protocol, method }` coordinates to `load`. Do not call `action` from a guessed method name.
+
+## load
+
+Load intent, risk labels, and parameter contracts for one or more coordinates.
+
+### Input
+
+```json
+{
+  "items": [
+    { "protocol": "kuru", "method": "swap" },
+    { "protocol": "kuru", "method": "quote" }
+  ]
+}
+```
+
+### Output
+
+```ts
+type Stub = {
+  protocol: string;
+  method: string;
+  kind: "capability" | "query";
+  intent: string;
+  verb?: Verb;
+  category: Category;
+  risk: RiskLabel[];
+  tags: string[];
+  params: Record<string, {
+    type: JsonSafeValue;
+    description: string;
+  }>;
+};
+```
+
+Each parameter contains two independent explanations:
+
+- `type` is generated JSON Schema plus the reusable representation, units, constraints, conversion, and examples;
+- `description` explains what the field controls in this Capability or Query.
+
+Read both. For example, a basis-points type explains that `1 bps = 0.01%`; the field description explains that the value limits swap slippage.
+
+## action
+
+Execute a Query or build one root Capability tree.
+
+### Input
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `protocol` | string | yes | Protocol slug returned by `discover` |
+| `method` | string | yes | Method returned by `discover` |
+| `account` | address | yes | Sender of every transaction in the resulting tree |
+| `params` | object | no | Values described by `load`; defaults to `{}` |
+
+Query example:
+
+```json
+{
+  "protocol": "kuru",
+  "method": "quote",
+  "account": "0xcccccccccccccccccccccccccccccccccccccccc",
+  "params": {
+    "tokenIn": "native",
+    "tokenOut": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+    "amountIn": "1"
+  }
+}
+```
+
+A Query returns immediately:
+
+```ts
+type QueryResult = {
+  kind: "query";
+  protocol: string;
+  method: string;
+  data: JsonSafeValue;
+};
+```
+
+A write returns one recursive Capability:
+
+```ts
+type CapabilityNode = {
+  kind: "capability";
+  protocol: string;
+  method: string;
+  params: JsonSafeValue;
+  receipt: string;
+  children: readonly (CapabilityNode | TransactionNode)[];
+};
+
+type TransactionNode = {
+  kind: "transaction";
+  transaction: {
+    from: Address;
+    to: Address;
+    data: Hex;
+    value: Hex;
+  };
+};
+```
+
+Every Capability has exactly one direct TransactionNode and one Receipt name. Extra transactions belong to nested Capabilities. Never edit or reorder the returned tree; call `action` again when inputs change.
 
 ## simulate
 
+Execute one root Capability tree against Monad state and parse each successful transaction.
+
+### Input
+
+```jsonc
+{
+  "capability": { /* exact CapabilityNode returned by action */ }
+}
 ```
-simulate(plans: Plan[]) → { ok, guidance, results: PlanSimResult[], halted? }
+
+Simulation traverses nested Capabilities in depth-first order and carries state forward. MCP projects the verified Receipt leaves into the small Agent-facing response:
+
+```ts
+type AgentSimulation = {
+  ok: boolean;
+  guidance: string;
+  halted?: { transactionIndex: number; reason: string };
+  results: Array<{
+    protocol: string;
+    method: string;
+    texts: string[];
+    warnings: Warning[];
+  }>;
+};
 ```
 
-Simulates plans **in order with state chained across them** — plan B sees plan A's effects. Use one call for multi-step flows (claim → swap → supply); each plan is still reconciled against its own `expects`.
+`texts` contains exactly one entry per Receipt leaf, recursively flattened in the original Change order. For example:
 
-Per-plan result:
+```json
+{
+  "ok": true,
+  "guidance": "Compare every ordered Receipt text with the user's intent before handing transactions to a signer.",
+  "results": [
+    {
+      "protocol": "erc20",
+      "method": "approve",
+      "texts": ["ERC20 Approval: ..."],
+      "warnings": []
+    },
+    {
+      "protocol": "kuru",
+      "method": "swap",
+      "texts": [
+        "ERC20 Transfer: ...",
+        "Trade Event: ...",
+        "Kuru Swap: ..."
+      ],
+      "warnings": []
+    }
+  ]
+}
+```
 
-- `effects` — the structured summary for intent alignment: `assetsOut`, `assetsIn`, `approvals`, `nftApprovals`, `nftsOut/In`, `recipients`. Includes native MON flows and wrapped-native mints/burns, which emit no Transfer events.
-- `warnings` — effects reconciliation output. Codes: `REVERTED`, `PLAN_TAMPERED`, `UNDECLARED_OUTFLOW`, `OUTFLOW_EXCEEDS_MAX`, `UNDECLARED_APPROVAL`, `APPROVAL_EXCEEDS_MAX`, `MIN_INFLOW_NOT_MET`, `UNDECLARED_NFT_OUT`, `NFT_OPERATOR_GRANTED`, `CONFIRMATION_MISSING` (a receipt the plan's `confirms` declared did not appear). Warnings fire only on **undeclared differences** — a declared outflow with nothing back (an unstake request, margin posting) is legitimate.
-- `observations` — protocol-authored receipts ([ADR 0008](./adr/0008-observation-plane.md)): `{ protocol, name, intent, data }`, where `intent` is a rendered human sentence ("Swapped 1 MON into 0.0239 USDC on Kuru (3 fills)"). **Narrative, not law**: use them to enrich the summary shown to the user; they never override `warnings`, and reconciliation never reads them.
-- `gasPerTx` — via `eth_estimateGas`; `null` where the endpoint rejects override-based estimation.
-- `planHashValid` — false means the plan was modified after `action` built it.
+The MCP wire response deliberately omits transactions, gas, raw Changes, Receipt trees, leaf data, and structured Outcomes; `action` already returned the Capability tree. SDK consumers calling the library Simulator directly retain the complete result:
 
-Top level: `ok` is true iff every plan has zero warnings; `halted` reports where a revert stopped the chain.
+```ts
+type TransactionSimulation = {
+  protocol: string;
+  method: string;
+  transaction: UnsignedTx;
+  reverted: boolean;
+  revertReason?: string;
+  receipt?: Receipt;
+  changes?: readonly Change[];
+  warnings: Warning[];
+  gas: string | null;
+};
+```
 
-**Rules: any warning → stop, report, never sign. Zero warnings → still perform intent alignment (compare `effects` with what the user actually asked for) before proceeding.**
+Core produces the MCP texts only after the complete recursive Receipt retains every exact input Change object with identical length and order. After a clean simulation, compare every ordered text with the user's original operation, assets, amounts, recipients, limits, approvals, and Protocol choice.
+
+## Warnings
+
+| Code | Meaning |
+| --- | --- |
+| `REVERTED` | The transaction reverted |
+| `TRACE_FAILED` | The RPC could not produce trace evidence |
+| `CHANGE_ORDER_UNAVAILABLE` | Exact Event/native-transfer ordering could not be proven |
+| `RECEIPT_FAILED` | The Protocol could not parse the Changes into a valid Receipt |
+| `CHANGE_COVERAGE_MISMATCH` | Receipt leaves omitted, duplicated, replaced, or reordered Changes |
+| `STATE_CHAIN_FAILED` | State for a later transaction could not be derived |
+
+Any Warning halts execution. Earlier successful Receipts may remain for diagnosis, but later transactions do not run and nothing may be handed to a signer.
 
 ## Endpoint requirements
 
-Simulation needs `debug_traceCall` with `callTracer` (+`withLog`) and `prestateTracer` (+`diffMode`), honoring `stateOverrides`. Verified working: `rpc.monad.xyz`, `rpc4.monad.xyz`, `rpc-mainnet.monadinfra.com`, `monad-rpc.huginn.tech`. Several third-party free tiers block the `debug` namespace; Moss fails loudly with this list rather than skipping simulation. Details and evidence: [ADR 0002](./adr/0002-simulation-via-debug-tracecall.md).
+Simulation needs `debug_traceCall` with call/log evidence, a `prestateTracer` diff, and state overrides. The default `https://rpc.monad.xyz` supports these methods.
+
+When an endpoint lacks required evidence, Moss returns a Warning and stops. It never falls back to approximate ordering or skips Receipt verification. See [ADR 0002](./adr/0002-simulation-via-debug-tracecall.md).

@@ -1,77 +1,74 @@
-# agent-swap — a real agent trading on a local Monad mainnet fork
+# Agent swap on a local Monad fork
 
-The other examples simulate and stop. This one closes the loop: a Claude Code
-subagent (`moss-trader`) drives the Moss MCP tools end to end — `discover →
-load → action → simulate` — and, only when simulation comes back clean, hands
-the unsigned Plan to a tiny local wallet script that signs and sends it. The
-trade lands on a **local anvil fork of Monad mainnet**, so real orderbook
-state, zero real funds, zero configuration, zero secrets.
+This example separates construction and verification from signing. Moss never receives a key; a small wallet process signs only a reviewed Capability tree on a disposable local fork.
 
-The split is the point:
+The three roles are explicit:
 
-- **Moss** (the MCP server) builds and verifies. It never signs.
-- **The wallet** (`src/wallet.ts`, ~100 lines of viem) signs and sends. It
-  never builds. It refuses Plans for other chains or other accounts.
-- **The agent** is the only thing that knows what the user asked for — it
-  simulates, checks the warnings, aligns effects with intent, then and only
-  then crosses the trust boundary.
+- `swap` records intent, builds and simulates a Kuru Capability, compares the structured Outcome, and writes unsigned JSON;
+- `wallet` validates the tree and sender, then signs and sends on the local fork;
+- an Agent may drive the same `discover → load → action → simulate` flow through MCP, but must perform intent alignment before invoking the wallet.
 
 ## Prerequisites
 
-- Node ≥ 22, pnpm, and [Claude Code](https://claude.com/claude-code)
-- The **Monad flavor of Foundry** — its anvil forks mainnet with Monad's gas
-  model, opcode pricing, and `debug_traceCall` support (which Moss simulation
-  requires; the hosted fork services we tried don't expose geth-style tracers):
-
-  ```bash
-  curl -L https://foundry.category.xyz | bash
-  foundryup --network monad
-  ```
-
-## Run it
+Install Node 22+, pnpm 11, and the Monad build of Foundry. The Monad `anvil` build provides the gas model and tracing support used by this example.
 
 ```bash
-pnpm install && pnpm build
-
-claude   # open Claude Code at the repo root; approve the `moss` MCP server
+curl -L https://foundry.category.xyz | bash
+foundryup --network monad
+pnpm install
+pnpm build
 ```
 
-Then just ask:
+The included private key is Anvil's public development account #0. It has value only on the local fork. Never fund or use it on a public network.
 
-> Use moss to swap 1 MON into USDC on Kuru.
+## Run the deterministic example
 
-The `moss-trader` subagent (defined in [`.claude/agents/moss-trader.md`](../../.claude/agents/moss-trader.md),
-wired to the `moss` MCP server declared in [`.mcp.json`](../../.mcp.json) —
-nothing to configure by hand) will:
-
-1. run `pnpm --filter @themoss/example-agent-swap fork` — idempotently starts
-   `anvil --fork-url https://rpc.monad.xyz` on `127.0.0.1:8545` and funds the
-   demo wallet with 1,000,000 MON via `anvil_setBalance`;
-2. call `discover` / `load` / `action` to build the Plan for the wallet's
-   address, then `simulate` it — **any warning stops the flow before a
-   signature exists**;
-3. write the verified Plan to a temp file and run
-   `pnpm --filter @themoss/example-agent-swap wallet send <plan.json>`;
-4. report transaction hashes and the wallet's balances before and after.
-
-## The wallet, by hand
-
-Everything the agent does you can do yourself:
+Start a local fork and fund the development account:
 
 ```bash
-pnpm --filter @themoss/example-agent-swap fork      # start + fund (idempotent)
-pnpm --filter @themoss/example-agent-swap wallet address
-pnpm --filter @themoss/example-agent-swap wallet balance
-pnpm --filter @themoss/example-agent-swap wallet send /path/to/plan.json
+pnpm --filter @themoss/example-agent-swap fork
 ```
 
-The key inside `src/dev-wallet.ts` is anvil's dev account #0 — publicly known
-by every anvil user on earth, valuable only on your local fork. Never fund it
-anywhere real.
+Build, simulate, verify, and write one unsigned Capability tree:
 
-## Notes
+```bash
+pnpm --filter @themoss/example-agent-swap swap -- verified-capability.json
+```
 
-- The fork is disposable state on your machine. Kill it with `pkill anvil`;
-  the next `fork` run starts fresh from the current mainnet tip.
-- The `moss` MCP server in `.mcp.json` points at `127.0.0.1:8545`, so
-  `simulate` verifies against exactly the state the trade will execute on.
+The script stops on every Warning. It also compares Capability parameters and the final structured Kuru Outcome with the requested sender, assets, amount, and slippage.
+
+Review the printed ordered Receipts and the JSON file. Receipt text is presentation; the structured Outcomes are the evidence.
+
+Only after review, send the transactions on the local fork:
+
+```bash
+pnpm --filter @themoss/example-agent-swap wallet -- send verified-capability.json
+```
+
+## Drive it through MCP
+
+The repository's `.mcp.json` points Moss at `http://127.0.0.1:8545`, the same fork used by the wallet.
+
+Open Claude Code at the repository root after starting the fork, then ask:
+
+> Use moss to swap 1 MON into USDC on Kuru on the local fork.
+
+The [`moss-trader`](../../.claude/agents/moss-trader.md) procedure obtains the wallet address, records balances, and calls the four Moss tools.
+
+It stops on every Warning, compares every ordered Receipt text with the request, and writes the exact Capability JSON.
+
+The Agent must not hand-edit, reconstruct, or reorder the Capability tree. If parameters change, it must call `action` and `simulate` again.
+
+## Inspect the wallet manually
+
+```bash
+pnpm --filter @themoss/example-agent-swap wallet -- address
+pnpm --filter @themoss/example-agent-swap wallet -- balance
+pnpm --filter @themoss/example-agent-swap wallet -- send /absolute/path/to/capability.json
+```
+
+The wallet refuses trees for a different sender. It also requires the local RPC to report Monad chain ID `143`.
+
+## Reset the fork
+
+The fork is disposable local state. Stop it with `pkill anvil`; the next `fork` command starts from the current Monad mainnet tip and funds the development account again.

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "fork": "tsx src/fork.ts",
+    "swap": "tsx src/swap.ts",
     "wallet": "tsx src/wallet.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"examples are exercised by e2e tests in packages\" && exit 0",
@@ -13,6 +14,8 @@
   "dependencies": {
     "@themoss/core": "workspace:*",
     "@themoss/erc": "workspace:*",
+    "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
     "viem": "^2.54.3"
   },

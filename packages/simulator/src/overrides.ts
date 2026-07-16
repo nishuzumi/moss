@@ -6,7 +6,7 @@ const ZERO_WORD: Hex = `0x${"0".repeat(64)}`;
 
 /**
  * Fold one transaction's prestate diff into the accumulated overrides, so the
- * next transaction simulates on top of this one's effects. This is the manual
+ * next transaction simulates on top of this one's state changes. This is the manual
  * state-chaining that eth_simulateV1 would have provided (ADR 0002).
  */
 export function mergeDiff(overrides: StateOverrides, diff: PrestateDiff): void {
