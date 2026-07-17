@@ -27,7 +27,9 @@ ABIs are vendored verbatim from the guarded `@clober/v2-sdk` npm tarball and det
 
 The BookId is derived from the input/output assets and Clober's canonical Monad fee and unit-size rules. The returned `BookKey` must exactly match those values before quoting or constructing a Capability. A quote must use at least 99.9% of the requested input; this allows deterministic book-unit dust while rejecting materially partial fills.
 
-The Receipt parser uses only ordered simulation Changes. It interprets BookManager `Take` events and delegates native/ERC-20 settlement Changes to the ERC Protocol while preserving every original Change object in order.
+Input amounts must be exactly representable in the token's smallest unit; excess non-zero decimal precision is rejected instead of silently rounded. ERC-20 allowance is read before construction, so an approval Capability is added only when the current allowance is insufficient.
+
+The Receipt parser uses only ordered simulation Changes. It interprets BookManager `Take` events, rejects fills from multiple books, and requires actual input/output transfer evidence. Native/ERC-20 settlement Changes are delegated to the ERC Protocol while preserving every original Change object in order.
 
 ## Current scope
 

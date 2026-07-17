@@ -24,17 +24,25 @@ if (!registryResponse.ok) {
 const registry = (await registryResponse.json()) as RegistryDoc;
 const publishedAt = (version: string) => Date.parse(registry.time[version] ?? "");
 const ageDays = (version: string) => Math.floor((Date.now() - publishedAt(version)) / dayMs);
+const cutoff = Date.now() - MIN_RELEASE_AGE_DAYS * dayMs;
 
 const pinned = process.argv[2];
 let picked: string;
 if (pinned) {
   if (!registry.versions[pinned]) throw new Error(`${SDK_NAME}@${pinned} does not exist`);
+  if (!Number.isFinite(publishedAt(pinned))) {
+    throw new Error(`${SDK_NAME}@${pinned} has no valid publication timestamp`);
+  }
+  if (publishedAt(pinned) > cutoff) {
+    throw new Error(
+      `${SDK_NAME}@${pinned} is only ${ageDays(pinned)}d old; pinned releases must satisfy the ${MIN_RELEASE_AGE_DAYS}d age guard`,
+    );
+  }
   picked = pinned;
-  console.log(`pinned to ${picked} by argument - age guard bypassed deliberately`);
+  console.log(`pinned to ${picked} by argument (${ageDays(picked)}d old; age guard satisfied)`);
 } else {
   const latest = registry["dist-tags"].latest;
   if (!latest) throw new Error(`${SDK_NAME} has no dist-tags.latest`);
-  const cutoff = Date.now() - MIN_RELEASE_AGE_DAYS * dayMs;
   if (publishedAt(latest) <= cutoff) {
     picked = latest;
     console.log(`picked ${SDK_NAME}@${picked} (dist-tags.latest, ${ageDays(picked)}d old)`);
