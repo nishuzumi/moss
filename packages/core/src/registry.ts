@@ -110,13 +110,14 @@ function requireMetadataText(value: unknown, path: string): void {
   }
 }
 
-function validateParams(spec: ParamsSpec, path: string): void {
+function validateParams(spec: ParamsSpec, kind: "binding" | "parameter", scope: string): void {
   for (const [param, field] of Object.entries(spec)) {
-    requireMetadataText(field.description, `${path}.${param} description`);
+    const path = `${kind} "${scope}.${param}"`;
+    requireMetadataText(field.description, `${path} description`);
     if (!field.type || typeof field.type.safeParseAsync !== "function") {
-      throw new Error(`${path}.${param} has an invalid type`);
+      throw new Error(`${path} has an invalid type`);
     }
-    requireMetadataText(parameterTypeDescription(field.type), `${path}.${param} type description`);
+    requireMetadataText(parameterTypeDescription(field.type), `${path} type description`);
   }
 }
 
@@ -169,7 +170,7 @@ export class Registry {
       throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
     }
     if (config.binding) {
-      validateParams(config.binding.params, `binding "${config.name}"`);
+      validateParams(config.binding.params, "binding", config.name);
       if (typeof config.binding.contracts !== "function") {
         throw new Error(`protocol "${config.name}" binding contracts must be a function`);
       }
@@ -215,7 +216,7 @@ export class Registry {
       if (meta.spec.tags?.some((tag) => typeof tag !== "string" || tag.trim().length === 0)) {
         throw new Error(`method "${config.name}.${name}" has an invalid tag`);
       }
-      validateParams(meta.spec.params, `parameter "${config.name}.${name}"`);
+      validateParams(meta.spec.params, "parameter", `${config.name}.${name}`);
       if (meta.kind !== "capability") continue;
       if (!VERBS.includes(meta.spec.verb)) {
         throw new Error(`capability "${config.name}.${name}" has an invalid verb`);

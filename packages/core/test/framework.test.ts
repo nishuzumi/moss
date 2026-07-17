@@ -396,7 +396,7 @@ describe("framework core seam", () => {
     );
     expect(() => new Registry(runtime).use(InvalidMetadataProtocol)).toThrow("non-empty string");
     expect(() => new Registry(runtime).use(UndescribedParameterProtocol)).toThrow(
-      "type description",
+      'parameter "undescribed-parameter.inspect.value" type description must be a non-empty string',
     );
   });
 

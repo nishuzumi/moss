@@ -108,10 +108,7 @@ export function Protocol<
         }
         const dynamicContracts =
           config.binding && binding !== undefined ? config.binding.contracts(binding) : undefined;
-        if (
-          dynamicContracts !== undefined &&
-          (typeof dynamicContracts !== "object" || dynamicContracts === null)
-        ) {
+        if (config.binding && (typeof dynamicContracts !== "object" || dynamicContracts === null)) {
           throw new Error(`protocol "${config.name}" binding contracts must return an object`);
         }
         if (typeof Reflect.get(dynamicContracts ?? {}, "then") === "function") {

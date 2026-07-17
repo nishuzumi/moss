@@ -11,6 +11,7 @@ import {
   type ParamsSpec,
   Protocol,
   type ProtocolFactory,
+  type ProtocolRef,
   protocolFactory,
   Query,
   Receipt,
@@ -138,7 +139,11 @@ class BoundComposer {
   async independent() {
     const first = this.fixture.create({ contract: FIRST });
     const second = this.fixture.create({ contract: FIRST });
-    return { first: await first.inspect({}), second: await second.inspect({}) };
+    return {
+      first: await first.inspect({}),
+      firstAgain: await first.inspect({}),
+      second: await second.inspect({}),
+    };
   }
 
   @Receipt()
@@ -218,9 +223,52 @@ describe("Bound Protocol Registry seam", () => {
       method: "independent",
       data: {
         first: { contract: FIRST, calls: 1 },
+        firstAgain: { contract: FIRST, calls: 2 },
         second: { contract: FIRST, calls: 1 },
       },
     });
+  });
+
+  it("rejects direct parameterized Protocol dependencies", () => {
+    @Protocol({
+      name: "invalid-direct-dependency",
+      category: "token",
+      description: "Fixture that declares a parameterized Protocol without a factory.",
+      contracts: {},
+      protocols: { fixture: BoundFixture },
+    })
+    class InvalidDirectDependency {
+      declare fixture: ProtocolRef<BoundFixture>;
+    }
+
+    expect(() => new Registry(runtime).use(InvalidDirectDependency)).toThrow(
+      "must be declared with protocolFactory()",
+    );
+  });
+
+  it("rejects invalid dynamic contracts", async () => {
+    @Protocol({
+      name: "invalid-dynamic-contracts",
+      category: "token",
+      description: "Fixture whose dynamic contract construction returns an invalid value.",
+      contracts: {},
+      binding: {
+        params: fixtureBinding,
+        // Deliberately bypass the type contract to exercise runtime validation.
+        contracts: () => undefined as never,
+      },
+    })
+    class InvalidDynamicContracts {
+      @Query({ intent: "Inspect the invalid fixture", params: noParams })
+      async inspect() {
+        return null;
+      }
+    }
+
+    const registry = new Registry(runtime).use(InvalidDynamicContracts);
+    await expect(
+      registry.action("invalid-dynamic-contracts", "inspect", ACCOUNT, {}, { contract: FIRST }),
+    ).rejects.toThrow("binding contracts must return an object");
   });
 
   it("rejects malformed bindings before Protocol execution or RPC", async () => {
