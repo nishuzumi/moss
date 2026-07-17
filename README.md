@@ -7,6 +7,21 @@ Moss turns Monad protocol interactions into Agent-callable Capabilities through 
 > [!WARNING]
 > Moss is unaudited alpha software. Do not use it with production funds.
 
+## Table of contents
+
+- [Why Moss](#why-moss)
+- [Supported Protocols](#supported-protocols)
+- [Quickstart](#quickstart)
+  - [Use as an MCP server](#use-as-an-mcp-server)
+  - [Use as a library](#use-as-a-library)
+- [How verification works](#how-verification-works)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+
 ## Why Moss
 
 - **Agents call Protocol-owned operations.** Protocol packages own addresses, ABIs, calldata construction, parameter rules, and Receipt parsing.
