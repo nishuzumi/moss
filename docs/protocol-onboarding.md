@@ -24,6 +24,13 @@ Every ABI under `src/abis/` declares one origin:
 - `vendored`: generated deterministically from committed full upstream artifacts with package version and tarball digest.
 
 Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset.
+For Monad mainnet verified contracts that use the `explorer` origin, fetch the full ABI through the root CLI and redirect stdout into the protocol package:
+
+```bash
+MONADSCAN_API_KEY=... pnpm fetch:abi 0x1234567890abcdef1234567890abcdef12345678 MyRouter > packages/protocols/myprotocol/src/abis/myrouter.ts
+```
+
+The second argument is the export base name; the command emits `export const MyRouterAbi = [...] as const`. It uses Etherscan API V2 with Monad mainnet `chainid=143`, writes diagnostics to stderr, and does not write files itself.
 
 Every fixed address cites a canonical source and has an on-chain bytecode check. Fixed token constants additionally verify expected metadata. Dynamic pools and tokens come from chain state and do not become global constants.
 
@@ -88,7 +95,7 @@ Registry parses action input with the composed schemas. `load` returns JSON-safe
 
 ## 4. Author one transaction per Capability
 
-Every Capability owns exactly one direct transaction and one registered Receipt parser. More transactions require nested Capabilities. The serialized Capability tree carries `protocol + method`; Registry resolves the Receipt name from the registered Capability metadata.
+Every Capability owns exactly one direct transaction and one named Receipt parser. More transactions require nested Capabilities.
 
 ```ts
 @Capability<MyProtocol, typeof swapParams>({

@@ -8,7 +8,15 @@ ABIs are load-bearing security artifacts — one wrong function signature means 
 
 If none of the three is possible, the protocol does not get an adapter.
 
+For Monad mainnet contracts using the `explorer` tier, use the repository CLI instead of copying from the page by hand:
+
+```bash
+MONADSCAN_API_KEY=... pnpm fetch:abi <address> <ExportBaseName> > packages/protocols/<name>/src/abis/<name>.ts
+```
+
 ## Mechanics worth recording
+
+- The explorer tier uses the root `fetch:abi` command against Etherscan API V2 with Monad `chainid=143`, emits TypeScript to stdout, and records the public Monadscan URL plus retrieval date in the generated header.
 
 - **Generated ABIs are committed TypeScript, not JSON.** abitype's type inference — the thing that makes Handles fully typed — requires `as const` literals, which JSON imports cannot provide. Generation scripts emit `export const XAbi = [...] as const` files; human-readable `parseAbi` string arrays are equally acceptable for explorer/vendored tiers.
 - Contributors never need foundry: compiled ABIs are regenerated only when `contracts/` changes. Foundry projects (`contracts/`, `out/`, `cache/`) are excluded from npm (`files: ["dist"]`) and build outputs are gitignored.
