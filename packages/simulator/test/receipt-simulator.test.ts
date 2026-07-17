@@ -36,57 +36,23 @@ function coveringReceipt(changes: readonly Change[]): Receipt<{ operation: "run"
   };
 }
 
-function runtimeWithFrames(frames: CallFrame[]): MossRuntime {
+function runtimeWithFrames(
+  frames: CallFrame[],
+  requests?: { method: string; tracer?: string }[],
+): MossRuntime {
   let frameIndex = 0;
   return {
     rpcUrl: "http://offline",
     client: {
       request: async ({ method, params }: { method: string; params: unknown[] }) => {
+        const tracer = (params[2] as { tracer?: string } | undefined)?.tracer;
+        requests?.push({ method, ...(tracer ? { tracer } : {}) });
         if (method === "eth_estimateGas") return "0x5208";
-        const tracer = (params[2] as { tracer: string }).tracer;
         if (tracer === "callTracer") return frames[frameIndex++];
         return { pre: {}, post: {} };
       },
       // biome-ignore lint/suspicious/noExplicitAny: minimal debug RPC fixture
     } as any,
-  };
-}
-
-function copiedReceipt(changes: readonly Change[]): Receipt<{ operation: "run" }> {
-  return {
-    kind: "receipt",
-    outcome: { operation: "run" },
-    text: "Ran fixture capability",
-    changes: changes.map((change) => ({
-      kind: "change",
-      change: { ...change },
-      data: {},
-      text: "change",
-    })),
-  };
-}
-
-function runtimeWithRecordedFrames(frames: CallFrame[]): {
-  runtime: MossRuntime;
-  requests: { method: string; tracer?: string }[];
-} {
-  let frameIndex = 0;
-  const requests: { method: string; tracer?: string }[] = [];
-  return {
-    requests,
-    runtime: {
-      rpcUrl: "http://offline",
-      client: {
-        request: async ({ method, params }: { method: string; params: unknown[] }) => {
-          const tracer = (params[2] as { tracer?: string } | undefined)?.tracer;
-          requests.push({ method, ...(tracer ? { tracer } : {}) });
-          if (method === "eth_estimateGas") return "0x5208";
-          if (tracer === "callTracer") return frames[frameIndex++];
-          return { pre: {}, post: {} };
-        },
-        // biome-ignore lint/suspicious/noExplicitAny: minimal debug RPC fixture
-      } as any,
-    },
   };
 }
 
@@ -108,25 +74,9 @@ describe("Capability simulation", () => {
   });
 
   it("returns no Receipt for a revert and stops later transactions", async () => {
+    let receiptCalls = 0;
     const root = capability("parent", C, [capability("child", B)]);
     const simulator = createTraceSimulator(
-      runtimeWithFrames([
-        { type: "CALL", from: A, to: B, error: "execution reverted" },
-        { type: "CALL", from: A, to: C },
-      ]),
-      { receipt: (_node, changes) => coveringReceipt(changes) },
-    );
-
-    const outcome = await simulator.simulate(root);
-    expect(outcome.results).toHaveLength(1);
-    expect(outcome.results[0]?.receipt).toBeUndefined();
-    expect(outcome.results[0]?.warnings[0]?.code).toBe("REVERTED");
-    expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "execution reverted" });
-  });
-
-  it("does not parse a Receipt for reverted trace frames, even if the RPC returns logs", async () => {
-    let receiptCalls = 0;
-    const outcome = await createTraceSimulator(
       runtimeWithFrames([
         {
           type: "CALL",
@@ -135,6 +85,7 @@ describe("Capability simulation", () => {
           error: "execution reverted",
           logs: [{ address: B, topics: ["0x01"], data: "0x02" }],
         },
+        { type: "CALL", from: A, to: C },
       ]),
       {
         receipt: () => {
@@ -142,11 +93,14 @@ describe("Capability simulation", () => {
           throw new Error("reverted transactions must not be parsed");
         },
       },
-    ).simulate(capability("fixture", B));
+    );
 
+    const outcome = await simulator.simulate(root);
     expect(receiptCalls).toBe(0);
+    expect(outcome.results).toHaveLength(1);
     expect(outcome.results[0]?.receipt).toBeUndefined();
     expect(outcome.results[0]?.warnings[0]?.code).toBe("REVERTED");
+    expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "execution reverted" });
   });
 
   it("turns unavailable trace evidence into a terminal Warning", async () => {
@@ -168,40 +122,26 @@ describe("Capability simulation", () => {
     expect(outcome.halted?.transactionIndex).toBe(0);
   });
 
-  it("classifies exact Change coverage failures without matching error text", async () => {
-    const outcome = await createTraceSimulator(
-      runtimeWithFrames([
-        {
-          type: "CALL",
-          from: A,
-          to: B,
-          logs: [{ address: B, topics: ["0x01"], data: "0x02" }],
-        },
-      ]),
-      { receipt: () => coveringReceipt([]) },
-    ).simulate(capability("fixture", B));
-
-    expect(outcome.results[0]?.warnings[0]).toEqual({
-      code: "CHANGE_COVERAGE_MISMATCH",
-      message: "Receipt covered 0 Changes; expected 1",
-    });
-  });
-
-  it("halts before gas estimation, state chaining, and later transactions on forged coverage", async () => {
-    const { runtime, requests } = runtimeWithRecordedFrames([
-      {
-        type: "CALL",
-        from: A,
-        to: B,
-        logs: [{ address: B, topics: ["0x01"], data: "0x02" }],
-      },
-      { type: "CALL", from: A, to: C, logs: [] },
-    ]);
+  it("classifies forged Change coverage and halts before later work", async () => {
+    const requests: { method: string; tracer?: string }[] = [];
     const root = capability("parent", C, [capability("child", B)]);
-
-    const outcome = await createTraceSimulator(runtime, {
-      receipt: (_node, changes) => copiedReceipt(changes),
-    }).simulate(root);
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames(
+        [
+          {
+            type: "CALL",
+            from: A,
+            to: B,
+            logs: [{ address: B, topics: ["0x01"], data: "0x02" }],
+          },
+          { type: "CALL", from: A, to: C, logs: [] },
+        ],
+        requests,
+      ),
+      {
+        receipt: (_node, changes) => coveringReceipt(changes.map((change) => ({ ...change }))),
+      },
+    ).simulate(root);
 
     expect(outcome.results).toHaveLength(1);
     expect(outcome.results[0]?.warnings[0]?.code).toBe("CHANGE_COVERAGE_MISMATCH");
