@@ -26,7 +26,7 @@ pnpm test:offline
 - [ ] Rename the package and replace all placeholder Protocol metadata.
 - [ ] Put every ABI in `src/abis/` with a compiled, explorer, or vendored origin header. Vendored output must be the full upstream artifact.
 - [ ] Record a canonical source for every fixed address and add bytecode and metadata checks.
-- [ ] Declare fixed Package labels independently of Handles; Receipt parsers return `ReceiptResult` with raw addresses, while Core adds Protocol provenance and renders `Package(Protocol:name)`.
+- [ ] Declare fixed Package labels independently of Handles; Receipt parsers return `ReceiptResult` with raw addresses, while Core adds Protocol provenance and renders `Package(Title Cased Slug:localName)`.
 - [ ] Export public `@Protocol` classes directly from `src/index.ts`; do not add a separate registration object or import side effect.
 - [ ] Declare Protocol dependencies explicitly and use injected typed instances for cross-Protocol Capabilities and Queries.
 - [ ] Define each Capability and Query field as `{ type, description }` with a context-free Zod value contract and field-specific purpose.

@@ -139,7 +139,7 @@ Core only flattens ReceiptChange leaves and checks exact object identity, length
 
 Receipt text is presentation. The structured Outcome is authoritative and must use JSON-safe values.
 
-After the root parser returns, Registry replaces standalone addresses in every Receipt and ReceiptChange text once. At each Receipt, resolution is `Trusted(name)`, the current `Package(Protocol:name)`, nearest-to-farthest caller Packages, one unambiguous Package from the current Protocol's dependency graph, then the raw address. ReceiptChange text inherits its containing Receipt's scope; unrelated, conflicting, and unknown addresses stay raw. Outcomes, data, and Change objects are not rewritten.
+After the root parser returns, Registry replaces standalone addresses in every Receipt and ReceiptChange text once. At each Receipt, resolution is `Trusted(name)`, the current `Package(Title Cased Slug:localName)`, nearest-to-farthest caller Packages, one unambiguous Package from the current Protocol's dependency graph, then the raw address. ReceiptChange text inherits its containing Receipt's scope; unrelated, conflicting, and unknown addresses stay raw. Outcomes, data, and Change objects are not rewritten.
 
 ## 6. Export and compose
 

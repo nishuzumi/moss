@@ -19,8 +19,11 @@ import type {
   Category,
   Change,
   JsonSafeValue,
+  LabelScope,
+  PackageLabel,
   Receipt,
   ReceiptResult,
+  RegistryOptions,
   RiskLabel,
   Verb,
 } from "./types.js";
@@ -64,15 +67,6 @@ export interface QueryResult {
   data: JsonSafeValue;
 }
 
-export interface TrustedToken {
-  address: Address;
-  label: string;
-}
-
-export interface RegistryOptions {
-  trustedTokens?: readonly TrustedToken[];
-}
-
 interface Registered {
   ctor: ProtocolCtor;
   receiptCtor: ProtocolCtor;
@@ -84,17 +78,6 @@ interface Registered {
 }
 
 type CapabilityMethodMeta = Extract<MethodMeta, { kind: "capability" }>;
-
-interface PackageLabel {
-  packageName: string;
-  name: string;
-}
-
-interface LabelScope {
-  packageName: string;
-  own: ReadonlyMap<string, string>;
-  dependencies: ReadonlyMap<string, PackageLabel | null>;
-}
 
 export type ProtocolSource = ProtocolCtor | Record<string, unknown>;
 
@@ -158,7 +141,7 @@ function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
 
 export class Registry {
   #protocols = new Map<string, Registered>();
-  #identifiedReceipts = new WeakMap<object, string>();
+  #assignedReceiptProtocols = new WeakMap<object, string>();
   #trustedLabels: ReadonlyMap<string, string>;
   readonly runtime: MossRuntime;
 
@@ -435,7 +418,7 @@ export class Registry {
       return names;
     };
     const validate = (parent: string, child: ReceiptResult): Receipt => {
-      const assignedProtocol = this.#identifiedReceipts.get(child);
+      const assignedProtocol = this.#assignedReceiptProtocols.get(child);
       if (!assignedProtocol || !hasProtocol(child)) {
         const claimed = hasProtocol(child) ? ` "${child.protocol}"` : "";
         throw new Error(`Receipt protocol${claimed} was not assigned by Registry`);
@@ -461,13 +444,13 @@ export class Registry {
         protocol,
         changes: current.changes.map((child) => {
           if (child.kind === "change") return child;
-          if (this.#identifiedReceipts.has(child) || hasProtocol(child)) {
+          if (this.#assignedReceiptProtocols.has(child) || hasProtocol(child)) {
             return validate(protocol, child);
           }
           return attach(child);
         }),
       };
-      this.#identifiedReceipts.set(receipt, protocol);
+      this.#assignedReceiptProtocols.set(receipt, protocol);
       return receipt;
     };
     return attach(result);

@@ -36,6 +36,26 @@ export type JsonSafeValue =
   | readonly JsonSafeValue[]
   | { readonly [key: string]: JsonSafeValue };
 
+export interface TrustedToken {
+  address: Address;
+  label: string;
+}
+
+export interface RegistryOptions {
+  trustedTokens?: readonly TrustedToken[];
+}
+
+export interface PackageLabel {
+  packageName: string;
+  name: string;
+}
+
+export interface LabelScope {
+  packageName: string;
+  own: ReadonlyMap<string, string>;
+  dependencies: ReadonlyMap<string, PackageLabel | null>;
+}
+
 export interface UnsignedTx {
   from: Address;
   to: Address;

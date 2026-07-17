@@ -24,9 +24,7 @@ export {
   type ProtocolSource,
   type QueryResult,
   Registry,
-  type RegistryOptions,
   type Stub,
-  type TrustedToken,
 } from "./registry.js";
 export { createRuntime, type MossRuntime } from "./runtime.js";
 export {
@@ -55,10 +53,12 @@ export {
   type ProtocolRef,
   type ReceiptChange,
   type ReceiptResult,
+  type RegistryOptions,
   RISK_LABELS,
   type RiskLabel,
   type TokenRef,
   type TransactionNode,
+  type TrustedToken,
   type UnsignedTx,
   VERBS,
   type Verb,
