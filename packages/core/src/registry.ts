@@ -328,13 +328,12 @@ export class Registry {
     const binding = this.#parseBinding(protocol, rawBinding);
     const params = await parseParams(meta.spec.params, rawParams);
     const instance = this.#instantiate(protocol, account, binding);
-    return this.#invokeCapability(protocol, method, meta, account, params, instance, binding);
+    return this.#invokeCapability(protocol, method, account, params, instance, binding);
   }
 
   async #invokeCapability(
     protocol: string,
     method: string,
-    meta: Extract<MethodMeta, { kind: "capability" }>,
     account: Address,
     params: Record<string, unknown>,
     instance: object,
@@ -488,7 +487,7 @@ export class Registry {
       reference[method] = async (rawParams: Record<string, unknown>) => {
         const params = await parseParams(meta.spec.params, rawParams);
         return meta.kind === "capability"
-          ? this.#invokeCapability(protocol, method, meta, account, params, instance, binding)
+          ? this.#invokeCapability(protocol, method, account, params, instance, binding)
           : this.#invokeQuery(method, account, params, instance);
       };
     }

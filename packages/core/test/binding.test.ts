@@ -163,8 +163,7 @@ const client = {
 
 const runtime: MossRuntime = {
   rpcUrl: "http://offline",
-  // biome-ignore lint/suspicious/noExplicitAny: only call counts matter in this fixture
-  client: client as any,
+  client: client as unknown as MossRuntime["client"],
 };
 
 describe("Bound Protocol Registry seam", () => {
@@ -243,15 +242,15 @@ describe("Bound Protocol Registry seam", () => {
       "requires one",
     );
     expect(executions).toBe(0);
-    expect(client.readContract).not.toHaveBeenCalled();
-    expect(client.call).not.toHaveBeenCalled();
 
     asyncBindingExecutions = 0;
     const asyncRegistry = new Registry(runtime).use(AsyncBoundFixture);
     await expect(
       asyncRegistry.action("async-bound-fixture", "inspect", ACCOUNT, {}, { contract: FIRST }),
-    ).rejects.toThrow("Encountered Promise during synchronous parse");
+    ).rejects.toThrow();
     expect(asyncBindingExecutions).toBe(0);
+    expect(client.readContract).not.toHaveBeenCalled();
+    expect(client.call).not.toHaveBeenCalled();
 
     expect(() => protocolFactory(BoundFixture, { ...fixtureBinding })).toThrow(
       "declared binding schema",

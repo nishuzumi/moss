@@ -11,6 +11,7 @@ import type {
   ProtocolFactory,
   ProtocolFactorySource,
   ProtocolRef,
+  ReceiptNames,
   Receipt as ReceiptResult,
   RiskLabel,
   Verb,
@@ -49,13 +50,6 @@ export interface ProtocolConfig<
   binding?: ProtocolBinding<Binding>;
   protocols?: Dependencies;
 }
-
-type ReceiptNames<This> = {
-  [K in keyof This]: This[K] extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>
-    ? K
-    : never;
-}[keyof This] &
-  string;
 
 export interface CapabilitySpec<This, Params extends ParamsSpec = ParamsSpec> {
   intent: string;
@@ -112,18 +106,16 @@ export function Protocol<
         if (!config.binding && binding !== undefined) {
           throw new Error(`protocol "${config.name}" does not accept a binding`);
         }
-        const dynamicContracts = config.binding?.contracts(binding as InferParams<Binding>);
-        if (
-          dynamicContracts &&
-          typeof (dynamicContracts as unknown as { then?: unknown }).then === "function"
-        ) {
-          throw new Error(`protocol "${config.name}" binding contracts must be synchronous`);
-        }
+        const dynamicContracts =
+          config.binding && binding !== undefined ? config.binding.contracts(binding) : undefined;
         if (
           dynamicContracts !== undefined &&
           (typeof dynamicContracts !== "object" || dynamicContracts === null)
         ) {
           throw new Error(`protocol "${config.name}" binding contracts must return an object`);
+        }
+        if (typeof Reflect.get(dynamicContracts ?? {}, "then") === "function") {
+          throw new Error(`protocol "${config.name}" binding contracts must be synchronous`);
         }
         for (const key of Object.keys(dynamicContracts ?? {})) {
           if (Object.hasOwn(config.contracts, key)) {

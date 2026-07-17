@@ -12,6 +12,7 @@ import {
   protocolFactory,
   Query,
   Receipt,
+  type ReceiptRef,
   type ReceiptResult,
   UnsignedIntegerString,
 } from "../src/index.js";
@@ -81,6 +82,14 @@ const reference: BoundProtocolRef<BoundTypesFixture> = factory.create({ contract
 void reference.set({ value: "42" });
 void reference.inspect({});
 void factory.receipts.setReceipt([]);
+
+const strictReceipts = null as unknown as ReceiptRef<{
+  valid(changes: readonly Change[]): ReceiptResult<{ operation: "set" }>;
+  invalid(value: string): ReceiptResult<{ operation: "set" }>;
+}>;
+void strictReceipts.valid([]);
+// @ts-expect-error Receipt-shaped methods with invalid parser parameters are excluded.
+void strictReceipts.invalid("not changes");
 
 // @ts-expect-error Protocol factories are non-callable objects.
 factory({ contract: CONTRACT });

@@ -75,15 +75,12 @@ export type ProtocolRef<T> = {
     : never;
 };
 
-type ReceiptNames<T> = {
-  [K in keyof T]: T[K] extends (...args: infer _Args) => infer Result
-    ? Result extends Receipt
-      ? K
-      : never
-    : never;
-}[keyof T];
+export type ReceiptNames<T> = {
+  [K in keyof T]: T[K] extends (changes: readonly Change[]) => Receipt<JsonSafeValue> ? K : never;
+}[keyof T] &
+  string;
 
-export type ReceiptRef<T> = Pick<T, Extract<ReceiptNames<T>, keyof T>>;
+export type ReceiptRef<T> = Pick<T, ReceiptNames<T>>;
 export type BoundProtocolRef<T> = Omit<ProtocolRef<T>, ReceiptNames<T>>;
 
 export const PROTOCOL_FACTORY_TARGET: unique symbol = Symbol.for("moss.protocol.factory");
