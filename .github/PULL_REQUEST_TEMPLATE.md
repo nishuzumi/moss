@@ -20,6 +20,7 @@
 - [ ] `pnpm typecheck`
 - [ ] `pnpm lint`
 - [ ] `pnpm test`
+- [ ] If live Monad RPC is unavailable: `pnpm test:offline`, with skipped live checks noted
 - [ ] User-facing package changes include a changeset
 - [ ] Docs and examples match the implemented API
 
