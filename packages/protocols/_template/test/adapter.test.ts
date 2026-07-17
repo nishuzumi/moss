@@ -52,7 +52,7 @@ describe("Protocol template", () => {
     });
     expect(receipt.changes[0]).toMatchObject({
       kind: "change",
-      text: `Native MON Transfer: 1000000000000000000 from ${ACCOUNT} to Template Vault`,
+      text: `Native MON Transfer: 1000000000000000000 from ${ACCOUNT} to Package(Template:Vault)`,
     });
   });
 });

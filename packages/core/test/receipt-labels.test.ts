@@ -24,6 +24,8 @@ const DEEP = "0xDDdDddDdDdddDDddDDddDDDDdDdDDdDDdDDDDDDd" as const;
 const AMBIGUOUS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as const;
 const UNRELATED = "0xFfFfFffFffFFfffFFfFFffFfFffFfFfFffFfFfFf" as const;
 const RAW = "0x1234567890123456789012345678901234567890" as const;
+const SHARED = "0x2345678901234567890123456789012345678901" as const;
+const OTHER_ONLY = "0x3456789012345678901234567890123456789012" as const;
 
 const trustedTokens = [
   { address: TRUSTED, label: "Trusted Token" },
@@ -39,12 +41,27 @@ const leafData = { source: "event" } as const;
   category: "token",
   description: "Transitive label fixture.",
   contracts: {},
-  labels: { Asset: DEEP, RootShadow: ROOT, Conflict: AMBIGUOUS, TrustedShadow: TRUSTED },
+  labels: { Asset: DEEP, SharedChild: SHARED, Conflict: AMBIGUOUS, TrustedShadow: TRUSTED },
 })
 class DeepTokenProtocol {
   @Query({ intent: "Inspect deep fixture", params: noParams })
   async inspect() {
     return null;
+  }
+
+  @Receipt()
+  renderReceipt(changes: readonly Change[]): ReceiptResult<typeof nestedOutcome> {
+    return {
+      kind: "receipt",
+      outcome: nestedOutcome,
+      text: `trusted ${TRUSTED} own ${DEEP} child ${SHARED} parent ${ROOT}`,
+      changes: changes.map((change) => ({
+        kind: "change",
+        change,
+        data: leafData,
+        text: `catalog ${CATALOG_ONLY} boundary a${DEEP} and ${DEEP}aa then ${DEEP} unrelated ${UNRELATED} raw ${RAW}`,
+      })),
+    };
   }
 }
 
@@ -69,7 +86,7 @@ class BranchProtocol {
   category: "token",
   description: "Conflicting dependency fixture.",
   contracts: {},
-  labels: { Conflict: AMBIGUOUS },
+  labels: { Conflict: AMBIGUOUS, Reserve: OTHER_ONLY },
 })
 class OtherTokenProtocol {
   @Query({ intent: "Inspect other fixture", params: noParams })
@@ -98,7 +115,7 @@ class UnrelatedProtocol {
   description: "Receipt label root fixture.",
   contracts: {},
   protocols: { branch: BranchProtocol, other: OtherTokenProtocol, deep: DeepTokenProtocol },
-  labels: { Router: ROOT, TrustedShadow: TRUSTED },
+  labels: { Router: ROOT, SharedRoot: SHARED, TrustedShadow: TRUSTED },
 })
 class RootProtocol {
   declare branch: ProtocolRef<BranchProtocol>;
@@ -121,20 +138,8 @@ class RootProtocol {
     return {
       kind: "receipt",
       outcome,
-      text: `trusted ${TRUSTED.toUpperCase()} root ${ROOT}`,
-      changes: [
-        {
-          kind: "receipt",
-          outcome: nestedOutcome,
-          text: `deep ${DEEP} ambiguous ${AMBIGUOUS}`,
-          changes: changes.map((change) => ({
-            kind: "change",
-            change,
-            data: leafData,
-            text: `catalog ${CATALOG_ONLY} boundary a${DEEP} and ${DEEP}aa then ${DEEP} unrelated ${UNRELATED} raw ${RAW}`,
-          })),
-        },
-      ],
+      text: `trusted ${TRUSTED.toUpperCase()} root ${ROOT} dependency ${OTHER_ONLY} ambiguous ${AMBIGUOUS}`,
+      changes: [this.deep.renderReceipt(changes)],
     };
   }
 }
@@ -148,6 +153,20 @@ class RootProtocol {
 })
 class DuplicateLabelsProtocol {
   @Query({ intent: "Inspect duplicate fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+}
+
+@Protocol({
+  name: "duplicate-names",
+  category: "token",
+  description: "Duplicate name fixture.",
+  contracts: {},
+  labels: { Token: ROOT, token: DEEP },
+})
+class DuplicateNamesProtocol {
+  @Query({ intent: "Inspect duplicate name fixture", params: noParams })
   async inspect() {
     return null;
   }
@@ -181,6 +200,44 @@ class LongLabelProtocol {
   }
 }
 
+@Protocol({
+  name: "forged-receipt",
+  category: "token",
+  description: "Invalid Receipt provenance fixture.",
+  contracts: {},
+})
+class ForgedReceiptProtocol {
+  @Capability<ForgedReceiptProtocol, typeof noParams>({
+    intent: "Return invalid Receipt provenance",
+    verb: "transfer",
+    params: noParams,
+    receipt: "forgedReceipt",
+    risk: ["fundOut"],
+  })
+  async render(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return transaction(ctx.account, ROOT);
+  }
+
+  @Receipt()
+  forgedReceipt(changes: readonly Change[]): ReceiptResult<null> {
+    const child = Object.assign(
+      {
+        kind: "receipt" as const,
+        outcome: null,
+        text: "forged",
+        changes: changes.map((change) => ({
+          kind: "change" as const,
+          change,
+          data: null,
+          text: "forged",
+        })),
+      },
+      { protocol: "unrelated" },
+    );
+    return { kind: "receipt", outcome: null, text: "root", changes: [child] };
+  }
+}
+
 const runtime: MossRuntime = {
   rpcUrl: "http://offline",
   // biome-ignore lint/suspicious/noExplicitAny: calls are not used by this unit test
@@ -210,18 +267,25 @@ describe("Registry Receipt labels", () => {
     } satisfies Change;
 
     const receipt = registry.parseReceipt(capability(), [change]);
-    expect(receipt.text).toBe("trusted Trusted Token root Root Protocol Router");
+    expect(receipt.protocol).toBe("root-protocol");
+    expect(receipt.text).toBe(
+      `trusted Trusted(Trusted Token) root Package(Root Protocol:Router) dependency Package(Other Token:Reserve) ambiguous ${AMBIGUOUS}`,
+    );
     expect(receipt.outcome).toBe(outcome);
 
     const nested = receipt.changes[0];
     if (nested?.kind !== "receipt") throw new Error("expected nested Receipt");
-    expect(nested.text).toBe(`deep Deep Token Asset ambiguous ${AMBIGUOUS}`);
+    expect(nested.protocol).toBe("deep-token");
+    expect(nested.text).toBe(
+      "trusted Trusted(Trusted Token) own Package(Deep Token:Asset) " +
+        "child Package(Deep Token:SharedChild) parent Package(Root Protocol:Router)",
+    );
     expect(nested.outcome).toBe(nestedOutcome);
 
     const leaf = nested.changes[0];
     if (leaf?.kind !== "change") throw new Error("expected ReceiptChange");
     expect(leaf.text).toBe(
-      `catalog Catalog Token boundary a${DEEP} and ${DEEP}aa then Deep Token Asset unrelated ${UNRELATED} raw ${RAW}`,
+      `catalog Trusted(Catalog Token) boundary a${DEEP} and ${DEEP}aa then Package(Deep Token:Asset) unrelated ${UNRELATED} raw ${RAW}`,
     );
     expect(leaf.change).toBe(change);
     expect(leaf.data).toBe(leafData);
@@ -283,5 +347,42 @@ describe("Registry Receipt labels", () => {
       "1-32 character safe name",
     );
     expect(() => new Registry(runtime).use(LongLabelProtocol)).toThrow("1-32 character safe name");
+  });
+
+  it("rejects case-insensitive duplicate names for different addresses", () => {
+    expect(
+      () =>
+        new Registry(runtime, {
+          trustedTokens: [
+            { address: ROOT, label: "USDC" },
+            { address: DEEP, label: "usdc" },
+          ],
+        }),
+    ).toThrow('Trusted name "usdc" to multiple addresses');
+    expect(() => new Registry(runtime).use(DuplicateNamesProtocol)).toThrow(
+      'Package name "token" to multiple addresses',
+    );
+  });
+
+  it("rejects a child Receipt that claims an undeclared Protocol", () => {
+    const registry = new Registry(runtime).use(ForgedReceiptProtocol, UnrelatedProtocol);
+    const node = {
+      kind: "capability",
+      protocol: "forged-receipt",
+      method: "render",
+      params: {},
+      receipt: "forgedReceipt",
+      children: [transaction(ACCOUNT, ROOT)],
+    } satisfies CapabilityNode;
+    const change = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: ROOT,
+      value: "1",
+    } satisfies Change;
+
+    expect(() => registry.parseReceipt(node, [change])).toThrow(
+      'Receipt protocol "unrelated" is not a dependency of "forged-receipt"',
+    );
   });
 });

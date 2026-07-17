@@ -54,7 +54,7 @@ export class MyProtocol {
 
 Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
 
-`labels` names fixed Package addresses independently of Handles. Registry prefixes the local name with the title-cased Protocol slug (`Myprotocol Router` above), validates the final safe name, and exposes it only to this Protocol and Protocols that declare it as a dependency. Receipt parsers still emit raw evidence-backed addresses; Registry owns presentation.
+`labels` names fixed Package addresses independently of Handles. Registry renders the example above as `Package(Myprotocol:Router)`, validates the combined payload inside the Core-owned wrapper as a safe 1–32 character name, and exposes it through declared dependency and Receipt parser caller scopes. Receipt parsers still emit raw evidence-backed addresses; Registry owns presentation.
 
 ## 3. Define parameter contracts
 
@@ -122,7 +122,7 @@ The authoring method may use local bigint or viem helpers while constructing cal
 
 ```ts
 @Receipt()
-swapReceipt(changes: readonly Change[]): Receipt<SwapOutcome> {
+swapReceipt(changes: readonly Change[]): ReceiptResult<SwapOutcome> {
   // Decode, loop, branch, and delegate as required by this Protocol.
   // Every ReceiptChange must retain the exact input Change object.
   return buildSwapReceipt(changes);
@@ -131,7 +131,7 @@ swapReceipt(changes: readonly Change[]): Receipt<SwapOutcome> {
 
 A Receipt parser receives only the immutable ordered Changes for one successful direct transaction. It cannot receive Capability parameters or transaction data and cannot call Runtime, Handle, Query, or RPC.
 
-It may call another Protocol's pure Receipt parser for a continuous Change interval and embed the returned Receipt.
+It may call another Protocol's pure Receipt parser for a continuous Change interval and embed the returned Receipt. Package parsers author `ReceiptResult`; Core attaches the producing Protocol name to every parser call and returns the identified `Receipt` through injected dependency references, Registry, and Simulator.
 
 Parsing strategy belongs to the Protocol: ordinary loops, queues, and branches are allowed. Core provides no grammar engine or semantic matcher.
 
@@ -139,7 +139,7 @@ Core only flattens ReceiptChange leaves and checks exact object identity, length
 
 Receipt text is presentation. The structured Outcome is authoritative and must use JSON-safe values.
 
-After the root parser returns, Registry replaces standalone addresses in every Receipt and ReceiptChange text once. Trusted labels selected by composition win, followed by the root Protocol's Package label and one unambiguous visible dependency Package label; unrelated, conflicting, and unknown addresses stay raw. Outcomes, data, and Change objects are not rewritten.
+After the root parser returns, Registry replaces standalone addresses in every Receipt and ReceiptChange text once. At each Receipt, resolution is `Trusted(name)`, the current `Package(Protocol:name)`, nearest-to-farthest caller Packages, one unambiguous Package from the current Protocol's dependency graph, then the raw address. ReceiptChange text inherits its containing Receipt's scope; unrelated, conflicting, and unknown addresses stay raw. Outcomes, data, and Change objects are not rewritten.
 
 ## 6. Export and compose
 

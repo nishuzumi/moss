@@ -3,8 +3,8 @@ import {
   type Change,
   flattenCapabilityTree,
   type MossRuntime,
+  type Receipt,
   ReceiptCoverageError,
-  type ReceiptResult,
   type UnsignedTx,
   verifyReceiptCoverage,
 } from "@themoss/core";
@@ -43,7 +43,7 @@ export interface TransactionSimulation {
   transaction: UnsignedTx;
   reverted: boolean;
   revertReason?: string;
-  receipt?: ReceiptResult;
+  receipt?: Receipt;
   changes?: readonly Change[];
   warnings: Warning[];
   gas: string | null;
@@ -61,7 +61,7 @@ export interface Simulator {
 export interface SimulatorOptions {
   gasPerTx?: bigint;
   prefundWei?: bigint;
-  receipt: (capability: CapabilityNode, changes: readonly Change[]) => ReceiptResult;
+  receipt: (capability: CapabilityNode, changes: readonly Change[]) => Receipt;
 }
 
 const DEFAULT_PREFUND_WEI = 10n ** 24n;
@@ -130,7 +130,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
           return { results, halted: { transactionIndex, reason } };
         }
 
-        let receipt: ReceiptResult;
+        let receipt: Receipt;
         try {
           receipt = options.receipt(capability, changes);
           verifyReceiptCoverage(changes, receipt);

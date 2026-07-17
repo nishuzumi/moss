@@ -6,7 +6,7 @@ import {
   type CapabilityNode,
   type MossRuntime,
   type ProtocolSource,
-  type ReceiptResult,
+  type Receipt,
   Registry,
   VERBS,
 } from "@themoss/core";
@@ -62,7 +62,7 @@ function jsonError(error: unknown) {
   return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
 }
 
-function receiptTexts(receipt: ReceiptResult): string[] {
+function receiptTexts(receipt: Receipt): string[] {
   return receipt.changes.flatMap((entry) =>
     entry.kind === "change" ? [entry.text] : receiptTexts(entry),
   );

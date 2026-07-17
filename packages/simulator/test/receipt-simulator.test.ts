@@ -27,9 +27,13 @@ function capability(
   };
 }
 
-function coveringReceipt(changes: readonly Change[]): Receipt<{ operation: "run" }> {
+function coveringReceipt(
+  protocol: string,
+  changes: readonly Change[],
+): Receipt<{ operation: "run" }> {
   return {
     kind: "receipt",
+    protocol,
     outcome: { operation: "run" },
     text: "Ran fixture capability",
     changes: changes.map((change) => ({ kind: "change", change, data: {}, text: "change" })),
@@ -64,7 +68,7 @@ describe("Capability simulation", () => {
         { type: "CALL", from: A, to: B, logs: [] },
         { type: "CALL", from: A, to: C, logs: [] },
       ]),
-      { receipt: (_node, changes) => coveringReceipt(changes) },
+      { receipt: (node, changes) => coveringReceipt(node.protocol, changes) },
     );
 
     const outcome = await simulator.simulate(root);
@@ -114,7 +118,7 @@ describe("Capability simulation", () => {
       } as any,
     };
     const outcome = await createTraceSimulator(runtime, {
-      receipt: (_node, changes) => coveringReceipt(changes),
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
     }).simulate(capability("fixture", B));
     expect(outcome.results[0]?.warnings).toEqual([
       { code: "TRACE_FAILED", message: "debug_traceCall unavailable" },

@@ -5,7 +5,7 @@ import {
   type Change,
   type Hex,
   type MossRuntime,
-  type ReceiptResult,
+  type Receipt,
   Registry,
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
@@ -379,7 +379,7 @@ function kuruEventChange(
   };
 }
 
-function simulationResult(protocol: string, method: string, receipt: ReceiptResult) {
+function simulationResult(protocol: string, method: string, receipt: Receipt) {
   return {
     protocol,
     method,

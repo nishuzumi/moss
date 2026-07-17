@@ -8,8 +8,9 @@ import type {
   Category,
   Change,
   JsonSafeValue,
+  Receipt as ParsedReceipt,
   ProtocolRef,
-  Receipt as ReceiptResult,
+  ReceiptResult,
   RiskLabel,
   Verb,
 } from "./types.js";
@@ -168,5 +169,5 @@ export function Receipt() {
   };
 }
 
-/** Result type returned by a method decorated with `@Receipt()`. */
-export type Receipt<TOutcome extends JsonSafeValue = JsonSafeValue> = ReceiptResult<TOutcome>;
+/** Core-identified Receipt returned by Registry and injected Receipt dependencies. */
+export type Receipt<TOutcome extends JsonSafeValue = JsonSafeValue> = ParsedReceipt<TOutcome>;

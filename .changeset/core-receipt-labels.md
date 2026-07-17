@@ -1,5 +1,6 @@
 ---
 "@themoss/core": minor
+"@themoss/simulator": minor
 ---
 
-Render explicitly trusted and dependency-scoped Protocol Package address labels in Receipt presentation text without changing structured evidence.
+Render `Trusted(name)` and call-chain-scoped `Package(Protocol:name)` address labels, with Core-owned Protocol provenance on final Receipts and unchanged structured evidence.

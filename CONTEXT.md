@@ -85,10 +85,10 @@ A package exporting one or more self-describing Protocols. Its public Protocol e
 _Avoid_: plugin, extension
 
 **Trusted label**:
-A safe display name for a fixed token address selected explicitly by the application composition root. Trusted describes catalog provenance only; the text remains untrusted presentation data. Ordinary Protocol exports cannot supply Trusted labels.
+A safe 1–32 character payload for a fixed token address selected explicitly by the application composition root and rendered as `Trusted(name)`. Trusted describes catalog provenance only; the text remains untrusted presentation data. Ordinary Protocol exports cannot supply Trusted labels.
 
 **Package label**:
-A Protocol-owned safe display name for a fixed address declared independently of its Handles. Registry prefixes the local name with the title-cased Protocol slug, and only the root Protocol and its declared dependency graph can see it.
+A Protocol-owned local name for a fixed address declared independently of its Handles and rendered as `Package(Title Cased Slug:localName)`. The combined payload inside `Package(...)` is a safe 1–32 character name. A Receipt sees its own Package labels, the Package labels inherited from its parser caller chain, and one unambiguous label from its own declared dependency graph.
 
 **Package boundary**:
 Core owns framework contracts; simulator owns trace mechanics; ERC and concrete Protocol packages own ABI semantics, Receipts, and protocol-exclusive deployment addresses; system owns the shared Monad Runtime and shared asset instances; MCP server owns transport. New Protocols affect only their package and the composition root.
@@ -125,21 +125,21 @@ An immutable Event or native MON transfer from successful execution, kept in exa
 _Avoid_: Outcome, effect summary
 
 **Receipt parser**:
-A pure Protocol method that translates the ordered Changes of one successful transaction into a Receipt. Its only evidence is those Changes: it never reconstructs a planned path or fills gaps from external state, and it may delegate intervals to other Receipt parsers.
+A pure Protocol method that translates the ordered Changes of one successful transaction into a `ReceiptResult`. Its only evidence is those Changes: it never reconstructs a planned path or fills gaps from external state, and it may delegate intervals to other Receipt parsers. Core attaches the parser's Protocol identity to produce a Receipt.
 _Avoid_: Event handler, validator
 
 **Receipt**:
-A recursive interpretation containing one structured Outcome, presentation text, and ordered ReceiptChange leaves or nested Receipts. Its structured data is authoritative; text is a projection.
+A Core-identified recursive interpretation containing the producing Protocol name, one structured Outcome, presentation text, and ordered ReceiptChange leaves or nested Receipts. Its structured data is authoritative; text is a projection.
 _Avoid_: event log
 
 **ReceiptChange**:
 A Receipt leaf that retains the exact input Change object and adds JSON-safe protocol data and text.
 
 **Receipt tree**:
-The recursive structure formed when a Receipt parser delegates a continuous Change interval to another parser. Receipts for separate transactions remain separate.
+The recursive structure formed when a Receipt parser delegates a continuous Change interval to another parser. A delegated Receipt records the dependency parser's Protocol; a grouping created by the current parser inherits its Protocol. Receipts for separate transactions remain separate.
 
 **Receipt label rendering**:
-Registry's one presentation-only pass over every Receipt and ReceiptChange text after the root parser returns. Standalone addresses resolve as Trusted, root Package, one unambiguous visible dependency Package, or remain raw; Outcomes, data, and original Changes are untouched.
+Registry's one presentation-only pass over every Receipt and ReceiptChange text after the root parser returns. At each Receipt, standalone addresses resolve as Trusted, the current Package, nearest-to-farthest caller Package, one unambiguous Package from the current Protocol's direct-or-transitive dependencies, or remain raw. ReceiptChange text inherits its containing Receipt's scope; Outcomes, data, and original Changes are untouched.
 
 **Outcome**:
 A JSON-safe structured statement of facts directly supported by simulation Changes. Chain quantities use decimal strings.
