@@ -22,7 +22,10 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 | WMON | `@themoss/system` | `wrap`、`unwrap` | `balanceOf` |
 | ERC-20 与 native MON | `@themoss/erc` | `transfer`、`approve` | `balanceOf`、`allowance`、`metadata` |
 | ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`、`balanceOf` |
+| ERC-1155 | `@themoss/erc` | `transfer` | `balanceOf` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
+
+ERC-1155 `transfer` 接收 collection、token ID、amount 和 recipient。token ID 与 amount 使用十进制 uint256 字符串（允许零）。该 Capability 只构建一笔 `safeTransferFrom`，目前不暴露批量转账构建；Receipt 仍会解析 `TransferSingle` 和 `TransferBatch` Change，并保留批量条目的原始顺序，不做聚合。
 
 ## 快速开始
 
