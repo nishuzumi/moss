@@ -463,6 +463,15 @@ describe("framework core seam", () => {
     expect(() => verifyReceiptCoverage(changes, copied)).toThrow("original object");
     const reordered = receiptFor("swap", [second, first]);
     expect(() => verifyReceiptCoverage(changes, reordered)).toThrow("original object");
+
+    const firstLeaf = receipt.changes[0];
+    if (firstLeaf?.kind !== "change") throw new Error("expected fixture ReceiptChange");
+    expect(() =>
+      verifyReceiptCoverage(changes, {
+        ...receipt,
+        changes: [receiptFor("approve", [second]), firstLeaf],
+      }),
+    ).toThrow("Receipt Change 0 does not retain the original object in order");
   });
 
   it("validates Receipt evidence recursively", () => {
