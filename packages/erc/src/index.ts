@@ -1,6 +1,7 @@
 export {
   ierc20Abi as ERC20Abi,
   ierc721Abi as ERC721Abi,
+  ierc4626Abi as ERC4626Abi,
   iweth9Abi as WETH9Abi,
 } from "./abis/erc.js";
 export { ERC20, type ERC20Outcome } from "./erc20.js";
