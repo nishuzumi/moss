@@ -158,7 +158,7 @@ function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
 
 export class Registry {
   #protocols = new Map<string, Registered>();
-  #identifiedReceipts = new WeakSet<object>();
+  #identifiedReceipts = new WeakMap<object, string>();
   #trustedLabels: ReadonlyMap<string, string>;
   readonly runtime: MossRuntime;
 
@@ -435,15 +435,23 @@ export class Registry {
       return names;
     };
     const validate = (parent: string, child: ReceiptResult): Receipt => {
-      if (!this.#identifiedReceipts.has(child) || !hasProtocol(child)) {
+      const assignedProtocol = this.#identifiedReceipts.get(child);
+      if (!assignedProtocol || !hasProtocol(child)) {
         const claimed = hasProtocol(child) ? ` "${child.protocol}"` : "";
         throw new Error(`Receipt protocol${claimed} was not assigned by Registry`);
       }
-      if (child.protocol !== parent && !dependenciesFor(parent).has(child.protocol)) {
-        throw new Error(`Receipt protocol "${child.protocol}" is not a dependency of "${parent}"`);
+      if (child.protocol !== assignedProtocol) {
+        throw new Error(
+          `Receipt protocol "${child.protocol}" does not match Registry-assigned "${assignedProtocol}"`,
+        );
+      }
+      if (assignedProtocol !== parent && !dependenciesFor(parent).has(assignedProtocol)) {
+        throw new Error(
+          `Receipt protocol "${assignedProtocol}" is not a dependency of "${parent}"`,
+        );
       }
       for (const grandchild of child.changes) {
-        if (grandchild.kind === "receipt") validate(child.protocol, grandchild);
+        if (grandchild.kind === "receipt") validate(assignedProtocol, grandchild);
       }
       return child;
     };
@@ -459,7 +467,7 @@ export class Registry {
           return attach(child);
         }),
       };
-      this.#identifiedReceipts.add(receipt);
+      this.#identifiedReceipts.set(receipt, protocol);
       return receipt;
     };
     return attach(result);

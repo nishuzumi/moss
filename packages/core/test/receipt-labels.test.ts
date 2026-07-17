@@ -230,9 +230,10 @@ class LongLabelProtocol {
   category: "token",
   description: "Invalid Receipt provenance fixture.",
   contracts: {},
-  protocols: { unrelated: UnrelatedProtocol },
+  protocols: { deep: DeepTokenProtocol, unrelated: UnrelatedProtocol },
 })
 class ForgedReceiptProtocol {
+  declare deep: ProtocolRef<DeepTokenProtocol>;
   declare unrelated: ProtocolRef<UnrelatedProtocol>;
 
   @Capability<ForgedReceiptProtocol, typeof noParams>({
@@ -248,20 +249,8 @@ class ForgedReceiptProtocol {
 
   @Receipt()
   forgedReceipt(changes: readonly Change[]): ReceiptResult<null> {
-    const child = Object.assign(
-      {
-        kind: "receipt" as const,
-        outcome: null,
-        text: "forged",
-        changes: changes.map((change) => ({
-          kind: "change" as const,
-          change,
-          data: null,
-          text: "forged",
-        })),
-      },
-      { protocol: "unrelated" },
-    );
+    const child = this.deep.renderReceipt(changes);
+    child.protocol = "unrelated";
     return { kind: "receipt", outcome: null, text: "root", changes: [child] };
   }
 }
@@ -408,7 +397,7 @@ describe("Registry Receipt labels", () => {
     );
   });
 
-  it("rejects a child Receipt that claims an undeclared Protocol", () => {
+  it("rejects mutation of a Registry-assigned child Receipt Protocol", () => {
     const registry = new Registry(runtime).use(ForgedReceiptProtocol, UnrelatedProtocol);
     const node = {
       kind: "capability",
@@ -426,7 +415,7 @@ describe("Registry Receipt labels", () => {
     } satisfies Change;
 
     expect(() => registry.parseReceipt(node, [change])).toThrow(
-      'Receipt protocol "unrelated" was not assigned by Registry',
+      'Receipt protocol "unrelated" does not match Registry-assigned "deep-token"',
     );
   });
 });
