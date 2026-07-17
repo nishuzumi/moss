@@ -2,9 +2,13 @@ export {
   Capability,
   type CapabilitySpec,
   type ContractConfig,
+  createProtocolFactory,
   Protocol,
+  type ProtocolBinding,
   type ProtocolConfig,
   type ProtocolCtor,
+  type ProtocolFactory,
+  type ProtocolFactoryDefinition,
   Query,
   type QuerySpec,
   Receipt,
@@ -30,6 +34,7 @@ export { createRuntime, type MossRuntime } from "./runtime.js";
 export {
   Address,
   BasisPoints,
+  BindingError,
   describeParams,
   type InferParams,
   type ParameterDeclaration,
@@ -42,6 +47,7 @@ export {
 } from "./semantics.js";
 export {
   type Address as AddressValue,
+  type BoundProtocolRef,
   CATEGORIES,
   type CapabilityNode,
   type CapabilityResult,
@@ -53,6 +59,7 @@ export {
   type ProtocolRef,
   type Receipt as ReceiptResult,
   type ReceiptChange,
+  type ReceiptRef,
   RISK_LABELS,
   type RiskLabel,
   type TokenRef,

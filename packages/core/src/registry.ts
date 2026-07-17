@@ -1,16 +1,25 @@
 import {
   METHOD_META,
   type MethodMeta,
+  PROTOCOL_FACTORY_META,
   PROTOCOL_META,
   PROTOCOL_TARGET,
   type ProtocolConfig,
   type ProtocolCtor,
   type ProtocolDependencies,
+  type ProtocolFactoryDefinition,
   RECEIPT_META,
 } from "./decorators.js";
 import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
 import type { MossRuntime } from "./runtime.js";
-import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
+import {
+  BindingError,
+  describeParams,
+  type ParamsSpec,
+  parameterTypeDescription,
+  parseBinding,
+  parseParams,
+} from "./semantics.js";
 import type {
   Address,
   CapabilityNode,
@@ -52,6 +61,7 @@ export interface Stub {
   category: Category;
   risk: RiskLabel[];
   tags: string[];
+  binding?: Record<string, LoadedParameter>;
   params: Record<string, LoadedParameter>;
 }
 
@@ -65,21 +75,37 @@ export interface QueryResult {
 interface Registered {
   ctor: ProtocolCtor;
   receiptCtor: ProtocolCtor;
-  config: ProtocolConfig<ProtocolDependencies>;
+  config: ProtocolConfig<ProtocolDependencies, ParamsSpec>;
   methods: Record<string, MethodMeta>;
   receipts: Set<string>;
 }
 
 type CapabilityMethodMeta = Extract<MethodMeta, { kind: "capability" }>;
 
-export type ProtocolSource = ProtocolCtor | Record<string, unknown>;
+export type ProtocolSource = ProtocolCtor | ProtocolFactoryDefinition | Record<string, unknown>;
 
-function configOf(value: unknown): ProtocolConfig<ProtocolDependencies> | undefined {
+function configOf(value: unknown): ProtocolConfig<ProtocolDependencies, ParamsSpec> | undefined {
   if (typeof value !== "function") return undefined;
   if (!Object.hasOwn(value, PROTOCOL_META)) return undefined;
-  return (value as unknown as Record<symbol, ProtocolConfig<ProtocolDependencies> | undefined>)[
-    PROTOCOL_META
-  ];
+  return (
+    value as unknown as Record<symbol, ProtocolConfig<ProtocolDependencies, ParamsSpec> | undefined>
+  )[PROTOCOL_META];
+}
+
+interface FactoryMarker {
+  protocol: ProtocolCtor;
+  binding: ParamsSpec;
+}
+
+function factoryOf(value: unknown): FactoryMarker | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return (value as Record<symbol, FactoryMarker | undefined>)[PROTOCOL_FACTORY_META];
+}
+
+function dependencyCtor(value: unknown): ProtocolCtor | undefined {
+  const factory = factoryOf(value);
+  if (factory) return factory.protocol;
+  return configOf(value) ? (value as ProtocolCtor) : undefined;
 }
 
 function requireMetadataText(value: unknown, path: string): void {
@@ -102,14 +128,23 @@ export class Registry {
         this.register(source as ProtocolCtor);
         continue;
       }
+      const sourceFactory = factoryOf(source);
+      if (sourceFactory) {
+        this.register(sourceFactory.protocol);
+        continue;
+      }
       if (!source || typeof source !== "object") {
-        throw new Error("Registry.use() expects a decorated Protocol class or module namespace");
+        throw new Error(
+          "Registry.use() expects a decorated Protocol class, Protocol factory, or module namespace",
+        );
       }
-      const protocols = [...new Set(Object.values(source).filter((value) => configOf(value)))];
+      const protocols = [
+        ...new Set(Object.values(source).map(dependencyCtor).filter(Boolean)),
+      ] as ProtocolCtor[];
       if (protocols.length === 0) {
-        throw new Error("module namespace exports no decorated Protocol classes");
+        throw new Error("module namespace exports no decorated Protocol classes or factories");
       }
-      for (const protocol of protocols) this.register(protocol as ProtocolCtor);
+      for (const protocol of protocols) this.register(protocol);
     }
     return this;
   }
@@ -137,7 +172,13 @@ export class Registry {
       throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
     }
     for (const dependency of Object.values(config.protocols ?? {})) {
-      this.register(dependency, [...stack, config.name]);
+      const ctor = dependencyCtor(dependency);
+      if (!ctor) {
+        const dependencyName =
+          typeof dependency === "function" ? dependency.name : "Protocol dependency";
+        throw new Error(`${dependencyName} is not decorated with @Protocol`);
+      }
+      this.register(ctor, [...stack, config.name]);
     }
 
     const methods: Record<string, MethodMeta> = {};
@@ -163,24 +204,18 @@ export class Registry {
     if (Object.keys(methods).length === 0) {
       throw new Error(`protocol "${config.name}" declares no @Capability or @Query methods`);
     }
+    if (config.binding) {
+      if (typeof config.binding.contracts !== "function") {
+        throw new Error(`protocol "${config.name}" binding must declare a contracts function`);
+      }
+      this.#validateDeclarations(config.binding.params, "binding", config.name);
+    }
     for (const [name, meta] of Object.entries(methods)) {
       requireMetadataText(meta.spec.intent, `method "${config.name}.${name}" intent`);
       if (meta.spec.tags?.some((tag) => typeof tag !== "string" || tag.trim().length === 0)) {
         throw new Error(`method "${config.name}.${name}" has an invalid tag`);
       }
-      for (const [param, field] of Object.entries(meta.spec.params)) {
-        requireMetadataText(
-          field.description,
-          `parameter "${config.name}.${name}.${param}" description`,
-        );
-        if (!field.type || typeof field.type.safeParseAsync !== "function") {
-          throw new Error(`parameter "${config.name}.${name}.${param}" has an invalid type`);
-        }
-        requireMetadataText(
-          parameterTypeDescription(field.type),
-          `parameter "${config.name}.${name}.${param}" type description`,
-        );
-      }
+      this.#validateDeclarations(meta.spec.params, "parameter", `${config.name}.${name}`);
       if (meta.kind !== "capability") continue;
       if (!VERBS.includes(meta.spec.verb)) {
         throw new Error(`capability "${config.name}.${name}" has an invalid verb`);
@@ -238,6 +273,9 @@ export class Registry {
         category: registered.config.category,
         risk: meta.kind === "capability" ? meta.spec.risk : [],
         tags: meta.spec.tags ?? [],
+        ...(registered.config.binding
+          ? { binding: describeParams(registered.config.binding.params) }
+          : {}),
         params: describeParams(meta.spec.params),
       };
     });
@@ -248,6 +286,7 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    rawBinding?: Record<string, unknown>,
   ): Promise<QueryResult | CapabilityNode> {
     const meta = this.#get(protocol).methods[method];
     if (!meta) throw new Error(`protocol "${protocol}" has no method "${method}"`);
@@ -256,10 +295,10 @@ export class Registry {
         kind: "query",
         protocol,
         method,
-        data: await this.#runQuery(protocol, method, account, rawParams),
+        data: await this.#runQuery(protocol, method, account, rawParams, rawBinding),
       };
     }
-    return this.#buildCapability(protocol, method, account, rawParams);
+    return this.#buildCapability(protocol, method, account, rawParams, rawBinding);
   }
 
   parseReceipt(node: CapabilityNode, changes: readonly Change[]): Receipt {
@@ -279,14 +318,27 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    rawBinding?: Record<string, unknown>,
   ): Promise<CapabilityNode> {
     const registered = this.#get(protocol);
     const meta = registered.methods[method];
     if (meta?.kind !== "capability") {
       throw new Error(`"${protocol}.${method}" is not a Capability`);
     }
+    const binding = this.#parseProtocolBinding(registered, rawBinding);
+    return this.#buildCapabilityWithBinding(meta, protocol, method, account, rawParams, binding);
+  }
+
+  async #buildCapabilityWithBinding(
+    meta: CapabilityMethodMeta,
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+    binding: Record<string, unknown> | undefined,
+  ): Promise<CapabilityNode> {
     const params = await parseParams(meta.spec.params, rawParams);
-    const instance = this.#instantiate(protocol, account);
+    const instance = this.#instantiate(protocol, account, binding);
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
     const result = (await (instance as any)[method](params, { account } satisfies ActionCtx)) as
       | CapabilityResult
@@ -296,6 +348,7 @@ export class Registry {
       kind: "capability",
       protocol,
       method,
+      ...(binding ? { binding: toJsonSafe(binding) } : {}),
       params: toJsonSafe(params),
       children,
     };
@@ -308,12 +361,25 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    rawBinding?: Record<string, unknown>,
   ): Promise<JsonSafeValue> {
     const registered = this.#get(protocol);
     const meta = registered.methods[method];
     if (meta?.kind !== "query") throw new Error(`"${protocol}.${method}" is not a Query`);
+    const binding = this.#parseProtocolBinding(registered, rawBinding);
+    return this.#runQueryWithBinding(meta, protocol, method, account, rawParams, binding);
+  }
+
+  async #runQueryWithBinding(
+    meta: Extract<MethodMeta, { kind: "query" }>,
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+    binding: Record<string, unknown> | undefined,
+  ): Promise<JsonSafeValue> {
     const params = await parseParams(meta.spec.params, rawParams);
-    const instance = this.#instantiate(protocol, account);
+    const instance = this.#instantiate(protocol, account, binding);
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
     return toJsonSafe(await (instance as any)[method](params, { account } satisfies ActionCtx));
   }
@@ -335,46 +401,60 @@ export class Registry {
     const ReceiptCtor = registered.receiptCtor as unknown as new () => object;
     const instance = new ReceiptCtor();
     for (const [key, dependency] of Object.entries(registered.config.protocols ?? {})) {
-      const name = configOf(dependency)?.name;
+      const ctor = dependencyCtor(dependency);
+      const name = ctor && configOf(ctor)?.name;
       if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
       Object.defineProperty(instance, key, {
-        value: this.#receiptDependency(name),
+        value: factoryOf(dependency)
+          ? this.#receiptFactory(dependency, name)
+          : this.#receiptDependency(name),
         writable: false,
       });
     }
     return instance;
   }
 
-  #instantiate(protocol: string, account: Address): object {
+  #instantiate(protocol: string, account: Address, binding?: Record<string, unknown>): object {
     const registered = this.#get(protocol);
     const dependencies = Object.fromEntries(
       Object.entries(registered.config.protocols ?? {}).map(([key, dependency]) => {
-        const name = configOf(dependency)?.name;
+        const marker = factoryOf(dependency);
+        const ctor = dependencyCtor(dependency);
+        const name = ctor && configOf(ctor)?.name;
         if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
-        return [key, this.#dependency(name, account)];
+        return [key, marker ? this.#factory(dependency, account) : this.#dependency(name, account)];
       }),
     );
     const Ctor = registered.ctor as unknown as new (
       runtime: MossRuntime,
       account: Address,
       dependencies: Record<string, object>,
+      binding?: Record<string, unknown>,
     ) => object;
-    return new Ctor(this.runtime, account, dependencies);
+    return new Ctor(this.runtime, account, dependencies, binding);
   }
 
-  #dependency(protocol: string, account: Address): object {
+  #dependency(
+    protocol: string,
+    account: Address,
+    binding?: Record<string, unknown>,
+    includeReceipts = true,
+  ): object {
     const registered = this.#get(protocol);
     const dependency: Record<string, unknown> = {};
     for (const [method, meta] of Object.entries(registered.methods)) {
       dependency[method] =
         meta.kind === "capability"
           ? (params: Record<string, unknown>) =>
-              this.#buildCapability(protocol, method, account, params)
-          : (params: Record<string, unknown>) => this.#runQuery(protocol, method, account, params);
+              this.#buildCapabilityWithBinding(meta, protocol, method, account, params, binding)
+          : (params: Record<string, unknown>) =>
+              this.#runQueryWithBinding(meta, protocol, method, account, params, binding);
     }
-    for (const receipt of registered.receipts) {
-      dependency[receipt] = (changes: readonly Change[]) =>
-        this.#runReceipt(protocol, receipt, changes);
+    if (includeReceipts) {
+      for (const receipt of registered.receipts) {
+        dependency[receipt] = (changes: readonly Change[]) =>
+          this.#runReceipt(protocol, receipt, changes);
+      }
     }
     return Object.freeze(dependency);
   }
@@ -386,6 +466,62 @@ export class Registry {
         this.#runReceipt(protocol, receipt, changes);
     }
     return Object.freeze(dependency);
+  }
+
+  #factory(definition: unknown, account: Address): object {
+    const marker = factoryOf(definition);
+    const name = marker && configOf(marker.protocol)?.name;
+    if (!marker || !name) throw new Error("invalid Protocol factory definition");
+    const factory: Record<PropertyKey, unknown> = {
+      create: (rawBinding: Record<string, unknown>) => {
+        const registered = this.#get(name);
+        const binding = this.#parseProtocolBinding(registered, rawBinding);
+        return this.#dependency(name, account, binding, false);
+      },
+      receipts: this.#receiptDependency(name),
+    };
+    Object.defineProperty(factory, PROTOCOL_FACTORY_META, { value: marker });
+    return Object.freeze(factory);
+  }
+
+  #receiptFactory(definition: unknown, protocol: string): object {
+    const marker = factoryOf(definition);
+    if (!marker) throw new Error("invalid Protocol factory definition");
+    const factory: Record<PropertyKey, unknown> = {
+      create: () => {
+        throw new Error("Protocol factory create() is unavailable inside Receipt parsers");
+      },
+      receipts: this.#receiptDependency(protocol),
+    };
+    Object.defineProperty(factory, PROTOCOL_FACTORY_META, { value: marker });
+    return Object.freeze(factory);
+  }
+
+  #parseProtocolBinding(
+    registered: Registered,
+    rawBinding: Record<string, unknown> | undefined,
+  ): Record<string, unknown> | undefined {
+    if (!registered.config.binding) {
+      if (rawBinding !== undefined) {
+        throw new BindingError(`protocol "${registered.config.name}" does not accept a binding`);
+      }
+      return undefined;
+    }
+    if (!rawBinding || typeof rawBinding !== "object" || Array.isArray(rawBinding)) {
+      throw new BindingError(`protocol "${registered.config.name}" requires a binding object`);
+    }
+    return parseBinding(registered.config.binding.params, rawBinding);
+  }
+
+  #validateDeclarations(spec: ParamsSpec, kind: "binding" | "parameter", scope: string): void {
+    for (const [name, field] of Object.entries(spec)) {
+      const path = `${kind} "${scope}.${name}"`;
+      requireMetadataText(field.description, `${path} description`);
+      if (!field.type || typeof field.type.safeParseAsync !== "function") {
+        throw new Error(`${path} has an invalid type`);
+      }
+      requireMetadataText(parameterTypeDescription(field.type), `${path} type description`);
+    }
   }
 
   #capabilityMeta(protocol: string, method: string): CapabilityMethodMeta {

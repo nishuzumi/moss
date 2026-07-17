@@ -4,11 +4,13 @@ import type { MossRuntime } from "./runtime.js";
 import type { InferParams, ParamsSpec } from "./semantics.js";
 import type {
   Address,
+  BoundProtocolRef,
   CapabilityResult,
   Category,
   Change,
   JsonSafeValue,
   ProtocolRef,
+  ReceiptRef,
   Receipt as ReceiptResult,
   RiskLabel,
   Verb,
@@ -20,17 +22,54 @@ export interface ContractConfig {
 }
 
 export type ProtocolCtor = new () => object;
-export type ProtocolDependencies = Record<string, ProtocolCtor>;
+export interface ProtocolBinding<Binding extends ParamsSpec> {
+  params: Binding;
+  contracts: (binding: InferParams<Binding>) => Record<string, ContractConfig>;
+}
+
+export interface ProtocolFactory<Instance extends object, Binding extends ParamsSpec> {
+  create(binding: InferParams<Binding>): BoundProtocolRef<Instance>;
+  readonly receipts: ReceiptRef<Instance>;
+}
+
+interface ProtocolFactoryMarker<Instance extends object, Binding extends ParamsSpec> {
+  protocol: ProtocolCtor;
+  binding: Binding;
+  readonly __instance?: Instance;
+}
+
+export const PROTOCOL_FACTORY_META = Symbol.for("moss.protocol.factory");
+
+export interface ProtocolFactoryDefinition<
+  Instance extends object = object,
+  Binding extends ParamsSpec = ParamsSpec,
+> extends ProtocolFactory<Instance, Binding> {
+  readonly [PROTOCOL_FACTORY_META]: ProtocolFactoryMarker<Instance, Binding>;
+}
+
+export type ProtocolDependency = ProtocolCtor | ProtocolFactoryDefinition;
+export type ProtocolDependencies = Record<string, ProtocolDependency>;
 type InjectedProtocols<Dependencies extends ProtocolDependencies> = {
-  [K in keyof Dependencies]: ProtocolRef<InstanceType<Dependencies[K]>>;
+  [K in keyof Dependencies]: Dependencies[K] extends ProtocolFactoryDefinition<
+    infer Instance,
+    infer Binding
+  >
+    ? ProtocolFactoryDefinition<Instance, Binding>
+    : Dependencies[K] extends ProtocolCtor
+      ? ProtocolRef<InstanceType<Dependencies[K]>>
+      : never;
 };
 
-export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Record<never, never>> {
+export interface ProtocolConfig<
+  Dependencies extends ProtocolDependencies = Record<never, never>,
+  Binding extends ParamsSpec = Record<never, never>,
+> {
   name: string;
   category: Category;
   description: string;
   contracts: Record<string, ContractConfig>;
   protocols?: Dependencies;
+  binding?: ProtocolBinding<Binding>;
 }
 
 type ReceiptNames<This> = {
@@ -64,9 +103,35 @@ export const PROTOCOL_TARGET = Symbol.for("moss.protocol.target");
 export const METHOD_META = Symbol.for("moss.method");
 export const RECEIPT_META = Symbol.for("moss.receipt");
 
-export function Protocol<Dependencies extends ProtocolDependencies = Record<never, never>>(
-  config: ProtocolConfig<Dependencies>,
-) {
+export function createProtocolFactory<Ctor extends ProtocolCtor, Binding extends ParamsSpec>(
+  protocol: Ctor,
+  binding: Binding,
+): ProtocolFactoryDefinition<InstanceType<Ctor>, Binding> {
+  const config = (protocol as unknown as Record<symbol, ProtocolConfig | undefined>)[PROTOCOL_META];
+  if (!config?.binding) {
+    throw new Error(`${protocol.name} does not declare a Protocol binding`);
+  }
+  if (config.binding.params !== binding) {
+    throw new Error(`${protocol.name} factory must use its declared binding schema`);
+  }
+  const unavailable = (): never => {
+    throw new Error("Protocol factories must be injected by Registry before use");
+  };
+  const factory: ProtocolFactoryDefinition<InstanceType<Ctor>, Binding> = {
+    create: unavailable,
+    receipts: Object.freeze({}) as ReceiptRef<InstanceType<Ctor>>,
+    [PROTOCOL_FACTORY_META]: {
+      protocol,
+      binding,
+    } satisfies ProtocolFactoryMarker<InstanceType<Ctor>, Binding>,
+  };
+  return Object.freeze(factory);
+}
+
+export function Protocol<
+  Dependencies extends ProtocolDependencies = Record<never, never>,
+  Binding extends ParamsSpec = Record<never, never>,
+>(config: ProtocolConfig<Dependencies, Binding>) {
   if (!/^[a-z][a-z0-9-]*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
   }
@@ -79,15 +144,36 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
     const injected = class extends Base {
       constructor(...args: unknown[]) {
         super();
-        const [runtime, account, dependencies = {}] = args as [
+        const [runtime, account, dependencies = {}, binding] = args as [
           MossRuntime,
           Address,
           Record<string, object>?,
+          InferParams<Binding>?,
         ];
         if (!runtime?.client || !account) {
           throw new Error(`protocol "${config.name}" must be constructed by Registry`);
         }
-        for (const [key, contract] of Object.entries(config.contracts)) {
+        let contracts = config.contracts;
+        if (config.binding) {
+          if (!binding) {
+            throw new Error(`protocol "${config.name}" binding was not supplied by Registry`);
+          }
+          const dynamic = config.binding.contracts(binding);
+          if (
+            !dynamic ||
+            typeof dynamic !== "object" ||
+            typeof (dynamic as { then?: unknown }).then === "function"
+          ) {
+            throw new Error(`protocol "${config.name}" binding contracts must be synchronous`);
+          }
+          for (const key of Object.keys(dynamic)) {
+            if (Object.hasOwn(config.contracts, key)) {
+              throw new Error(`protocol "${config.name}" declares duplicate contract "${key}"`);
+            }
+          }
+          contracts = { ...config.contracts, ...dynamic };
+        }
+        for (const [key, contract] of Object.entries(contracts)) {
           Object.defineProperty(this, key, {
             value: createHandle(contract.abi, contract.addr, runtime.client, account),
             writable: false,

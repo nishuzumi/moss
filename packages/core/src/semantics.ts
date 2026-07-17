@@ -22,6 +22,13 @@ export class ParameterError extends Error {
   }
 }
 
+export class BindingError extends Error {
+  constructor(message: string) {
+    super(`invalid binding: ${message}`);
+    this.name = "BindingError";
+  }
+}
+
 export const Address = z
   .string()
   .refine((value) => isAddress(value, { strict: false }), "Expected a 20-byte 0x address.")
@@ -61,6 +68,36 @@ export async function parseParams<S extends ParamsSpec>(
   const result = await schema.safeParseAsync(raw);
   if (!result.success) {
     throw new ParameterError(z.prettifyError(result.error));
+  }
+  return result.data as InferParams<S>;
+}
+
+/**
+ * Parse Protocol identity synchronously before any Protocol is constructed.
+ * Async refinements are intentionally unsupported: binding validation must be
+ * externally pure and cannot depend on RPC or other asynchronous state.
+ */
+export function parseBinding<S extends ParamsSpec>(
+  spec: S,
+  raw: Record<string, unknown>,
+): InferParams<S> {
+  const schema = z
+    .object(Object.fromEntries(Object.entries(spec).map(([name, field]) => [name, field.type])))
+    .strict();
+  let result: z.ZodSafeParseResult<Record<string, unknown>>;
+  try {
+    result = schema.safeParse(raw);
+  } catch (error) {
+    throw new BindingError(
+      error instanceof Error && error.message.includes("Encountered Promise")
+        ? "binding schemas must be synchronous"
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    );
+  }
+  if (!result.success) {
+    throw new BindingError(z.prettifyError(result.error));
   }
   return result.data as InferParams<S>;
 }

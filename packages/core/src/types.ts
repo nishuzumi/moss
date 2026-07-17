@@ -52,6 +52,7 @@ export interface CapabilityNode {
   kind: "capability";
   protocol: string;
   method: string;
+  binding?: JsonSafeValue;
   params: JsonSafeValue;
   children: readonly (CapabilityNode | TransactionNode)[];
 }
@@ -71,6 +72,35 @@ export type ProtocolRef<T> = {
       : Result extends Receipt
         ? T[K]
         : (params: Params) => Promise<Awaited<Result>>
+    : never;
+};
+
+/**
+ * Execution-only reference returned by a bound Protocol factory.
+ *
+ * Receipt parsers deliberately live on the factory's separate `receipts`
+ * surface so a binding can never become parser input.
+ */
+export type BoundProtocolRef<T> = {
+  [K in keyof T as T[K] extends (...args: never[]) => infer Result
+    ? Awaited<Result> extends Receipt
+      ? never
+      : K
+    : never]: T[K] extends (params: infer Params, ...args: infer _Rest) => infer Result
+    ? Awaited<Result> extends CapabilityResult
+      ? (params: Params) => Promise<CapabilityNode>
+      : (params: Params) => Promise<Awaited<Result>>
+    : never;
+};
+
+/** Pure, binding-free Receipt parser references exposed by a Protocol factory. */
+export type ReceiptRef<T> = {
+  [K in keyof T as T[K] extends (...args: never[]) => infer Result
+    ? Result extends Receipt
+      ? K
+      : never
+    : never]: T[K] extends (changes: infer Changes) => infer Result
+    ? (changes: Changes) => Result
     : never;
 };
 
