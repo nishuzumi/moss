@@ -1,8 +1,10 @@
 import {
   type ActionCtx,
+  Address,
   type AddressValue,
   BasisPoints,
   Capability,
+  type CapabilityNode,
   type CapabilityResult,
   type Change,
   createHandle,
@@ -25,10 +27,10 @@ import {
 } from "@themoss/core";
 import { ERC20 } from "@themoss/erc";
 import { decodeEventLog, formatUnits, getAddress, isAddress, parseUnits } from "viem";
-import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
+import { KuruMarginAccountAbi, KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 import type {
   KuruLimitOrderOutcome,
-  KuruOrderFill,
+  KuruMarginDepositOutcome,
   KuruQuote,
   KuruSwapOutcome,
   MarketCandidate,
@@ -46,6 +48,14 @@ const KURU_API_URL = "https://api.kuru.io";
 const KURU_NATIVE = "0x0000000000000000000000000000000000000000" as const;
 const DEFAULT_SLIPPAGE_BPS = 50;
 const UINT32_MAX = (1n << 32n) - 1n;
+const UINT256_MAX = (1n << 256n) - 1n;
+/**
+ * bestBidAsk() returns prices as 1e18 fixed-point quote-per-base, independent
+ * of the market's pricePrecision. Verified empirically across three mainnet
+ * markets with pricePrecision 1e7/1e8 against their resting orders
+ * (2026-07-17); the live e2e test cross-checks this against a market quote.
+ */
+const BEST_BID_ASK_DECIMALS = 18;
 
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
@@ -77,20 +87,48 @@ const swapParams = {
   },
 } satisfies ParamsSpec;
 
+const OptionalMarket = Address.optional().describe(
+  "An optional 20-byte 0x address of a specific contract instance.",
+);
+
+const pairParams = {
+  tokenIn: { type: TokenReference, description: "One asset of the traded pair." },
+  tokenOut: { type: TokenReference, description: "The other asset of the traded pair." },
+} satisfies ParamsSpec;
+
 const marketPairParams = {
   tokenIn: { type: TokenReference, description: "Asset offered to the market." },
   tokenOut: { type: TokenReference, description: "Asset requested from the market." },
+  market: {
+    type: OptionalMarket,
+    description:
+      "Router-verified Kuru market to use. Required when several markets list the pair; " +
+      "when omitted and exactly one market lists the pair directly, that market is used.",
+  },
 } satisfies ParamsSpec;
 
 const limitOrderParams = {
   ...marketPairParams,
   amount: { type: HumanTokenAmount, description: "Quantity of tokenIn committed to the order." },
-  price: { type: HumanPrice, description: "Limit price the order rests at." },
+  price: { type: HumanPrice, description: "Limit price the resting order is placed at." },
 } satisfies ParamsSpec;
 
+// orderId is market-local, so status lookups address the market directly.
 const orderStatusParams = {
-  ...marketPairParams,
+  market: {
+    type: Address,
+    description: "Router-verified Kuru market the order was placed on; ids are market-local.",
+  },
   orderId: { type: UnsignedIntegerString, description: "Kuru order id to look up." },
+} satisfies ParamsSpec;
+
+const marginBalanceParams = {
+  token: { type: TokenReference, description: "Asset whose Kuru margin balance is read." },
+} satisfies ParamsSpec;
+
+const depositMarginParams = {
+  token: { type: TokenReference, description: "Asset deposited into the Kuru margin account." },
+  amount: { type: HumanTokenAmount, description: "Quantity of token to deposit." },
 } satisfies ParamsSpec;
 
 type InferredSwapParams = InferParams<typeof swapParams>;
@@ -99,6 +137,11 @@ type SwapParams = Omit<InferredSwapParams, "amountIn" | "amountOut" | "slippage"
 type KuruSwapParams = Pick<SwapParams, "tokenIn" | "tokenOut"> & {
   slippage?: InferredSwapParams["slippage"];
 } & ({ amountIn: string; amountOut?: never } | { amountIn?: never; amountOut: string });
+
+type WithOptionalMarket<Params> = Omit<Params, "market"> &
+  Partial<Pick<Params & { market?: AddressValue }, "market">>;
+type MarketPairParams = WithOptionalMarket<InferParams<typeof marketPairParams>>;
+type LimitOrderParams = WithOptionalMarket<InferParams<typeof limitOrderParams>>;
 
 @Protocol({
   name: "kuru",
@@ -140,31 +183,63 @@ export class Kuru {
     params: marketPairParams,
     tags: ["clob", "orderbook"],
   })
-  async bestBidAsk(params: InferParams<typeof marketPairParams>, ctx: ActionCtx) {
-    const { market } = await this.#directMarket(params.tokenIn, params.tokenOut, ctx.account);
+  async bestBidAsk(params: MarketPairParams, ctx: ActionCtx) {
+    const { market } = await this.#directMarket(
+      params.tokenIn,
+      params.tokenOut,
+      ctx.account,
+      params.market,
+    );
     const [bid, ask] = await market.handle.read.bestBidAsk();
-    // bestBidAsk prices carry the combined pricePrecision * sizePrecision scaling.
-    const scaleDigits =
-      String(market.params.pricePrecision * market.params.sizePrecision).length - 1;
     return {
       market: market.address,
-      bestBid: bid === 0n ? null : formatUnits(bid, scaleDigits),
-      bestAsk: ask === 0n ? null : formatUnits(ask, scaleDigits),
+      bestBid: emptyBookSide(bid) ? null : formatUnits(bid, BEST_BID_ASK_DECIMALS),
+      bestAsk: emptyBookSide(ask) ? null : formatUnits(ask, BEST_BID_ASK_DECIMALS),
       note: "Prices in quote-per-base units. null means no orders on that side.",
     };
   }
 
   @Query({
-    intent: "Look up a Kuru limit order by id",
+    intent: "List the Router-verified Kuru markets for a token pair with their top of book",
+    params: pairParams,
+    tags: ["clob", "orderbook"],
+  })
+  async markets(params: InferParams<typeof pairParams>, ctx: ActionCtx) {
+    const candidates = await this.#pairCandidates(params.tokenIn, params.tokenOut);
+    const verified = await Promise.all(
+      candidates.map((candidate) => this.#verifyMarket(candidate, ctx.account)),
+    );
+    return Promise.all(
+      verified.map(async (market) => {
+        const [bid, ask] = await market.handle.read.bestBidAsk();
+        return {
+          market: market.address,
+          baseAsset: fromKuru(market.params.baseAsset),
+          quoteAsset: fromKuru(market.params.quoteAsset),
+          pricePrecision: market.params.pricePrecision.toString(),
+          sizePrecision: market.params.sizePrecision.toString(),
+          tickSize: market.params.tickSize.toString(),
+          minSize: market.params.minSize.toString(),
+          maxSize: market.params.maxSize.toString(),
+          bestBid: emptyBookSide(bid) ? null : formatUnits(bid, BEST_BID_ASK_DECIMALS),
+          bestAsk: emptyBookSide(ask) ? null : formatUnits(ask, BEST_BID_ASK_DECIMALS),
+        };
+      }),
+    );
+  }
+
+  @Query({
+    intent: "Look up a Kuru limit order by market and id",
     params: orderStatusParams,
     tags: ["clob", "orderbook"],
   })
   async orderStatus(params: InferParams<typeof orderStatusParams>, ctx: ActionCtx) {
-    const { market } = await this.#directMarket(params.tokenIn, params.tokenOut, ctx.account);
+    const market = await this.#verifiedMarket(getAddress(params.market), ctx.account);
     const [owner, size, , , , price, , isBuy] = await market.handle.read.s_orders([
       Number(params.orderId),
     ]);
-    // Kuru deletes filled and cancelled orders, so a zeroed owner means "gone".
+    // Kuru deletes an order's storage both on full fill and on cancel, so a
+    // zeroed owner only proves the order is gone — not which way it went.
     const exists = !sameAddress(owner, KURU_NATIVE);
     return {
       market: market.address,
@@ -173,7 +248,97 @@ export class Kuru {
       size: exists ? size.toString() : null,
       price: exists ? String(price) : null,
       isBuy: exists ? isBuy : null,
-      status: exists ? "open" : "filled_or_cancelled",
+      status: exists ? ("open" as const) : ("gone" as const),
+      note: exists
+        ? "Order is resting on the book; size is the unfilled remainder in sizePrecision units."
+        : "gone means fully filled or cancelled; Kuru does not distinguish the two on-chain.",
+    };
+  }
+
+  @Query({
+    intent: "Read a Kuru margin account balance",
+    params: marginBalanceParams,
+    tags: ["margin", "balance"],
+  })
+  async marginBalance(params: InferParams<typeof marginBalanceParams>, ctx: ActionCtx) {
+    const marginAccount = await this.#marginAccount(ctx.account);
+    const balance = await marginAccount.handle.read.getBalance([ctx.account, toKuru(params.token)]);
+    return {
+      marginAccount: marginAccount.address,
+      user: ctx.account,
+      token: params.token,
+      balance: balance.toString(),
+      note: "Balance in the token's base units; limit orders are funded from this balance.",
+    };
+  }
+
+  @Capability<Kuru, typeof depositMarginParams>({
+    intent: "Deposit funds into the Kuru margin account that funds limit orders",
+    verb: "supply",
+    params: depositMarginParams,
+    receipt: "depositMarginReceipt",
+    risk: ["fundOut", "approval"],
+    tags: ["margin"],
+  })
+  async depositMargin(
+    params: InferParams<typeof depositMarginParams>,
+    ctx: ActionCtx,
+  ): Promise<CapabilityResult> {
+    const marginAccount = await this.#marginAccount(ctx.account);
+    const decimals =
+      params.token === NATIVE ? 18 : (await this.erc20.metadata({ token: params.token })).decimals;
+    const amount = parseUnits(params.amount, decimals);
+    if (amount <= 0n) throw new ParameterError("deposit amount must be positive");
+    const children = [];
+    if (params.token !== NATIVE) {
+      children.push(
+        await this.erc20.approve({
+          token: params.token,
+          spender: marginAccount.address,
+          amount: amount.toString(),
+        }),
+      );
+    }
+    children.push(
+      marginAccount.handle.deposit([ctx.account, toKuru(params.token), amount], {
+        value: params.token === NATIVE ? amount : 0n,
+      }),
+    );
+    return children;
+  }
+
+  @Receipt()
+  depositMarginReceipt(changes: readonly Change[]): ReceiptResult<KuruMarginDepositOutcome> {
+    let deposit: KuruMarginDepositOutcome | undefined;
+    const parsed = changes.map((change) => {
+      if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
+      const event = tryDecodeKuruEvent(KuruMarginAccountAbi, change);
+      if (!event) return this.erc20.changesReceipt([change]);
+      if (event.eventName !== "Deposit") {
+        throw new Error(`Unexpected Change: Kuru margin account emitted ${event.eventName}`);
+      }
+      if (deposit) throw new Error("Kuru margin deposit emitted multiple Deposit events");
+      deposit = {
+        operation: "depositMargin",
+        protocol: "kuru",
+        marginAccount: change.address,
+        user: event.args.owner,
+        token: fromKuru(event.args.token),
+        amount: event.args.amount.toString(),
+      };
+      return {
+        kind: "change" as const,
+        change,
+        data: deposit,
+        text: `Kuru Margin Deposit: ${deposit.amount} ${deposit.token} for ${deposit.user}`,
+      };
+    });
+    if (!deposit) throw new Error("Kuru margin deposit Receipt requires a Deposit event");
+    return {
+      kind: "receipt",
+      outcome: deposit,
+      text: `Kuru Margin Deposit: ${deposit.amount} base units of ${deposit.token} credited to ${deposit.user}`,
+      changes: parsed,
     };
   }
 
@@ -282,131 +447,130 @@ export class Kuru {
   }
 
   @Capability<Kuru, typeof limitOrderParams>({
-    intent: "Place a resting limit order on a Kuru market at a caller-chosen price",
+    intent:
+      "Place a post-only resting limit order on a Kuru market, depositing any missing margin first",
     verb: "swap",
     params: limitOrderParams,
     receipt: "limitOrderReceipt",
-    risk: ["fundOut"],
+    risk: ["fundOut", "approval"],
     tags: ["clob", "orderbook", "limit"],
   })
-  async limitOrder(
-    params: InferParams<typeof limitOrderParams>,
-    ctx: ActionCtx,
-  ): Promise<CapabilityResult> {
-    // Kuru markets denominate native MON as address(0), but addBuyOrder and
-    // addSellOrder are nonpayable — native MON cannot fund a resting order.
-    if (params.tokenIn === NATIVE) {
-      throw new ParameterError(
-        "native MON limit orders are unsupported — wrap MON first and use WMON as tokenIn",
-      );
-    }
+  async limitOrder(params: LimitOrderParams, ctx: ActionCtx): Promise<CapabilityResult> {
     const { market, isBuy } = await this.#directMarket(
       params.tokenIn,
       params.tokenOut,
       ctx.account,
+      params.market,
     );
     const { pricePrecision, sizePrecision, baseDecimals, quoteDecimals, tickSize } = market.params;
     const price = toKuruPrice(params.price, pricePrecision, tickSize);
-    if (price <= 0n) throw new ParameterError("price is below the market's tick size");
     if (price > UINT32_MAX) {
       throw new ParameterError("price exceeds Kuru's uint32 limit after precision conversion");
     }
-    const amountIn = parseUnits(params.amount, isBuy ? quoteDecimals : baseDecimals);
-    let size: bigint;
-    if (isBuy) {
-      // Buying base with quote: derive the base size the quote spend affords at
-      // the tick-aligned limit price (price * tickSize ≈ humanPrice * pricePrecision).
-      const baseInQuoteUnits = (amountIn * pricePrecision) / (price * tickSize);
-      const baseUnits =
-        (baseInQuoteUnits * 10n ** BigInt(baseDecimals)) / 10n ** BigInt(quoteDecimals);
-      size = toKuruSize(baseUnits, baseDecimals, sizePrecision);
-    } else {
-      size = toKuruSize(amountIn, baseDecimals, sizePrecision);
+    const inputDecimals = isBuy ? quoteDecimals : baseDecimals;
+    const amountIn = parseUnits(params.amount, inputDecimals);
+    // Order size is denominated in base-asset sizePrecision units. A buy
+    // spends quote, so derive the base size the spend affords at the limit
+    // price; a sell commits base directly.
+    const size = isBuy
+      ? (amountIn * pricePrecision * sizePrecision) / (price * 10n ** BigInt(quoteDecimals))
+      : (amountIn * sizePrecision) / 10n ** BigInt(baseDecimals);
+    if (size < market.params.minSize) {
+      throw new ParameterError(
+        `order size ${size} is below the market minimum ${market.params.minSize} (sizePrecision units)`,
+      );
     }
-    if (size <= 0n) throw new ParameterError("order size is below the market's size precision");
-    // Kuru limit orders settle against the maker's margin account, not via
-    // transferFrom — no approve step; the account must fund its margin balance
-    // before placement.
-    return isBuy
-      ? market.handle.addBuyOrder([Number(price), size, false])
-      : market.handle.addSellOrder([Number(price), size, false]);
+    if (market.params.maxSize > 0n && size > market.params.maxSize) {
+      throw new ParameterError(
+        `order size ${size} exceeds the market maximum ${market.params.maxSize} (sizePrecision units)`,
+      );
+    }
+
+    // Kuru provisions limit orders from the maker's margin account, not via
+    // transferFrom. Top up any shortfall with a nested deposit so the tree is
+    // executable by itself; the deposit never exceeds what the order commits.
+    const children = [];
+    const marginAccount = await this.#marginAccount(ctx.account);
+    const balance = await marginAccount.handle.read.getBalance([
+      ctx.account,
+      toKuru(params.tokenIn),
+    ]);
+    if (balance < amountIn) {
+      children.push(
+        await this.#nestedDeposit(params.tokenIn, amountIn - balance, inputDecimals, ctx),
+      );
+    }
+    // postOnly=true: the order can never take liquidity. A price that crosses
+    // the current book reverts with PostOnlyError instead of filling.
+    children.push(
+      isBuy
+        ? market.handle.addBuyOrder([Number(price), size, true])
+        : market.handle.addSellOrder([Number(price), size, true]),
+    );
+    return children;
   }
 
   @Receipt()
   limitOrderReceipt(changes: readonly Change[]): ReceiptResult<KuruLimitOrderOutcome> {
-    let created:
-      | {
-          market: AddressValue;
-          orderId: string;
-          owner: AddressValue;
-          size: string;
-          price: string;
-          isBuy: boolean;
-        }
-      | undefined;
-    const fills: KuruOrderFill[] = [];
-    let market: AddressValue | undefined;
+    let created: KuruLimitOrderOutcome | undefined;
+    let deposits = 0;
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
-      const event = tryDecodeKuruEvent(KuruOrderbookAbi, change);
-      if (!event) return this.erc20.changesReceipt([change]);
-      if (event.eventName === "OrderCreated") {
+      const orderEvent = tryDecodeKuruEvent(KuruOrderbookAbi, change);
+      if (orderEvent) {
+        // postOnly placement can emit exactly one OrderCreated and can never
+        // trade, so any other order-book event means the plan was not ours.
+        if (orderEvent.eventName !== "OrderCreated") {
+          throw new Error(`Unexpected Change: Kuru market emitted ${orderEvent.eventName}`);
+        }
         if (created) throw new Error("Kuru limit order emitted multiple OrderCreated events");
-        market = change.address;
         created = {
+          operation: "limitOrder",
+          protocol: "kuru",
           market: change.address,
-          orderId: event.args.orderId.toString(),
-          owner: event.args.owner,
-          size: event.args.size.toString(),
-          price: event.args.price.toString(),
-          isBuy: event.args.isBuy,
+          orderId: orderEvent.args.orderId.toString(),
+          owner: orderEvent.args.owner,
+          size: orderEvent.args.size.toString(),
+          price: orderEvent.args.price.toString(),
+          isBuy: orderEvent.args.isBuy,
         };
         return {
           kind: "change" as const,
           change,
           data: created,
-          text: `Kuru Order Created: #${created.orderId} ${created.isBuy ? "buy" : "sell"} size ${created.size} at tick price ${created.price} on ${created.market}`,
+          text: `Kuru Order Created: #${created.orderId} ${created.isBuy ? "buy" : "sell"} size ${created.size} (sizePrecision units) at price ${created.price} (pricePrecision units) on ${created.market}`,
         };
       }
-      // A non-postOnly order that crosses the book fills immediately as taker.
-      if (event.eventName === "Trade") {
-        market = change.address;
-        const fill: KuruOrderFill = {
-          orderId: event.args.orderId.toString(),
-          maker: event.args.makerAddress,
-          price: event.args.price.toString(),
-          filledSize: event.args.filledSize.toString(),
-        };
-        fills.push(fill);
+      const marginEvent = tryDecodeKuruEvent(KuruMarginAccountAbi, change);
+      if (marginEvent) {
+        if (marginEvent.eventName !== "Deposit") {
+          throw new Error(
+            `Unexpected Change: Kuru margin account emitted ${marginEvent.eventName}`,
+          );
+        }
+        deposits += 1;
+        const data = {
+          event: "Deposit",
+          marginAccount: change.address,
+          user: marginEvent.args.owner,
+          token: fromKuru(marginEvent.args.token),
+          amount: marginEvent.args.amount.toString(),
+        } as const;
         return {
           kind: "change" as const,
           change,
-          data: fill,
-          text: `Trade Event: ${fill.filledSize} at ${fill.price} emitted by ${change.address}`,
+          data,
+          text: `Kuru Margin Deposit: ${data.amount} ${data.token} for ${data.user}`,
         };
       }
-      throw new Error(`Unexpected Change: Kuru market emitted ${event.eventName}`);
+      return this.erc20.changesReceipt([change]);
     });
 
-    if (!market) throw new Error("Kuru limit order Receipt requires OrderCreated or Trade");
-    const outcome: KuruLimitOrderOutcome = {
-      operation: "limitOrder",
-      protocol: "kuru",
-      market,
-      orderId: created?.orderId ?? null,
-      owner: created?.owner ?? null,
-      size: created?.size ?? null,
-      price: created?.price ?? null,
-      isBuy: created?.isBuy ?? null,
-      fills,
-    };
-    const rested = created
-      ? `order #${created.orderId} resting at tick price ${created.price}`
-      : "no resting order";
+    if (!created) throw new Error("Kuru limit order Receipt requires exactly one OrderCreated");
     return {
       kind: "receipt",
-      outcome,
-      text: `Kuru Limit Order: ${rested}; ${fills.length} immediate fill${fills.length === 1 ? "" : "s"}`,
+      outcome: created,
+      text: `Kuru Limit Order: #${created.orderId} ${created.isBuy ? "buy" : "sell"} resting on ${created.market} at price ${created.price} (pricePrecision units)${deposits > 0 ? `; ${deposits} margin deposit${deposits === 1 ? "" : "s"}` : ""}`,
       changes: parsed,
     };
   }
@@ -470,25 +634,95 @@ export class Kuru {
   }
 
   /**
-   * Resolve the single market listing the pair directly (either orientation).
-   * When several verified markets list the same pair the lowest address wins —
-   * a deterministic choice, and the chosen market is exposed in every result.
+   * Resolve the market a pair-addressed method operates on. An explicit
+   * market parameter is verified against the Router and must list the pair;
+   * without one the pair must map to exactly one direct market — an
+   * ambiguous pair is an error rather than an arbitrary choice, because
+   * price, liquidity, and order ids are all market-local.
    */
-  async #directMarket(tokenIn: TokenRef, tokenOut: TokenRef, account: AddressValue) {
+  async #directMarket(
+    tokenIn: TokenRef,
+    tokenOut: TokenRef,
+    account: AddressValue,
+    explicit?: AddressValue,
+  ) {
+    const kuruIn = toKuru(tokenIn);
+    const kuruOut = toKuru(tokenOut);
+
+    if (explicit) {
+      if (sameToken(tokenIn, tokenOut)) {
+        throw new ParameterError("tokenIn and tokenOut must differ");
+      }
+      const market = await this.#verifiedMarket(getAddress(explicit), account);
+      if (!pairMatches(market.params.baseAsset, market.params.quoteAsset, kuruIn, kuruOut)) {
+        throw new ParameterError(`market ${explicit} does not list this token pair`);
+      }
+      return { market, isBuy: sameAddress(market.params.quoteAsset, kuruIn) };
+    }
+
+    const candidates = await this.#pairCandidates(tokenIn, tokenOut);
+    if (candidates.length === 0) {
+      throw new Error("no verified Kuru market lists this token pair directly");
+    }
+    if (candidates.length > 1) {
+      const addresses = candidates
+        .map((candidate) => candidate.address)
+        .sort()
+        .join(", ");
+      throw new ParameterError(
+        `multiple Kuru markets list this pair (${addresses}); pass the market parameter to choose one — the markets Query lists each market with its top of book`,
+      );
+    }
+    const market = await this.#verifyMarket(candidates[0] as MarketCandidate, account);
+    return { market, isBuy: sameAddress(market.params.quoteAsset, kuruIn) };
+  }
+
+  /** All API-discovered markets that list the pair directly, in either orientation. */
+  async #pairCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
     if (sameToken(tokenIn, tokenOut)) throw new ParameterError("tokenIn and tokenOut must differ");
     const kuruIn = toKuru(tokenIn);
     const kuruOut = toKuru(tokenOut);
-    const candidates = (await fetchMarketCandidates(tokenIn, tokenOut))
-      .filter(
-        (candidate) =>
-          (sameAddress(candidate.base, kuruIn) && sameAddress(candidate.quote, kuruOut)) ||
-          (sameAddress(candidate.base, kuruOut) && sameAddress(candidate.quote, kuruIn)),
-      )
-      .sort((left, right) => left.address.toLowerCase().localeCompare(right.address.toLowerCase()));
-    const [candidate] = candidates;
-    if (!candidate) throw new Error("no verified Kuru market lists this token pair directly");
-    const market = await this.#verifyMarket(candidate, account);
-    return { market, isBuy: sameAddress(market.params.quoteAsset, kuruIn) };
+    return (await fetchMarketCandidates(tokenIn, tokenOut)).filter((candidate) =>
+      pairMatches(candidate.base, candidate.quote, kuruIn, kuruOut),
+    );
+  }
+
+  /** Verify an explicitly supplied market address against the Router alone. */
+  async #verifiedMarket(address: AddressValue, account: AddressValue): Promise<VerifiedMarket> {
+    const market = await this.#marketFromRouter(address, account);
+    if (!market) throw new Error(`${address} is not a Router-verified Kuru market`);
+    return market;
+  }
+
+  /**
+   * The Kuru margin account, discovered from the Router (never hardcoded).
+   * Wrapped in an object because a bare Handle proxy must never be a promise's
+   * resolution value — its catch-all `then` would make it a thenable.
+   */
+  async #marginAccount(account: AddressValue) {
+    const address = await this.router.read.marginAccountAddress();
+    return {
+      address,
+      handle: createHandle(KuruMarginAccountAbi, address, this.runtime.client, account),
+    };
+  }
+
+  /** Wrap a margin deposit as a nested Capability so the tree stays self-describing. */
+  async #nestedDeposit(
+    token: TokenRef,
+    shortfall: bigint,
+    decimals: number,
+    ctx: ActionCtx,
+  ): Promise<CapabilityNode> {
+    const depositParams = { token, amount: formatUnits(shortfall, decimals) };
+    const children = await this.depositMargin(depositParams, ctx);
+    return {
+      kind: "capability",
+      protocol: "kuru",
+      method: "depositMargin",
+      params: depositParams,
+      children: Array.isArray(children) ? children : [children],
+    };
   }
 
   async #discoverRoutes(tokenIn: TokenRef, tokenOut: TokenRef, account: AddressValue) {
@@ -524,6 +758,21 @@ export class Kuru {
   }
 
   async #verifyMarket(candidate: MarketCandidate, account: AddressValue): Promise<VerifiedMarket> {
+    const market = await this.#marketFromRouter(candidate.address, account);
+    if (
+      !market ||
+      !sameAddress(market.params.baseAsset, candidate.base) ||
+      !sameAddress(market.params.quoteAsset, candidate.quote)
+    ) {
+      throw new Error(`Kuru API returned unverified market ${candidate.address}`);
+    }
+    return market;
+  }
+
+  async #marketFromRouter(
+    address: AddressValue,
+    account: AddressValue,
+  ): Promise<VerifiedMarket | undefined> {
     const [
       pricePrecision,
       sizePrecision,
@@ -532,28 +781,23 @@ export class Kuru {
       quoteAsset,
       quoteDecimals,
       tickSize,
-    ] = await this.router.read.verifiedMarket([candidate.address]);
-    if (
-      pricePrecision === 0 ||
-      sizePrecision === 0n ||
-      !sameAddress(baseAsset, candidate.base) ||
-      !sameAddress(quoteAsset, candidate.quote)
-    ) {
-      throw new Error(`Kuru API returned unverified market ${candidate.address}`);
-    }
-    const parsedBaseDecimals = tokenDecimals(baseDecimals, candidate.address, "base");
-    const parsedQuoteDecimals = tokenDecimals(quoteDecimals, candidate.address, "quote");
+      minSize,
+      maxSize,
+    ] = await this.router.read.verifiedMarket([address]);
+    if (pricePrecision === 0 || sizePrecision === 0n) return undefined;
     return {
-      address: candidate.address,
-      handle: createHandle(KuruOrderbookAbi, candidate.address, this.runtime.client, account),
+      address,
+      handle: createHandle(KuruOrderbookAbi, address, this.runtime.client, account),
       params: {
         pricePrecision: BigInt(pricePrecision),
         sizePrecision,
         baseAsset,
-        baseDecimals: parsedBaseDecimals,
+        baseDecimals: tokenDecimals(baseDecimals, address, "base"),
         quoteAsset,
-        quoteDecimals: parsedQuoteDecimals,
+        quoteDecimals: tokenDecimals(quoteDecimals, address, "quote"),
         tickSize: BigInt(tickSize),
+        minSize,
+        maxSize,
       },
     };
   }
@@ -764,24 +1008,36 @@ function amountSide(params: SwapParams) {
 }
 
 /**
- * Convert a human-readable price ("0.022") to Kuru's tick-denominated uint32
- * order price: orderPrice = humanPrice * pricePrecision / tickSize.
+ * Convert a human-readable price ("0.022") to Kuru's uint32 order price in
+ * pricePrecision units: orderPrice = humanPrice * pricePrecision. This
+ * matches @kuru-labs/kuru-sdk GTC.placeLimit (parseUnits over
+ * log10(pricePrecision)) and live mainnet orders; the SDK silently clips
+ * excess decimals, we reject them instead. tickSize does not scale the
+ * price — it only constrains which prices are valid, mirroring the
+ * contract's TickSizeError.
  */
 function toKuruPrice(humanPrice: string, pricePrecision: bigint, tickSize: bigint): bigint {
-  if (tickSize <= 0n) throw new Error("Kuru market reports no tick size");
   const [intPart = "0", fracPart = ""] = humanPrice.split(".");
-  const intVal = BigInt(intPart || "0");
-  const raw =
-    fracPart.length === 0
-      ? intVal * pricePrecision
-      : intVal * pricePrecision +
-        (BigInt(fracPart) * pricePrecision) / 10n ** BigInt(fracPart.length);
-  return raw / tickSize;
+  const fracScale = 10n ** BigInt(fracPart.length);
+  const fracRaw = fracPart ? BigInt(fracPart) * pricePrecision : 0n;
+  if (fracRaw % fracScale !== 0n) {
+    throw new ParameterError(
+      `price ${humanPrice} has more decimals than the market's price precision (${pricePrecision}) can represent`,
+    );
+  }
+  const raw = BigInt(intPart || "0") * pricePrecision + fracRaw / fracScale;
+  if (raw <= 0n) throw new ParameterError("price is zero at the market's price precision");
+  if (tickSize > 0n && raw % tickSize !== 0n) {
+    throw new ParameterError(
+      `price ${humanPrice} maps to ${raw} price units, which is not a multiple of the market tick size ${tickSize}`,
+    );
+  }
+  return raw;
 }
 
-/** Convert a token base-unit amount into Kuru's sizePrecision units. */
-function toKuruSize(amount: bigint, decimals: number, sizePrecision: bigint): bigint {
-  return (amount * sizePrecision) / 10n ** BigInt(decimals);
+/** True when a bestBidAsk side carries no orders: 0 and MaxUint256 are both empty-side sentinels. */
+function emptyBookSide(raw: bigint): boolean {
+  return raw === 0n || raw === UINT256_MAX;
 }
 
 function scaleUnits(amount: bigint, fromDecimals: number, toDecimals: number) {
@@ -798,6 +1054,19 @@ function tokenDecimals(value: bigint, market: AddressValue, asset: "base" | "quo
 
 function sameToken(left: TokenRef, right: TokenRef): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+/** True when a market's base/quote equal the pair in either orientation. */
+function pairMatches(
+  base: AddressValue,
+  quote: AddressValue,
+  kuruIn: AddressValue,
+  kuruOut: AddressValue,
+): boolean {
+  return (
+    (sameAddress(base, kuruIn) && sameAddress(quote, kuruOut)) ||
+    (sameAddress(base, kuruOut) && sameAddress(quote, kuruIn))
+  );
 }
 
 function toKuru(token: TokenRef): AddressValue {
@@ -820,10 +1089,9 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function tryDecodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrderbookAbi>(
-  abi: TAbi,
-  change: Extract<Change, { kind: "event" }>,
-) {
+function tryDecodeKuruEvent<
+  TAbi extends typeof KuruRouterAbi | typeof KuruOrderbookAbi | typeof KuruMarginAccountAbi,
+>(abi: TAbi, change: Extract<Change, { kind: "event" }>) {
   try {
     return decodeEventLog({
       abi,
@@ -836,10 +1104,9 @@ function tryDecodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrder
   }
 }
 
-function decodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrderbookAbi>(
-  abi: TAbi,
-  change: Extract<Change, { kind: "event" }>,
-) {
+function decodeKuruEvent<
+  TAbi extends typeof KuruRouterAbi | typeof KuruOrderbookAbi | typeof KuruMarginAccountAbi,
+>(abi: TAbi, change: Extract<Change, { kind: "event" }>) {
   const event = tryDecodeKuruEvent(abi, change);
   if (!event)
     throw new Error(`Unexpected Change: ${change.address} emitted an unsupported Kuru event`);

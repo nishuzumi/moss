@@ -20,6 +20,7 @@ export interface SourceSpec {
 export const SOURCES: SourceSpec[] = [
   { file: "Router.json", exportName: "KuruRouterAbi" },
   { file: "OrderBook.json", exportName: "KuruOrderbookAbi" },
+  { file: "MarginAccount.json", exportName: "KuruMarginAccountAbi" },
 ];
 
 export interface VendorInfo {

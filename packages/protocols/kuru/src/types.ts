@@ -24,8 +24,15 @@ export type MarketParams = {
   baseDecimals: number;
   quoteAsset: AddressValue;
   quoteDecimals: number;
-  /** Kuru order prices are denominated in ticks: orderPrice = humanPrice * pricePrecision / tickSize. */
+  /**
+   * Order prices are humanPrice * pricePrecision and must be a multiple of
+   * tickSize (contract reverts with TickSizeError otherwise). Verified against
+   * @kuru-labs/kuru-sdk GTC.placeLimit and live mainnet orders (2026-07-17).
+   */
   tickSize: bigint;
+  /** Inclusive bounds for order size in sizePrecision units. */
+  minSize: bigint;
+  maxSize: bigint;
 };
 
 export type MarketCandidate = {
@@ -73,25 +80,29 @@ export type KuruSwapOutcome = {
   amountOut: string;
 };
 
-/** One Trade event observed while a limit order crossed the book on placement. */
-export type KuruOrderFill = {
-  orderId: string;
-  maker: AddressValue;
-  price: string;
-  filledSize: string;
-};
-
+/**
+ * Outcome of a post-only limit order. postOnly guarantees the order cannot
+ * take liquidity, so exactly one OrderCreated event backs every field.
+ */
 export type KuruLimitOrderOutcome = {
   operation: "limitOrder";
   protocol: "kuru";
   market: AddressValue;
-  /** null when the order fully filled on placement and nothing rested on the book. */
-  orderId: string | null;
-  owner: AddressValue | null;
-  /** Resting size in Kuru sizePrecision units; null when nothing rested. */
-  size: string | null;
-  /** Resting tick price; null when nothing rested. */
-  price: string | null;
-  isBuy: boolean | null;
-  fills: readonly KuruOrderFill[];
+  orderId: string;
+  owner: AddressValue;
+  /** Resting size in Kuru sizePrecision units. */
+  size: string;
+  /** Resting price in Kuru pricePrecision units. */
+  price: string;
+  isBuy: boolean;
+};
+
+export type KuruMarginDepositOutcome = {
+  operation: "depositMargin";
+  protocol: "kuru";
+  marginAccount: AddressValue;
+  user: AddressValue;
+  token: TokenRef;
+  /** Deposited amount in the token's base units. */
+  amount: string;
 };
