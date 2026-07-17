@@ -17,6 +17,7 @@ export default defineConfig({
       "@themoss/erc": src("../erc/src/index.ts"),
       "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
       "@themoss/system": src("../system/src/index.ts"),
+      "@themoss/protocol-fastlane": src("../protocols/fastlane/src/index.ts"),
     },
   },
 });
