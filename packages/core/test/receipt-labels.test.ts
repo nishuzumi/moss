@@ -26,6 +26,7 @@ const UNRELATED = "0xFfFfFffFffFFfffFFfFFffFfFffFfFfFffFfFfFf" as const;
 const RAW = "0x1234567890123456789012345678901234567890" as const;
 const SHARED = "0x2345678901234567890123456789012345678901" as const;
 const OTHER_ONLY = "0x3456789012345678901234567890123456789012" as const;
+const CALLER_SHARED = "0x4567890123456789012345678901234567890123" as const;
 
 const trustedTokens = [
   { address: TRUSTED, label: "Trusted Token" },
@@ -33,6 +34,7 @@ const trustedTokens = [
 ] as const;
 const noParams = {} satisfies ParamsSpec;
 const outcome = { operation: "label" } as const;
+const branchOutcome = { operation: "branch" } as const;
 const nestedOutcome = { operation: "nested" } as const;
 const leafData = { source: "event" } as const;
 
@@ -54,13 +56,20 @@ class DeepTokenProtocol {
     return {
       kind: "receipt",
       outcome: nestedOutcome,
-      text: `trusted ${TRUSTED} own ${DEEP} child ${SHARED} parent ${ROOT}`,
-      changes: changes.map((change) => ({
-        kind: "change",
-        change,
-        data: leafData,
-        text: `catalog ${CATALOG_ONLY} boundary a${DEEP} and ${DEEP}aa then ${DEEP} unrelated ${UNRELATED} raw ${RAW}`,
-      })),
+      text: `trusted ${TRUSTED} own ${DEEP} child ${SHARED} nearest ${CALLER_SHARED} ancestor ${ROOT}`,
+      changes: [
+        {
+          kind: "receipt",
+          outcome: null,
+          text: `sibling ${OTHER_ONLY}`,
+          changes: changes.map((change) => ({
+            kind: "change",
+            change,
+            data: leafData,
+            text: `catalog ${CATALOG_ONLY} boundary a${DEEP} and ${DEEP}aa then ${DEEP} unrelated ${UNRELATED} raw ${RAW}`,
+          })),
+        },
+      ],
     };
   }
 }
@@ -70,6 +79,7 @@ class DeepTokenProtocol {
   category: "token",
   description: "Dependency branch fixture.",
   contracts: {},
+  labels: { Nearest: CALLER_SHARED },
   protocols: { deep: DeepTokenProtocol },
 })
 class BranchProtocol {
@@ -78,6 +88,16 @@ class BranchProtocol {
   @Query({ intent: "Inspect branch fixture", params: noParams })
   async inspect() {
     return null;
+  }
+
+  @Receipt()
+  renderReceipt(changes: readonly Change[]): ReceiptResult<typeof branchOutcome> {
+    return {
+      kind: "receipt",
+      outcome: branchOutcome,
+      text: `ancestor ${ROOT}`,
+      changes: [this.deep.renderReceipt(changes)],
+    };
   }
 }
 
@@ -115,7 +135,12 @@ class UnrelatedProtocol {
   description: "Receipt label root fixture.",
   contracts: {},
   protocols: { branch: BranchProtocol, other: OtherTokenProtocol, deep: DeepTokenProtocol },
-  labels: { Router: ROOT, SharedRoot: SHARED, TrustedShadow: TRUSTED },
+  labels: {
+    Router: ROOT,
+    SharedRoot: SHARED,
+    Farthest: CALLER_SHARED,
+    TrustedShadow: TRUSTED,
+  },
 })
 class RootProtocol {
   declare branch: ProtocolRef<BranchProtocol>;
@@ -139,7 +164,7 @@ class RootProtocol {
       kind: "receipt",
       outcome,
       text: `trusted ${TRUSTED.toUpperCase()} root ${ROOT} dependency ${OTHER_ONLY} ambiguous ${AMBIGUOUS}`,
-      changes: [this.deep.renderReceipt(changes)],
+      changes: [this.branch.renderReceipt(changes)],
     };
   }
 }
@@ -205,8 +230,11 @@ class LongLabelProtocol {
   category: "token",
   description: "Invalid Receipt provenance fixture.",
   contracts: {},
+  protocols: { unrelated: UnrelatedProtocol },
 })
 class ForgedReceiptProtocol {
+  declare unrelated: ProtocolRef<UnrelatedProtocol>;
+
   @Capability<ForgedReceiptProtocol, typeof noParams>({
     intent: "Return invalid Receipt provenance",
     verb: "transfer",
@@ -273,16 +301,28 @@ describe("Registry Receipt labels", () => {
     );
     expect(receipt.outcome).toBe(outcome);
 
-    const nested = receipt.changes[0];
+    const branch = receipt.changes[0];
+    if (branch?.kind !== "receipt") throw new Error("expected branch Receipt");
+    expect(branch.protocol).toBe("branch");
+    expect(branch.text).toBe("ancestor Package(Root Protocol:Router)");
+    expect(branch.outcome).toBe(branchOutcome);
+
+    const nested = branch.changes[0];
     if (nested?.kind !== "receipt") throw new Error("expected nested Receipt");
     expect(nested.protocol).toBe("deep-token");
     expect(nested.text).toBe(
       "trusted Trusted(Trusted Token) own Package(Deep Token:Asset) " +
-        "child Package(Deep Token:SharedChild) parent Package(Root Protocol:Router)",
+        "child Package(Deep Token:SharedChild) nearest Package(Branch:Nearest) " +
+        "ancestor Package(Root Protocol:Router)",
     );
     expect(nested.outcome).toBe(nestedOutcome);
 
-    const leaf = nested.changes[0];
+    const group = nested.changes[0];
+    if (group?.kind !== "receipt") throw new Error("expected grouped Receipt");
+    expect(group.protocol).toBe("deep-token");
+    expect(group.text).toBe(`sibling ${OTHER_ONLY}`);
+
+    const leaf = group.changes[0];
     if (leaf?.kind !== "change") throw new Error("expected ReceiptChange");
     expect(leaf.text).toBe(
       `catalog Trusted(Catalog Token) boundary a${DEEP} and ${DEEP}aa then Package(Deep Token:Asset) unrelated ${UNRELATED} raw ${RAW}`,
@@ -302,9 +342,13 @@ describe("Registry Receipt labels", () => {
     } satisfies Change;
 
     const receipt = registry.parseReceipt(capability(), [change]);
-    const nested = receipt.changes[0];
+    const branch = receipt.changes[0];
+    if (branch?.kind !== "receipt") throw new Error("expected branch Receipt");
+    const nested = branch.changes[0];
     if (nested?.kind !== "receipt") throw new Error("expected nested Receipt");
-    const leaf = nested.changes[0];
+    const group = nested.changes[0];
+    if (group?.kind !== "receipt") throw new Error("expected grouped Receipt");
+    const leaf = group.changes[0];
     if (leaf?.kind !== "change") throw new Error("expected ReceiptChange");
     expect(leaf.text).toContain(`catalog ${CATALOG_ONLY}`);
   });
@@ -382,7 +426,7 @@ describe("Registry Receipt labels", () => {
     } satisfies Change;
 
     expect(() => registry.parseReceipt(node, [change])).toThrow(
-      'Receipt protocol "unrelated" is not a dependency of "forged-receipt"',
+      'Receipt protocol "unrelated" was not assigned by Registry',
     );
   });
 });

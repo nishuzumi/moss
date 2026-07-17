@@ -8,6 +8,7 @@ import {
   type ProtocolSource,
   type Receipt,
   Registry,
+  type TrustedToken,
   VERBS,
 } from "@themoss/core";
 import { createTraceSimulator, type SimulateOutcome, type Simulator } from "@themoss/simulator";
@@ -16,6 +17,7 @@ import { z } from "zod";
 export interface MossServerOptions {
   runtime: MossRuntime;
   protocols: readonly ProtocolSource[];
+  trustedTokens?: readonly TrustedToken[];
 }
 
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte 0x address");
@@ -93,7 +95,9 @@ export function createMossServer(opts: MossServerOptions): {
   simulator: Simulator;
 } {
   const { runtime } = opts;
-  const registry = new Registry(runtime).use(...opts.protocols);
+  const registry = new Registry(runtime, { trustedTokens: opts.trustedTokens ?? [] }).use(
+    ...opts.protocols,
+  );
   const simulator = createTraceSimulator(runtime, {
     receipt: (capability, changes) => registry.parseReceipt(capability, changes),
   });

@@ -125,6 +125,18 @@ class ReceiptNameFixture extends ExampleProtocol {
     };
   }
 
+  // @ts-expect-error Package parsers return ReceiptResult; Core owns final Receipt provenance.
+  @Receipt()
+  identifiedReceipt(changes: readonly Change[]): Receipt<{ ok: true }> {
+    return {
+      kind: "receipt",
+      protocol: "forged",
+      outcome: { ok: true },
+      text: "invalid",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+
   // @ts-expect-error Receipt parsers accept only an immutable ordered Change list.
   @Receipt()
   invalidReceipt(_: string): ReceiptResult<{ ok: true }> {

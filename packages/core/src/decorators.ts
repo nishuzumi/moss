@@ -36,8 +36,12 @@ export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Reco
 }
 
 type ReceiptNames<This> = {
-  [K in keyof This]: This[K] extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>
-    ? K
+  [K in keyof This]: This[K] extends (changes: readonly Change[]) => infer Result
+    ? Result extends ParsedReceipt<JsonSafeValue>
+      ? never
+      : Result extends ReceiptResult<JsonSafeValue>
+        ? K
+        : never
     : never;
 }[keyof This] &
   string;
@@ -159,7 +163,7 @@ export function Query<Params extends ParamsSpec>(spec: QuerySpec<Params>) {
 
 export function Receipt() {
   return <This, Method extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>>(
-    method: Method,
+    method: Method & (ReturnType<Method> extends ParsedReceipt<JsonSafeValue> ? never : unknown),
     context: ClassMethodDecoratorContext<This, Method>,
   ): void => {
     if (context.kind !== "method" || context.static) {

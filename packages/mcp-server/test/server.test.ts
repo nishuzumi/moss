@@ -49,6 +49,22 @@ describe("moss MCP server", () => {
     ]);
   });
 
+  it("passes the explicitly selected Trusted catalog into Registry", () => {
+    const token = system.USDC_ADDRESS;
+    const owner = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const spender = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const { registry } = createMossServer({
+      runtime,
+      protocols: [erc],
+      trustedTokens: [{ address: token, label: "USDC" }],
+    });
+    const receipt = registry.parseReceipt(receiptCapability("erc20", "approve", "approveReceipt"), [
+      erc20Change(token, "Approval", owner, spender, 1n),
+    ]);
+
+    expect(receipt.text).toContain("Trusted(USDC)");
+  });
+
   it("discovers direct Protocol exports and loads type plus field descriptions", async () => {
     const client = await connectedClient();
     const discovered = parseText(

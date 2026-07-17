@@ -1,5 +1,6 @@
 ---
 "@themoss/core": minor
+"@themoss/mcp-server": minor
 "@themoss/simulator": minor
 ---
 

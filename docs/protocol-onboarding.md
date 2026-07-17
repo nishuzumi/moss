@@ -149,7 +149,15 @@ The package entry point exports the Protocol class:
 export { MyProtocol } from "./my-protocol.js";
 ```
 
-The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code. A library composition may explicitly select its trusted token catalog:
+The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code. MCP and library compositions select the Trusted catalog explicitly:
+
+```ts
+const { server } = createMossServer({
+  runtime,
+  protocols: [myProtocol],
+  trustedTokens: [{ address: OFFICIAL_TOKEN_ADDRESS, label: "Official Token" }],
+});
+```
 
 ```ts
 const registry = new Registry(runtime, {

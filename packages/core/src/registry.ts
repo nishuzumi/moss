@@ -122,7 +122,7 @@ function collectLabels(
   packageName?: string,
 ): ReadonlyMap<string, string> {
   const labels = new Map<string, string>();
-  const addressesByName = new Map<string, string>();
+  const names = new Set<string>();
   for (const [name, address] of entries) {
     const payload = packageName ? `${packageName}:${name}` : name;
     if (!SAFE_LABEL_PART.test(name) || payload.length > 32) {
@@ -136,11 +136,11 @@ function collectLabels(
       throw new Error(`${owner} assigns multiple ${provenance} names to address "${address}"`);
     }
     const nameKey = name.toLowerCase();
-    if (addressesByName.has(nameKey)) {
+    if (names.has(nameKey)) {
       throw new Error(`${owner} assigns ${provenance} name "${name}" to multiple addresses`);
     }
     labels.set(key, name);
-    addressesByName.set(nameKey, key);
+    names.add(nameKey);
   }
   return labels;
 }
@@ -158,6 +158,7 @@ function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
 
 export class Registry {
   #protocols = new Map<string, Registered>();
+  #identifiedReceipts = new WeakSet<object>();
   #trustedLabels: ReadonlyMap<string, string>;
   readonly runtime: MossRuntime;
 
@@ -420,26 +421,48 @@ export class Registry {
   }
 
   #attachProtocol(result: ReceiptResult, protocol: string): Receipt {
-    const directDependencies = new Set(
-      Object.values(this.#get(protocol).config.protocols ?? {}).flatMap((dependency) => {
-        const name = configOf(dependency)?.name;
-        return name ? [name] : [];
-      }),
-    );
-    return {
-      ...result,
-      protocol,
-      changes: result.changes.map((child) => {
-        if (child.kind === "change") return child;
-        if (!hasProtocol(child)) return this.#attachProtocol(child, protocol);
-        if (child.protocol !== protocol && !directDependencies.has(child.protocol)) {
-          throw new Error(
-            `Receipt protocol "${child.protocol}" is not a dependency of "${protocol}"`,
-          );
-        }
-        return child;
-      }),
+    const dependencyNames = new Map<string, ReadonlySet<string>>();
+    const dependenciesFor = (parent: string): ReadonlySet<string> => {
+      const cached = dependencyNames.get(parent);
+      if (cached) return cached;
+      const names = new Set(
+        Object.values(this.#get(parent).config.protocols ?? {}).flatMap((dependency) => {
+          const name = configOf(dependency)?.name;
+          return name ? [name] : [];
+        }),
+      );
+      dependencyNames.set(parent, names);
+      return names;
     };
+    const validate = (parent: string, child: ReceiptResult): Receipt => {
+      if (!this.#identifiedReceipts.has(child) || !hasProtocol(child)) {
+        const claimed = hasProtocol(child) ? ` "${child.protocol}"` : "";
+        throw new Error(`Receipt protocol${claimed} was not assigned by Registry`);
+      }
+      if (child.protocol !== parent && !dependenciesFor(parent).has(child.protocol)) {
+        throw new Error(`Receipt protocol "${child.protocol}" is not a dependency of "${parent}"`);
+      }
+      for (const grandchild of child.changes) {
+        if (grandchild.kind === "receipt") validate(child.protocol, grandchild);
+      }
+      return child;
+    };
+    const attach = (current: ReceiptResult): Receipt => {
+      const receipt: Receipt = {
+        ...current,
+        protocol,
+        changes: current.changes.map((child) => {
+          if (child.kind === "change") return child;
+          if (this.#identifiedReceipts.has(child) || hasProtocol(child)) {
+            return validate(protocol, child);
+          }
+          return attach(child);
+        }),
+      };
+      this.#identifiedReceipts.add(receipt);
+      return receipt;
+    };
+    return attach(result);
   }
 
   #instantiateReceipt(protocol: string): object {
@@ -517,7 +540,7 @@ export class Registry {
       const registered = this.#get(protocol);
       const dependencies = new Map<string, PackageLabel | null>();
       const visited = new Set<string>();
-      const visit = (current: Registered): void => {
+      const collectDependencies = (current: Registered): void => {
         for (const dependency of Object.values(current.config.protocols ?? {})) {
           const name = configOf(dependency)?.name;
           if (!name || visited.has(name)) continue;
@@ -529,10 +552,10 @@ export class Registry {
               dependencies.has(address) ? null : { packageName: visible.packageName, name: label },
             );
           }
-          visit(visible);
+          collectDependencies(visible);
         }
       };
-      visit(registered);
+      collectDependencies(registered);
 
       const scope = {
         packageName: registered.packageName,
@@ -543,7 +566,7 @@ export class Registry {
       return scope;
     };
 
-    const visit = (receipt: Receipt, ancestors: readonly LabelScope[]): Receipt => {
+    const render = (receipt: Receipt, ancestors: readonly LabelScope[]): Receipt => {
       const current = scopeFor(receipt.protocol);
       const chain = [current, ...ancestors];
       const renderText = (text: string): string =>
@@ -564,13 +587,13 @@ export class Registry {
         text: renderText(receipt.text),
         changes: receipt.changes.map((child) =>
           child.kind === "receipt"
-            ? visit(child, chain)
+            ? render(child, chain)
             : { ...child, text: renderText(child.text) },
         ),
       };
     };
 
-    return visit(root, []);
+    return render(root, []);
   }
 
   #get(protocol: string): Registered {
