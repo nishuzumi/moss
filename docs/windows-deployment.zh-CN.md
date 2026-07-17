@@ -337,4 +337,3 @@ pnpm build
 ---
 
 > 本文档的目标读者是 Windows 上的 Moss 初学者。如果你在配置过程中遇到了本文未覆盖的问题，欢迎在 [GitHub Issues](https://github.com/nishuzumi/moss/issues) 提交反馈。
-*** End of File
