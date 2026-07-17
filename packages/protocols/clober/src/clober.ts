@@ -140,17 +140,24 @@ export class Clober {
     risk: ["fundOut", "approval", "priceImpact"],
     tags: ["clob", "orderbook"],
   })
-  async swap(params: SwapParams, _ctx: ActionCtx): Promise<CapabilityResult> {
+  async swap(params: SwapParams, ctx: ActionCtx): Promise<CapabilityResult> {
     const prepared = await this.#prepareSwap(params);
     const children = [];
     if (params.tokenIn !== NATIVE) {
-      children.push(
-        await this.erc20.approve({
-          token: params.tokenIn,
-          spender: this.controller.address,
-          amount: prepared.amountIn.toString(),
-        }),
-      );
+      const { allowance } = await this.erc20.allowance({
+        token: params.tokenIn,
+        owner: ctx.account,
+        spender: this.controller.address,
+      });
+      if (BigInt(allowance) < prepared.amountIn) {
+        children.push(
+          await this.erc20.approve({
+            token: params.tokenIn,
+            spender: this.controller.address,
+            amount: prepared.amountIn.toString(),
+          }),
+        );
+      }
     }
 
     const tokensToSettle = uniqueErc20Tokens(params.tokenIn, params.tokenOut);
@@ -173,6 +180,7 @@ export class Clober {
   swapReceipt(changes: readonly Change[]): ReceiptResult<CloberSwapOutcome> {
     const fills: CloberFill[] = [];
     const settlements: CloberSwapOutcome["settlements"][number][] = [];
+    let fillBookId: bigint | undefined;
     const parsed = changes.map((change) => {
       if (change.kind === "event" && sameAddress(change.address, CLOBER_BOOK_MANAGER_ADDRESS)) {
         const event = decodeBookManagerEvent(change);
@@ -182,6 +190,10 @@ export class Clober {
         if (!sameAddress(event.args.user, CLOBER_CONTROLLER_ADDRESS)) {
           throw new Error("Clober Take user is not the Controller");
         }
+        if (fillBookId !== undefined && event.args.bookId !== fillBookId) {
+          throw new Error("Clober single-book swap Receipt contains multiple book IDs");
+        }
+        fillBookId = event.args.bookId;
         const fill: CloberFill = {
           event: "Take",
           bookId: event.args.bookId.toString(),
@@ -204,6 +216,10 @@ export class Clober {
     });
 
     if (fills.length === 0) throw new Error("Clober swap Receipt requires at least one Take");
+    const transferCount = settlements.filter(({ operation }) => operation === "transfer").length;
+    if (transferCount < 2) {
+      throw new Error("Clober swap Receipt requires input and output transfer settlements");
+    }
     const outcome: CloberSwapOutcome = {
       operation: "swap",
       protocol: "clober",
@@ -226,7 +242,7 @@ export class Clober {
       this.#tokenDecimals(params.tokenIn),
       this.#tokenDecimals(params.tokenOut),
     ]);
-    const amountIn = parseUnits(params.amountIn, inputDecimals);
+    const amountIn = parseExactUnits(params.amountIn, inputDecimals);
     const unitSize = cloberUnitSize(params.tokenOut, outputDecimals);
     const key: BookKey = {
       base: toClober(params.tokenIn),
@@ -251,6 +267,9 @@ export class Clober {
     };
     const [amountOut, spentAmountIn] = await this.bookViewer.read.getExpectedOutput([order]);
     if (amountOut <= 0n) throw new Error("Clober book has no output for this input amount");
+    if (spentAmountIn > amountIn) {
+      throw new Error("Clober quote exceeds the requested input amount");
+    }
     const minimumSpentAmount = (amountIn * BigInt(MIN_INPUT_UTILIZATION_BPS) + 9_999n) / 10_000n;
     if (spentAmountIn < minimumSpentAmount) {
       throw new Error("Clober book cannot spend at least 99.9% of the input amount");
@@ -342,6 +361,16 @@ function sameToken(left: TokenRef, right: TokenRef): boolean {
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+function parseExactUnits(amount: string, decimals: number): bigint {
+  const fraction = amount.split(".")[1] ?? "";
+  if (/[1-9]/.test(fraction.slice(decimals))) {
+    throw new ParameterError(
+      `amountIn cannot be represented exactly with tokenIn's ${decimals} decimals`,
+    );
+  }
+  return parseUnits(amount, decimals);
 }
 
 function decodeBookManagerEvent(change: Extract<Change, { kind: "event" }>) {
