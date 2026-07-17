@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@themoss/core": "workspace:*",
-    "viem": "^2.54.3"
+    "viem": "^2.54.3",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@wagmi/cli": "^2.10.0",
