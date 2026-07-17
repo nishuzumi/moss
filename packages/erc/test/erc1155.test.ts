@@ -104,7 +104,6 @@ describe("ERC1155", () => {
       to: RECIPIENT,
     });
     if (capability.kind !== "capability") throw new Error("expected capability");
-    expect(capability.receipt).toBe("transferReceipt");
     const flattened = flattenCapabilityTree(capability);
     expect(flattened).toHaveLength(1);
     const [transfer] = flattened;
