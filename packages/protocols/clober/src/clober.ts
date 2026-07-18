@@ -46,7 +46,7 @@ const MAX_SLIPPAGE_BPS = 5_000;
 // Source: https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/constants/chain-configs/fee.ts
 const MAKER_POLICY = 8_888_608;
 const TAKER_POLICY = 8_888_708;
-// Moss rejects materially partial exact-input quotes while allowing book-unit dust.
+// Moss fails closed below 99.9%; this relative policy is not terminal-cause-aware.
 const MIN_INPUT_UTILIZATION_BPS = 9_990;
 const NATIVE_UNIT_SIZE = 1_000_000_000_000n;
 const UINT64_MAX = (1n << 64n) - 1n;
@@ -116,6 +116,11 @@ type PreparedSwap = {
     hookData: Hex;
   };
 };
+
+type TransferSettlement = Extract<
+  CloberSwapOutcome["settlements"][number],
+  { operation: "transfer" }
+>;
 
 @Protocol({
   name: "clober",
@@ -220,6 +225,9 @@ export class Clober {
         if (!sameAddress(event.args.user, CLOBER_CONTROLLER_ADDRESS)) {
           throw new Error("Clober Take user is not the Controller");
         }
+        if (event.args.unit === 0n) {
+          throw new Error("Clober Take must contain a non-zero unit amount");
+        }
         if (fillBookId !== undefined && event.args.bookId !== fillBookId) {
           throw new Error("Clober single-book swap Receipt contains multiple book IDs");
         }
@@ -245,11 +253,10 @@ export class Clober {
       return settlement;
     });
 
-    if (fills.length === 0) throw new Error("Clober swap Receipt requires at least one Take");
-    const transferCount = settlements.filter(({ operation }) => operation === "transfer").length;
-    if (transferCount < 2) {
-      throw new Error("Clober swap Receipt requires input and output transfer settlements");
+    if (fills.length === 0 || fillBookId === undefined) {
+      throw new Error("Clober swap Receipt requires at least one Take");
     }
+    validateSwapSettlements(fillBookId, settlements);
     const outcome: CloberSwapOutcome = {
       operation: "swap",
       protocol: "clober",
@@ -276,17 +283,10 @@ export class Clober {
     if (sameToken(params.tokenIn, params.tokenOut)) {
       throw new ParameterError("tokenIn and tokenOut must differ");
     }
-    const { inputDecimals, outputDecimals } = supportedMarket(params.tokenIn, params.tokenOut);
+    const market = supportedMarket(params.tokenIn, params.tokenOut);
+    const { inputDecimals, outputDecimals } = market;
     const amountIn = parseExactUnits(params.amountIn, inputDecimals);
-    const unitSize = cloberUnitSize(params.tokenOut, outputDecimals);
-    const key: BookKey = {
-      base: toClober(params.tokenIn),
-      unitSize,
-      quote: toClober(params.tokenOut),
-      makerPolicy: MAKER_POLICY,
-      hooks: zeroAddress,
-      takerPolicy: TAKER_POLICY,
-    };
+    const key = marketBookKey(market);
     const bookId = encodeBookId(key);
     const onchainKey = await this.bookManager.read.getBookKey([bookId]);
     if (!sameBookKey(onchainKey, key)) {
@@ -329,13 +329,140 @@ export class Clober {
 
 function supportedMarket(tokenIn: TokenRef, tokenOut: TokenRef): SupportedMarket {
   const market = SUPPORTED_MARKETS.find(
-    (candidate) =>
-      sameToken(candidate.tokenIn, tokenIn) && sameToken(candidate.tokenOut, tokenOut),
+    (candidate) => sameToken(candidate.tokenIn, tokenIn) && sameToken(candidate.tokenOut, tokenOut),
   );
   if (!market) {
     throw new ParameterError("Clober v1 supports only native MON/USDC markets");
   }
   return market;
+}
+
+function marketBookKey(market: SupportedMarket): BookKey {
+  return {
+    base: toClober(market.tokenIn),
+    unitSize: cloberUnitSize(market.tokenOut, market.outputDecimals),
+    quote: toClober(market.tokenOut),
+    makerPolicy: MAKER_POLICY,
+    hooks: zeroAddress,
+    takerPolicy: TAKER_POLICY,
+  };
+}
+
+function marketForBookId(bookId: bigint): SupportedMarket | undefined {
+  return SUPPORTED_MARKETS.find((market) => encodeBookId(marketBookKey(market)) === bookId);
+}
+
+/**
+ * Binds Receipt evidence to one curated market and Clober Controller's zero-hook
+ * settlement flow. The user is inferred from the required input debit because
+ * the v1 Receipt contract receives ordered Changes but no Capability parameters.
+ * Source: Controller._settleTokens at the v2-periphery revision pinned in README.
+ */
+function validateSwapSettlements(
+  bookId: bigint,
+  settlements: readonly CloberSwapOutcome["settlements"][number][],
+): void {
+  const market = marketForBookId(bookId);
+  if (!market) {
+    throw new Error("Clober swap Receipt book ID is not in the curated market catalog");
+  }
+
+  const transfers: TransferSettlement[] = [];
+  for (const settlement of settlements) {
+    if (settlement.operation !== "transfer") {
+      throw new Error("Clober swap Receipt accepts only transfer settlements");
+    }
+    let amount: bigint;
+    try {
+      amount = BigInt(settlement.amount);
+    } catch {
+      throw new Error("Clober swap Receipt requires non-zero settlement amounts");
+    }
+    if (amount <= 0n) {
+      throw new Error("Clober swap Receipt requires non-zero settlement amounts");
+    }
+    transfers.push(settlement);
+  }
+
+  const inputDebit =
+    market.tokenIn === NATIVE
+      ? requireSingleTransfer(
+          transfers,
+          (transfer) =>
+            transfer.token === NATIVE &&
+            sameAddress(transfer.to, CLOBER_CONTROLLER_ADDRESS) &&
+            !sameAddress(transfer.from, CLOBER_CONTROLLER_ADDRESS) &&
+            !sameAddress(transfer.from, CLOBER_BOOK_MANAGER_ADDRESS) &&
+            !sameAddress(transfer.from, zeroAddress),
+          "Clober swap Receipt requires one native input transfer to the Controller",
+        )
+      : requireSingleTransfer(
+          transfers,
+          (transfer) =>
+            sameToken(transfer.token, market.tokenIn) &&
+            sameAddress(transfer.to, CLOBER_BOOK_MANAGER_ADDRESS) &&
+            !sameAddress(transfer.from, CLOBER_CONTROLLER_ADDRESS) &&
+            !sameAddress(transfer.from, CLOBER_BOOK_MANAGER_ADDRESS) &&
+            !sameAddress(transfer.from, zeroAddress),
+          "Clober swap Receipt requires one input-token transfer to the BookManager",
+        );
+  const user = inputDebit.from;
+  const matched = new Set<TransferSettlement>([inputDebit]);
+
+  if (market.tokenIn === NATIVE) {
+    const settledInput = requireSingleTransfer(
+      transfers,
+      (transfer) =>
+        transfer.token === NATIVE &&
+        sameAddress(transfer.from, CLOBER_CONTROLLER_ADDRESS) &&
+        sameAddress(transfer.to, CLOBER_BOOK_MANAGER_ADDRESS),
+      "Clober swap Receipt requires native input settlement from Controller to BookManager",
+    );
+    matched.add(settledInput);
+
+    const refunds = transfers.filter(
+      (transfer) =>
+        transfer.token === NATIVE &&
+        sameAddress(transfer.from, CLOBER_CONTROLLER_ADDRESS) &&
+        sameAddress(transfer.to, user),
+    );
+    if (refunds.length > 1) {
+      throw new Error("Clober swap Receipt contains multiple native input refunds");
+    }
+    const refund = refunds[0];
+    if (refund) matched.add(refund);
+    if (
+      BigInt(inputDebit.amount) !==
+      BigInt(settledInput.amount) + (refund ? BigInt(refund.amount) : 0n)
+    ) {
+      throw new Error("Clober swap Receipt native input and refund amounts do not balance");
+    }
+  }
+
+  matched.add(
+    requireSingleTransfer(
+      transfers,
+      (transfer) =>
+        sameToken(transfer.token, market.tokenOut) &&
+        sameAddress(transfer.from, CLOBER_BOOK_MANAGER_ADDRESS) &&
+        sameAddress(transfer.to, user),
+      "Clober swap Receipt requires output-token settlement from BookManager to the input sender",
+    ),
+  );
+
+  if (matched.size !== transfers.length) {
+    throw new Error("Clober swap Receipt contains an unexpected token or participant");
+  }
+}
+
+function requireSingleTransfer(
+  transfers: readonly TransferSettlement[],
+  predicate: (transfer: TransferSettlement) => boolean,
+  message: string,
+): TransferSettlement {
+  const matches = transfers.filter(predicate);
+  if (matches.length !== 1 || !matches[0]) throw new Error(message);
+  return matches[0];
 }
 
 /**
