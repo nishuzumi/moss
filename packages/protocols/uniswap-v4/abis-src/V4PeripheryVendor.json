@@ -1,0 +1,7 @@
+{
+  "name": "@uniswap/v4-periphery",
+  "version": "1.0.3",
+  "tarballSha256": "3abeef0bd9e6d895727e0bec457db5d600fbb5debd4d413a95577cca938adff0",
+  "vendoredAt": "2026-07-18",
+  "releaseAgeGuardDays": 7
+}

@@ -1,0 +1,7 @@
+{
+  "name": "@uniswap/v4-core",
+  "version": "1.0.2",
+  "tarballSha256": "033d148fac5995874b83621afe35be94a28eb00bfd59bd0a8c9c030bea6a1aef",
+  "vendoredAt": "2026-07-18",
+  "releaseAgeGuardDays": 7
+}
