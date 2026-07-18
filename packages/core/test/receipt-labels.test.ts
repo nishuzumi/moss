@@ -267,7 +267,6 @@ function capability(): CapabilityNode {
     protocol: "root-protocol",
     method: "render",
     params: {},
-    receipt: "renderReceipt",
     children: [transaction(ACCOUNT, ROOT)],
   };
 }
@@ -404,7 +403,6 @@ describe("Registry Receipt labels", () => {
       protocol: "forged-receipt",
       method: "render",
       params: {},
-      receipt: "forgedReceipt",
       children: [transaction(ACCOUNT, ROOT)],
     } satisfies CapabilityNode;
     const change = {

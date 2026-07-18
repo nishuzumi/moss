@@ -58,7 +58,7 @@ describe("moss MCP server", () => {
       protocols: [erc],
       trustedTokens: [{ address: token, label: "USDC" }],
     });
-    const receipt = registry.parseReceipt(receiptCapability("erc20", "approve", "approveReceipt"), [
+    const receipt = registry.parseReceipt(receiptCapability("erc20", "approve"), [
       erc20Change(token, "Approval", owner, spender, 1n),
     ]);
 
@@ -311,14 +311,16 @@ function eventChange(address: `0x${string}`): Change {
 function successfulSimulationResult(): SimulateOutcome["results"][number] {
   const first = eventChange("0x1111111111111111111111111111111111111111");
   const second = eventChange("0x2222222222222222222222222222222222222222");
-  const nested: ReceiptResult = {
+  const nested: Receipt = {
     kind: "receipt",
+    protocol: "erc20",
     outcome: { operation: "transfer" },
     text: "nested summary",
     changes: [{ kind: "change", change: second, data: { amount: "2" }, text: "second" }],
   };
-  const receipt: ReceiptResult = {
+  const receipt: Receipt = {
     kind: "receipt",
+    protocol: "kuru",
     outcome: { operation: "swap" },
     text: "root summary",
     changes: [{ kind: "change", change: first, data: { amount: "1" }, text: "first" }, nested],

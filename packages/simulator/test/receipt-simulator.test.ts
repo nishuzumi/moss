@@ -143,7 +143,11 @@ describe("Capability simulation", () => {
         requests,
       ),
       {
-        receipt: (_node, changes) => coveringReceipt(changes.map((change) => ({ ...change }))),
+        receipt: (node, changes) =>
+          coveringReceipt(
+            node.protocol,
+            changes.map((change) => ({ ...change })),
+          ),
       },
     ).simulate(root);
 
