@@ -56,6 +56,28 @@ export interface CapabilityNode {
   children: readonly (CapabilityNode | TransactionNode)[];
 }
 
+export interface CapabilityTreeLimits {
+  maxDepth: number;
+  maxCapabilities: number;
+  maxChildrenPerCapability: number;
+  maxParamDepth: number;
+  maxParamNodes: number;
+  maxParamStringLength: number;
+  maxCalldataBytes: number;
+}
+
+export type CapabilityTreeValidationCode =
+  | "CYCLE"
+  | "SHARED_NODE"
+  | "MAX_DEPTH"
+  | "MAX_CAPABILITIES"
+  | "MAX_CHILDREN"
+  | "PARAM_CYCLE"
+  | "MAX_PARAM_DEPTH"
+  | "MAX_PARAM_NODES"
+  | "MAX_PARAM_STRING_LENGTH"
+  | "MAX_CALLDATA_BYTES";
+
 export type CapabilityResult =
   | CapabilityNode
   | TransactionNode

@@ -10,6 +10,8 @@ export {
   Receipt,
 } from "./decorators.js";
 export {
+  CAPABILITY_TREE_LIMITS,
+  CapabilityTreeValidationError,
   type ExecutableCapability,
   flattenCapabilityTree,
   ReceiptCoverageError,
@@ -45,6 +47,8 @@ export {
   CATEGORIES,
   type CapabilityNode,
   type CapabilityResult,
+  type CapabilityTreeLimits,
+  type CapabilityTreeValidationCode,
   type Category,
   type Change,
   type Hex,

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
 import {
   type AddressValue,
+  CAPABILITY_TREE_LIMITS,
   Capability,
   type CapabilityNode,
+  CapabilityTreeValidationError,
   type Change,
   flattenCapabilityTree,
   type Handle,
@@ -416,6 +418,113 @@ describe("framework core seam", () => {
     expect(() => flattenCapabilityTree(capability([malformed]))).toThrow("UnsignedTx");
   });
 
+  it("bounds Capability depth and count while preserving valid boundary trees", () => {
+    const atDepthLimit = nestedCapabilities(CAPABILITY_TREE_LIMITS.maxDepth);
+    expect(flattenCapabilityTree(atDepthLimit)).toHaveLength(CAPABILITY_TREE_LIMITS.maxDepth);
+    expectCapabilityTreeError(nestedCapabilities(CAPABILITY_TREE_LIMITS.maxDepth + 1), "MAX_DEPTH");
+
+    const atCountLimit = wideCapabilities(CAPABILITY_TREE_LIMITS.maxCapabilities);
+    expect(flattenCapabilityTree(atCountLimit)).toHaveLength(
+      CAPABILITY_TREE_LIMITS.maxCapabilities,
+    );
+    expectCapabilityTreeError(
+      wideCapabilities(CAPABILITY_TREE_LIMITS.maxCapabilities + 1),
+      "MAX_CAPABILITIES",
+    );
+  });
+
+  it("rejects Capability cycles, shared nodes, and excessive child counts", () => {
+    const cyclic = fixtureCapability();
+    (cyclic as unknown as { children: unknown[] }).children = [cyclic, fixtureTransaction()];
+    expectCapabilityTreeError(cyclic, "CYCLE");
+
+    const shared = fixtureCapability();
+    const reused = fixtureCapability();
+    (shared as unknown as { children: unknown[] }).children = [
+      reused,
+      reused,
+      fixtureTransaction(),
+    ];
+    expectCapabilityTreeError(shared, "SHARED_NODE");
+
+    const tooManyChildren = fixtureCapability();
+    (tooManyChildren as unknown as { children: unknown[] }).children = Array.from(
+      { length: CAPABILITY_TREE_LIMITS.maxChildrenPerCapability + 1 },
+      () => fixtureTransaction(),
+    );
+    expectCapabilityTreeError(tooManyChildren, "MAX_CHILDREN");
+  });
+
+  it("bounds cumulative parameter complexity without rejecting shared parameter values", () => {
+    const atDepthLimit = fixtureCapability(nestedParam(CAPABILITY_TREE_LIMITS.maxParamDepth));
+    expect(() => flattenCapabilityTree(atDepthLimit)).not.toThrow();
+    expectCapabilityTreeError(
+      fixtureCapability(nestedParam(CAPABILITY_TREE_LIMITS.maxParamDepth + 1)),
+      "MAX_PARAM_DEPTH",
+    );
+
+    expect(() =>
+      flattenCapabilityTree(
+        fixtureCapability(Array(CAPABILITY_TREE_LIMITS.maxParamNodes - 1).fill(null)),
+      ),
+    ).not.toThrow();
+    expectCapabilityTreeError(
+      fixtureCapability(Array(CAPABILITY_TREE_LIMITS.maxParamNodes).fill(null)),
+      "MAX_PARAM_NODES",
+    );
+    const cumulativeParams = Array(CAPABILITY_TREE_LIMITS.maxParamNodes / 2).fill(null);
+    const cumulativeRoot = fixtureCapability(cumulativeParams);
+    const cumulativeChild = fixtureCapability(cumulativeParams);
+    (cumulativeRoot as unknown as { children: unknown[] }).children = [
+      cumulativeChild,
+      fixtureTransaction(),
+    ];
+    expectCapabilityTreeError(cumulativeRoot, "MAX_PARAM_NODES");
+
+    expect(() =>
+      flattenCapabilityTree(
+        fixtureCapability("a".repeat(CAPABILITY_TREE_LIMITS.maxParamStringLength)),
+      ),
+    ).not.toThrow();
+    expectCapabilityTreeError(
+      fixtureCapability("a".repeat(CAPABILITY_TREE_LIMITS.maxParamStringLength + 1)),
+      "MAX_PARAM_STRING_LENGTH",
+    );
+
+    const cyclicParams: Record<string, unknown> = {};
+    cyclicParams.self = cyclicParams;
+    expectCapabilityTreeError(
+      fixtureCapability(cyclicParams as CapabilityNode["params"]),
+      "PARAM_CYCLE",
+    );
+
+    const reused = { amount: "1" };
+    expect(() =>
+      flattenCapabilityTree(fixtureCapability({ first: reused, second: reused })),
+    ).not.toThrow();
+  });
+
+  it("bounds cumulative calldata bytes", () => {
+    expect(() =>
+      flattenCapabilityTree(
+        fixtureCapability({}, `0x${"00".repeat(CAPABILITY_TREE_LIMITS.maxCalldataBytes)}`),
+      ),
+    ).not.toThrow();
+    expectCapabilityTreeError(
+      fixtureCapability({}, `0x${"00".repeat(CAPABILITY_TREE_LIMITS.maxCalldataBytes + 1)}`),
+      "MAX_CALLDATA_BYTES",
+    );
+
+    const half = Math.floor(CAPABILITY_TREE_LIMITS.maxCalldataBytes / 2) + 1;
+    const cumulativeRoot = fixtureCapability({}, `0x${"00".repeat(half)}`);
+    const cumulativeChild = fixtureCapability({}, `0x${"00".repeat(half)}`);
+    (cumulativeRoot as unknown as { children: unknown[] }).children = [
+      cumulativeChild,
+      ...cumulativeRoot.children,
+    ];
+    expectCapabilityTreeError(cumulativeRoot, "MAX_CALLDATA_BYTES");
+  });
+
   it("validates every Capability node against registered protocol methods", async () => {
     const registry = new Registry(runtime).use(ComposedProtocol);
     const result = await registry.action("composed", "swap", ACCOUNT, {});
@@ -541,3 +650,61 @@ describe("framework core seam", () => {
     ).toThrow("Receipt.changes[0].data contains a non-plain object");
   });
 });
+
+function fixtureTransaction(data: `0x${string}` = "0x"): TransactionNode {
+  return transaction(ACCOUNT, VAULT, { data });
+}
+
+function fixtureCapability(
+  params: CapabilityNode["params"] = {},
+  data: `0x${string}` = "0x",
+): CapabilityNode {
+  return {
+    kind: "capability",
+    protocol: "fixture",
+    method: "execute",
+    params,
+    children: [fixtureTransaction(data)],
+  };
+}
+
+function nestedCapabilities(depth: number): CapabilityNode {
+  let node = fixtureCapability();
+  for (let index = 1; index < depth; index += 1) {
+    node = { ...fixtureCapability(), children: [node, fixtureTransaction()] };
+  }
+  return node;
+}
+
+function wideCapabilities(count: number): CapabilityNode {
+  const children = Array.from({ length: Math.min(count - 1, 63) }, () => fixtureCapability());
+  let remaining = count - 1 - children.length;
+  let cursor = children[0];
+  while (remaining > 0 && cursor) {
+    const nested = fixtureCapability();
+    (cursor as unknown as { children: unknown[] }).children = [nested, fixtureTransaction()];
+    cursor = nested;
+    remaining -= 1;
+  }
+  return { ...fixtureCapability(), children: [...children, fixtureTransaction()] };
+}
+
+function nestedParam(depth: number): CapabilityNode["params"] {
+  let value: CapabilityNode["params"] = null;
+  for (let index = 0; index < depth; index += 1) value = [value];
+  return value;
+}
+
+function expectCapabilityTreeError(
+  capability: CapabilityNode,
+  code: InstanceType<typeof CapabilityTreeValidationError>["code"],
+): void {
+  try {
+    flattenCapabilityTree(capability);
+    throw new Error(`expected ${code}`);
+  } catch (error) {
+    expect(error).toBeInstanceOf(CapabilityTreeValidationError);
+    expect(error).not.toBeInstanceOf(RangeError);
+    expect((error as CapabilityTreeValidationError).code).toBe(code);
+  }
+}

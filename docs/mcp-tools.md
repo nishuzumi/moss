@@ -172,6 +172,8 @@ Execute one root Capability tree against Monad state and parse each successful t
 
 Simulation traverses nested Capabilities in depth-first order and carries state forward. MCP projects the verified Receipt leaves into the small Agent-facing response:
 
+Before recursive wire decoding or tracing, Core rejects Capability trees that contain cycles or shared nodes, exceed 16 Capability levels or 64 Capabilities, give one Capability more than 64 children, exceed 32 parameter levels or 4,096 cumulative parameter nodes, contain more than 262,144 cumulative parameter key/string characters, or contain more than 262,144 cumulative calldata bytes.
+
 ```ts
 type AgentSimulation = {
   ok: boolean;

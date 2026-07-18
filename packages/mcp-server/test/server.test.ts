@@ -286,6 +286,25 @@ describe("moss MCP server", () => {
     expect(response.isError).toBe(true);
     expect(simulated).toBe(false);
   });
+
+  it("rejects over-deep Capability input before recursive decoding or tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: { capability: nestedReceiptCapability(17) },
+    });
+
+    expect(response.isError).toBe(true);
+    const content = response.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain("Capability depth exceeds 16");
+    expect(simulated).toBe(false);
+  });
 });
 
 function eventChange(address: `0x${string}`): Change {
@@ -343,6 +362,15 @@ function receiptCapability(protocol: string, method: string): CapabilityNode {
       },
     ],
   };
+}
+
+function nestedReceiptCapability(depth: number): CapabilityNode {
+  let node = receiptCapability("kuru", "swap");
+  for (let index = 1; index < depth; index += 1) {
+    const parent = receiptCapability("kuru", "swap");
+    node = { ...parent, children: [node, ...parent.children] };
+  }
+  return node;
 }
 
 function erc20Change(
