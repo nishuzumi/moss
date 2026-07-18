@@ -1,0 +1,31 @@
+{
+  "name": "@themoss/protocol-wallet",
+  "version": "0.1.0",
+  "description": "Moss wallet adapter - provides wallet information queries including balances, transaction counts, and gas estimates",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "viem": "^2.54.3",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}
