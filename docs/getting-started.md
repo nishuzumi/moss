@@ -202,6 +202,31 @@ Also confirm the Capability preserves `slippage: 50`. The Protocol used that val
 
 Receipt text is useful for display, but it is not evidence. Never approve a transaction only because a string contains words such as “Kuru Swap”.
 
+### Reusable post-simulation checklist
+
+Before passing unsigned transactions to a wallet, compare every structured
+Outcome with the intent recorded before calling tools:
+
+- confirm that simulation did not halt and that no result contains a Warning;
+- confirm that the `operation` and `protocol` match the request;
+- confirm that the sender and receiver addresses are correct;
+- confirm input and output assets using canonical identities rather than
+  user-supplied symbols alone;
+- confirm amounts, decimal units, and asset directions;
+- confirm limits such as slippage, minimum output, deadlines, and allowances;
+- confirm that nested Capabilities introduce only expected prerequisite
+  transactions;
+- confirm that the structured Outcomes and ordered Receipt evidence describe
+  the expected state changes.
+
+If any field cannot be reconciled with the recorded intent, stop before
+signing and ask the user to review the mismatch.
+
+A successful simulation reports what happened under the simulated state and
+whether the observed Changes were parsed. It does not prove user consent or
+intent alignment. Present the unsigned transactions together with a clear
+summary of the verified Outcomes before requesting a signature.
+
 ## 10. Use the MCP server
 
 After `pnpm build`, add this server to an MCP client:
