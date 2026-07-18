@@ -43,6 +43,36 @@ const erc1155BalanceParams = {
   owner: { type: Address, description: "Address whose token balance is read." },
 } satisfies ParamsSpec;
 
+// ── Approval-specific types (added by zz-0816, PR #81) ──────────
+
+const erc1155ApprovalParams = {
+  collection: { type: Address, description: "Collection to manage operator approval for." },
+  operator: { type: Address, description: "Address authorized to manage the caller's tokens." },
+  approved: {
+    type: UnsignedIntegerString.refine(
+      (v) => v === "1" || v === "0",
+      'Expected "1" (approve) or "0" (revoke).',
+    ).describe('Pass "1" to approve the operator or "0" to revoke.'),
+    description: '"1" to approve the operator, "0" to revoke.',
+  },
+} satisfies ParamsSpec;
+
+const erc1155ApprovalCheckParams = {
+  collection: { type: Address, description: "Collection whose approval is checked." },
+  owner: { type: Address, description: "Address that may have granted approval." },
+  operator: { type: Address, description: "Address whose operator status is checked." },
+} satisfies ParamsSpec;
+
+export type ERC1155ApprovalOutcome = {
+  operation: "approvalForAll";
+  collection: AddressValue;
+  account: AddressValue;
+  operator: AddressValue;
+  approved: boolean;
+};
+
+// ── #82 原有的类型（未修改）────────────────────────────────────
+
 export type ERC1155TransferItem = {
   tokenId: string;
   amount: string;
@@ -84,6 +114,8 @@ export class ERC1155 {
     return createHandle(ierc1155Abi, collection, this.runtime.client, account);
   }
 
+  // ── #82 原有的 transfer + balanceOf（未修改）─────────────────
+
   @Capability<ERC1155, typeof erc1155TransferParams>({
     intent: "Transfer ERC-1155 token units",
     verb: "transfer",
@@ -117,6 +149,41 @@ export class ERC1155 {
     return { ...params, balance: balance.toString() };
   }
 
+  // ── 新增：approve Capability（来自 PR #81）────────────────────
+
+  @Capability<ERC1155, typeof erc1155ApprovalParams>({
+    intent: "Set or revoke an ERC-1155 operator approval",
+    verb: "approve",
+    params: erc1155ApprovalParams,
+    receipt: "approvalReceipt",
+    risk: ["approval"],
+    tags: ["approval"],
+  })
+  async approve(params: InferParams<typeof erc1155ApprovalParams>, ctx: ActionCtx) {
+    return [
+      this.#handle(params.collection, ctx.account).setApprovalForAll([
+        params.operator,
+        params.approved === "1",
+      ]),
+    ];
+  }
+
+  // ── 新增：isApprovedForAll + uri Query（来自 PR #81）──────────
+
+  @Query({
+    intent: "Check whether an operator is approved for an ERC-1155 collection",
+    params: erc1155ApprovalCheckParams,
+  })
+  async isApprovedForAll(params: InferParams<typeof erc1155ApprovalCheckParams>, ctx: ActionCtx) {
+    const approved = await this.#handle(params.collection, ctx.account).read.isApprovedForAll([
+      params.owner,
+      params.operator,
+    ]);
+    return { ...params, approved };
+  }
+
+  // ── #82 原有的 Receipt（未修改）───────────────────────────────
+
   @Receipt()
   transferReceipt(changes: readonly Change[]): MossReceipt<ERC1155TransferOutcome> {
     const receipt = this.changesReceipt(changes);
@@ -147,7 +214,49 @@ export class ERC1155 {
       changes: parsed,
     };
   }
+
+  // ── 新增：approvalReceipt（自包含，不依赖 changesReceipt）─────
+
+  @Receipt()
+  approvalReceipt(changes: readonly Change[]): MossReceipt<ERC1155ApprovalOutcome> {
+    const first = changes[0];
+    if (changes.length !== 1 || !first || first.kind !== "event") {
+      throw new Error("ERC1155 approval Receipt requires exactly one event Change");
+    }
+    let decoded: ReturnType<typeof decodeEventLog<typeof ierc1155Abi>>;
+    try {
+      decoded = decodeEventLog({
+        abi: ierc1155Abi,
+        topics: first.topics as [Hex, ...Hex[]],
+        data: first.data,
+        strict: true,
+      });
+    } catch {
+      throw new Error(`Unexpected Change: ${first.address} emitted an unsupported event`);
+    }
+    if (decoded.eventName !== "ApprovalForAll") {
+      throw new Error(
+        `Unexpected Change: ${first.address} emitted ${decoded.eventName}, expected ApprovalForAll`,
+      );
+    }
+    const outcome: ERC1155ApprovalOutcome = {
+      operation: "approvalForAll",
+      collection: first.address,
+      account: decoded.args.account,
+      operator: decoded.args.operator,
+      approved: decoded.args.approved,
+    };
+    const text = `ERC1155 ApprovalForAll: ${outcome.account} ${outcome.approved ? "approved" : "revoked"} ${outcome.operator} for ${outcome.collection}`;
+    return {
+      kind: "receipt",
+      outcome,
+      text,
+      changes: [{ kind: "change" as const, change: first, data: outcome, text }],
+    };
+  }
 }
+
+// ── #82 原有的 parser + describe（未修改）───────────────────────
 
 function parseERC1155Change(change: Change): ERC1155Outcome {
   if (change.kind !== "event") {
