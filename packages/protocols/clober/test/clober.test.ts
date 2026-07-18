@@ -319,12 +319,7 @@ describe("Clober", () => {
     expect(BigInt(swap.transaction.value)).toBe(0n);
 
     const take = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 2n);
-    const debit = erc20Transfer(
-      USDC_ADDRESS,
-      ACCOUNT,
-      CLOBER_BOOK_MANAGER_ADDRESS,
-      1_000_000n,
-    );
+    const debit = erc20Transfer(USDC_ADDRESS, ACCOUNT, CLOBER_BOOK_MANAGER_ADDRESS, 1_000_000n);
     const credit = nativeTransfer(CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
     expect(registry.parseReceipt(capability, [take, debit, credit]).outcome).toMatchObject({
       fills: [{ bookId: expectedBookId.toString() }],
@@ -333,6 +328,14 @@ describe("Clober", () => {
         { operation: "transfer", token: NATIVE, to: ACCOUNT, amount: "2000000" },
       ],
     });
+    expect(() =>
+      registry.parseReceipt(capability, [
+        take,
+        debit,
+        credit,
+        erc20Transfer(USDC_ADDRESS, CLOBER_CONTROLLER_ADDRESS, ACCOUNT, 1n),
+      ]),
+    ).toThrow("contains an unexpected token or participant");
   });
 
   it("rejects markets outside the curated catalog before any chain read", async () => {
@@ -368,6 +371,41 @@ describe("Clober", () => {
         tokenIn: NATIVE,
         tokenOut: USDC_ADDRESS,
         amountIn: "1",
+      }),
+    ).rejects.toThrow("cannot spend at least 99.9% of the input amount");
+  });
+
+  it("enforces the conservative 99.9% utilization boundary exactly", async () => {
+    const minimumSpent = 999_000_000_000_000_000n;
+    const accepted = offlineRegistry({ spentBaseAmount: minimumSpent }).registry;
+    const quote = await accepted.action("clober", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected Query");
+    expect(quote.data).toMatchObject({ estimatedAmountSpent: "0.999" });
+
+    const rejected = offlineRegistry({ spentBaseAmount: minimumSpent - 1n }).registry;
+    await expect(
+      rejected.action("clober", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("cannot spend at least 99.9% of the input amount");
+  });
+
+  it("rejects a non-zero small quote when whole-unit dust exceeds the policy", async () => {
+    const { registry } = offlineRegistry({
+      amountOut: 20n,
+      spentBaseAmount: 970_516_235_692_685n,
+    });
+    await expect(
+      registry.action("clober", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "0.001",
       }),
     ).rejects.toThrow("cannot spend at least 99.9% of the input amount");
   });
@@ -414,12 +452,7 @@ describe("Clober", () => {
       unitSize: 1_000_000_000_000n,
     });
     const take = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 9n);
-    const debit = erc20Transfer(
-      USDC_ADDRESS,
-      ACCOUNT,
-      CLOBER_BOOK_MANAGER_ADDRESS,
-      1_000_000n,
-    );
+    const debit = erc20Transfer(USDC_ADDRESS, ACCOUNT, CLOBER_BOOK_MANAGER_ADDRESS, 1_000_000n);
     const credit = nativeTransfer(CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
     const changes = [take, debit, credit] as const;
     const receipt = registry.parseReceipt(capability, changes);
@@ -475,9 +508,14 @@ describe("Clober", () => {
     const first = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, -12, 2n);
     const second = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, -13, 3n);
     const debit = nativeTransfer(ACCOUNT, CLOBER_CONTROLLER_ADDRESS, 1_000_000_000_000_000_000n);
+    const settledInput = nativeTransfer(
+      CLOBER_CONTROLLER_ADDRESS,
+      CLOBER_BOOK_MANAGER_ADDRESS,
+      1_000_000_000_000_000_000n,
+    );
     const credit = erc20Transfer(USDC_ADDRESS, CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
 
-    const receipt = registry.parseReceipt(capability, [debit, first, second, credit]);
+    const receipt = registry.parseReceipt(capability, [debit, first, second, settledInput, credit]);
     expect(receipt.outcome).toMatchObject({
       fills: [
         { bookId: expectedBookId.toString(), tick: "-12", unit: "2" },
@@ -489,9 +527,116 @@ describe("Clober", () => {
         debit,
         first,
         takeChange(expectedBookId + 1n, CLOBER_CONTROLLER_ADDRESS, -13, 3n),
+        settledInput,
         credit,
       ]),
     ).toThrow("contains multiple book IDs");
+  });
+
+  it("binds native settlement evidence to the curated market, user, and contracts", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await registry.action("clober", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+    const expectedBookId = bookId({ base: zeroAddress, quote: USDC_ADDRESS, unitSize: 1n });
+    const take = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 1n);
+    const input = nativeTransfer(ACCOUNT, CLOBER_CONTROLLER_ADDRESS, 1_000_000n);
+    const settledInput = nativeTransfer(
+      CLOBER_CONTROLLER_ADDRESS,
+      CLOBER_BOOK_MANAGER_ADDRESS,
+      999_000n,
+    );
+    const fullySettledInput = nativeTransfer(
+      CLOBER_CONTROLLER_ADDRESS,
+      CLOBER_BOOK_MANAGER_ADDRESS,
+      1_000_000n,
+    );
+    const output = erc20Transfer(USDC_ADDRESS, CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
+    const refund = nativeTransfer(CLOBER_CONTROLLER_ADDRESS, ACCOUNT, 1_000n);
+
+    expect(() =>
+      registry.parseReceipt(capability, [input, take, settledInput, output, refund]),
+    ).not.toThrow();
+
+    const invalidCases: readonly {
+      name: string;
+      changes: readonly Change[];
+      error: string;
+    }[] = [
+      {
+        name: "missing output",
+        changes: [input, take, fullySettledInput],
+        error: "requires output-token settlement",
+      },
+      {
+        name: "wrong output token",
+        changes: [
+          input,
+          take,
+          fullySettledInput,
+          erc20Transfer(OTHER_TOKEN, CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n),
+        ],
+        error: "requires output-token settlement",
+      },
+      {
+        name: "uncurated BookId",
+        changes: [
+          input,
+          takeChange(expectedBookId + 1n, CLOBER_CONTROLLER_ADDRESS, 123, 1n),
+          fullySettledInput,
+          output,
+        ],
+        error: "not in the curated market catalog",
+      },
+      {
+        name: "wrong output participant",
+        changes: [
+          input,
+          take,
+          fullySettledInput,
+          erc20Transfer(USDC_ADDRESS, CLOBER_BOOK_MANAGER_ADDRESS, OTHER_TOKEN, 2_000_000n),
+        ],
+        error: "requires output-token settlement",
+      },
+      {
+        name: "zero-value input",
+        changes: [
+          nativeTransfer(ACCOUNT, CLOBER_CONTROLLER_ADDRESS, 0n),
+          take,
+          fullySettledInput,
+          output,
+        ],
+        error: "requires non-zero settlement amounts",
+      },
+      {
+        name: "unrelated extra transfer",
+        changes: [
+          input,
+          take,
+          fullySettledInput,
+          output,
+          erc20Transfer(OTHER_TOKEN, ACCOUNT, CLOBER_BOOK_MANAGER_ADDRESS, 1n),
+        ],
+        error: "contains an unexpected token or participant",
+      },
+      {
+        name: "unbalanced native refund",
+        changes: [
+          input,
+          take,
+          settledInput,
+          output,
+          nativeTransfer(CLOBER_CONTROLLER_ADDRESS, ACCOUNT, 999n),
+        ],
+        error: "native input and refund amounts do not balance",
+      },
+    ];
+    for (const { name, changes, error } of invalidCases) {
+      expect(() => registry.parseReceipt(capability, changes), name).toThrow(error);
+    }
   });
 
   it("requires at least one BookManager Take event", async () => {
@@ -519,15 +664,13 @@ describe("Clober", () => {
     const expectedBookId = bookId({ base: zeroAddress, quote: USDC_ADDRESS, unitSize: 1n });
     const take = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 1n);
 
-    expect(() => registry.parseReceipt(capability, [take])).toThrow(
-      "requires input and output transfer settlements",
-    );
+    expect(() => registry.parseReceipt(capability, [take])).toThrow("requires one native input");
     expect(() =>
       registry.parseReceipt(capability, [
         take,
         erc20Approval(USDC_ADDRESS, ACCOUNT, CLOBER_CONTROLLER_ADDRESS, 1n),
       ]),
-    ).toThrow("requires input and output transfer settlements");
+    ).toThrow("accepts only transfer settlements");
   });
 
   it("rejects a Take event whose user is not the Clober Controller", async () => {
@@ -542,6 +685,22 @@ describe("Clober", () => {
     expect(() =>
       registry.parseReceipt(capability, [takeChange(expectedBookId, ACCOUNT, 123, 1n)]),
     ).toThrow("Take user is not the Controller");
+  });
+
+  it("rejects zero-unit Take events", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await registry.action("clober", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+    const expectedBookId = bookId({ base: zeroAddress, quote: USDC_ADDRESS, unitSize: 1n });
+    expect(() =>
+      registry.parseReceipt(capability, [
+        takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 0n),
+      ]),
+    ).toThrow("Take must contain a non-zero unit amount");
   });
 });
 
