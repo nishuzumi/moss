@@ -1,0 +1,22 @@
+{
+  "name": "@themoss/example-x402-qopt",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "server": "tsx src/server.ts",
+    "client": "tsx src/client.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"examples are exercised by package tests\" && exit 0",
+    "build": "echo \"examples are not built\" && exit 0"
+  },
+  "dependencies": {
+    "@themoss/x402-qopt-adapter": "workspace:*",
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.0"
+  }
+}
