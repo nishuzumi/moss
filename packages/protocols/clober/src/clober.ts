@@ -20,7 +20,7 @@ import {
   TokenReference,
 } from "@themoss/core";
 import { ERC20 } from "@themoss/erc";
-import { WMON_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
 import {
   decodeEventLog,
   encodeAbiParameters,
@@ -34,7 +34,7 @@ import { CloberBookManagerAbi, CloberBookViewerAbi, CloberControllerAbi } from "
 import type { CloberFill, CloberQuote, CloberSwapOutcome } from "./types.js";
 
 // Official Monad mainnet deployments:
-// https://github.com/clober-dex/v2-sdk/blob/main/src/constants/chain-configs/addresses.ts
+// https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/constants/chain-configs/addresses.ts
 // (retrieved 2026-07-16). Live tests verify deployed bytecode and relationships.
 export const CLOBER_CONTROLLER_ADDRESS = "0x19b68a2b909D96c05B623050C276FBD457De8e83" as const;
 export const CLOBER_BOOK_MANAGER_ADDRESS = "0x6657d192273731C3cAc646cc82D5F28D0CBE8CCC" as const;
@@ -42,12 +42,17 @@ export const CLOBER_BOOK_VIEWER_ADDRESS = "0xe424c211e2Ed8a5B6d1C57FA493C4171556
 
 const DEFAULT_SLIPPAGE_BPS = 50;
 const MAX_SLIPPAGE_BPS = 5_000;
+// Clober's Monad defaults use zero hooks and quote-side maker 0% / taker 0.01% fees.
+// Source: https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/constants/chain-configs/fee.ts
 const MAKER_POLICY = 8_888_608;
 const TAKER_POLICY = 8_888_708;
+// Moss rejects materially partial exact-input quotes while allowing book-unit dust.
 const MIN_INPUT_UTILIZATION_BPS = 9_990;
 const NATIVE_UNIT_SIZE = 1_000_000_000_000n;
 const UINT64_MAX = (1n << 64n) - 1n;
 const UINT192_MASK = (1n << 192n) - 1n;
+// Matches the official SDK's 20-minute market-order deadline window.
+// Source: https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/utils/time.ts
 const SWAP_DEADLINE_SECONDS = 20 * 60;
 
 const CloberSlippage = BasisPoints.max(MAX_SLIPPAGE_BPS).describe(
@@ -81,6 +86,20 @@ type BookKey = {
   takerPolicy: number;
 };
 
+type SupportedMarket = {
+  tokenIn: TokenRef;
+  tokenOut: TokenRef;
+  inputDecimals: number;
+  outputDecimals: number;
+};
+
+// Moss v1 curated catalog, including reviewed display precision. Each direction
+// is revalidated against BookManager; canonical shape alone is not eligibility.
+const SUPPORTED_MARKETS: readonly SupportedMarket[] = [
+  { tokenIn: NATIVE, tokenOut: USDC_ADDRESS, inputDecimals: 18, outputDecimals: 6 },
+  { tokenIn: USDC_ADDRESS, tokenOut: NATIVE, inputDecimals: 6, outputDecimals: 18 },
+];
+
 type PreparedSwap = {
   amountIn: bigint;
   spentAmountIn: bigint;
@@ -101,7 +120,7 @@ type PreparedSwap = {
 @Protocol({
   name: "clober",
   category: "dex",
-  description: "Clober V2 exact-input swaps over canonical verified Monad order books.",
+  description: "Clober V2 exact-input swaps over curated canonical Monad order books.",
   contracts: {
     controller: { abi: CloberControllerAbi, addr: CLOBER_CONTROLLER_ADDRESS },
     bookManager: { abi: CloberBookManagerAbi, addr: CLOBER_BOOK_MANAGER_ADDRESS },
@@ -117,7 +136,7 @@ export class Clober {
 
   quote(params: CloberSwapParams, ctx: ActionCtx): Promise<CloberQuote>;
   @Query({
-    intent: "Quote a canonical Clober exact-input swap",
+    intent: "Quote a curated Clober exact-input swap",
     params: swapParams,
     tags: ["clob"],
   })
@@ -133,7 +152,7 @@ export class Clober {
 
   swap(params: CloberSwapParams, ctx: ActionCtx): Promise<CapabilityResult>;
   @Capability<Clober, typeof swapParams>({
-    intent: "Swap a fixed input through the canonical Clober order book",
+    intent: "Swap a fixed input through a curated Clober order book",
     verb: "swap",
     params: swapParams,
     receipt: "swapReceipt",
@@ -149,7 +168,18 @@ export class Clober {
         owner: ctx.account,
         spender: this.controller.address,
       });
-      if (BigInt(allowance) < prepared.amountIn) {
+      const currentAllowance = BigInt(allowance);
+      if (currentAllowance < prepared.amountIn) {
+        // Reset a non-zero insufficient allowance first for USDT-style ERC-20s.
+        if (currentAllowance > 0n) {
+          children.push(
+            await this.erc20.approve({
+              token: params.tokenIn,
+              spender: this.controller.address,
+              amount: "0",
+            }),
+          );
+        }
         children.push(
           await this.erc20.approve({
             token: params.tokenIn,
@@ -234,14 +264,19 @@ export class Clober {
     };
   }
 
+  /**
+   * Derives Clober's zero-hook default BookId, verifies the exact BookKey on-chain,
+   * and quotes through BookViewer. Controller.spend returns no quote value; the
+   * pinned SDK uses this same Viewer result to build spend, and an e2e test checks
+   * the quoted zero-slippage floor against the simulated Controller settlement.
+   * Sources: v2-sdk calls/market/market.ts and v2-periphery's
+   * test/unit/controller/ControllerSpendOrder.t.sol at the pinned README revisions.
+   */
   async #prepareSwap(params: SwapParams): Promise<PreparedSwap> {
     if (sameToken(params.tokenIn, params.tokenOut)) {
       throw new ParameterError("tokenIn and tokenOut must differ");
     }
-    const [inputDecimals, outputDecimals] = await Promise.all([
-      this.#tokenDecimals(params.tokenIn),
-      this.#tokenDecimals(params.tokenOut),
-    ]);
+    const { inputDecimals, outputDecimals } = supportedMarket(params.tokenIn, params.tokenOut);
     const amountIn = parseExactUnits(params.amountIn, inputDecimals);
     const unitSize = cloberUnitSize(params.tokenOut, outputDecimals);
     const key: BookKey = {
@@ -290,17 +325,24 @@ export class Clober {
       order,
     };
   }
-
-  async #tokenDecimals(token: TokenRef): Promise<number> {
-    if (token === NATIVE) return 18;
-    const { decimals } = await this.erc20.metadata({ token });
-    if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-      throw new Error(`Clober token ${token} returned invalid decimals`);
-    }
-    return decimals;
-  }
 }
 
+function supportedMarket(tokenIn: TokenRef, tokenOut: TokenRef): SupportedMarket {
+  const market = SUPPORTED_MARKETS.find(
+    (candidate) =>
+      sameToken(candidate.tokenIn, tokenIn) && sameToken(candidate.tokenOut, tokenOut),
+  );
+  if (!market) {
+    throw new ParameterError("Clober v1 supports only native MON/USDC markets");
+  }
+  return market;
+}
+
+/**
+ * Mirrors Clober SDK unit-size selection: native MON and WMON use 1e12;
+ * other quote tokens use 10^max(decimals - 6, 0).
+ * Source: https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/utils/unit-size.ts
+ */
 function cloberUnitSize(quote: TokenRef, decimals: number): bigint {
   const unitSize =
     quote === NATIVE || sameAddress(quote, WMON_ADDRESS)
@@ -312,6 +354,10 @@ function cloberUnitSize(quote: TokenRef, decimals: number): bigint {
   return unitSize;
 }
 
+/**
+ * Mirrors Clober's BookId: the low 192 bits of keccak256(abi.encode(BookKey)).
+ * Source: https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/entities/book/utils/book-id.ts
+ */
 function encodeBookId(key: BookKey): bigint {
   const encoded = encodeAbiParameters(
     [

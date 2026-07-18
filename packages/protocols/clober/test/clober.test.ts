@@ -9,7 +9,7 @@ import {
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime, USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
+import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -30,6 +30,7 @@ import {
   CLOBER_BOOK_VIEWER_ADDRESS,
   CLOBER_CONTROLLER_ADDRESS,
   Clober,
+  type CloberSwapOutcome,
 } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
@@ -81,33 +82,69 @@ describe("Clober", () => {
   });
 
   it("rejects amountIn values that require token-unit rounding", async () => {
-    const { registry } = offlineRegistry({ base: TOKEN_IN, inputDecimals: 6 });
+    const { registry } = offlineRegistry({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      inputDecimals: 6,
+      outputDecimals: 18,
+      unitSize: 1_000_000_000_000n,
+    });
     for (const amountIn of ["0.0000009", "1.0000001", "1.0000009"]) {
       await expect(
         registry.action("clober", "quote", ACCOUNT, {
-          tokenIn: TOKEN_IN,
-          tokenOut: USDC_ADDRESS,
+          tokenIn: USDC_ADDRESS,
+          tokenOut: NATIVE,
           amountIn,
         }),
       ).rejects.toThrow("cannot be represented exactly with tokenIn's 6 decimals");
     }
 
     const exact = await registry.action("clober", "quote", ACCOUNT, {
-      tokenIn: TOKEN_IN,
-      tokenOut: USDC_ADDRESS,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
       amountIn: "1.0000000",
     });
     if (exact.kind !== "query") throw new Error("expected Query");
     expect(exact.data).toMatchObject({ amountIn: "1", estimatedAmountSpent: "1" });
   });
 
+  it("uses curated token decimals without requiring optional ERC-20 metadata", async () => {
+    const { registry, readContract } = offlineRegistry({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      outputDecimals: 18,
+      unitSize: 1_000_000_000_000n,
+    });
+    const quote = await registry.action("clober", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected Query");
+
+    const functions = readContract.mock.calls.map(([call]) => call.functionName);
+    expect(functions).not.toContain("decimals");
+    expect(functions).not.toContain("name");
+    expect(functions).not.toContain("symbol");
+  });
+
   it("builds an ERC-20 approval followed by exact Controller.spend calldata", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
-    const expectedBookId = bookId({ base: TOKEN_IN, quote: USDC_ADDRESS, unitSize: 1n });
-    const { registry } = offlineRegistry({ base: TOKEN_IN });
+    const expectedBookId = bookId({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      unitSize: 1_000_000_000_000n,
+    });
+    const { registry } = offlineRegistry({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      inputDecimals: 6,
+      outputDecimals: 18,
+      unitSize: 1_000_000_000_000n,
+    });
     const capability = await registry.action("clober", "swap", ACCOUNT, {
-      tokenIn: TOKEN_IN,
-      tokenOut: USDC_ADDRESS,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
       amountIn: "1.5",
     });
     if (capability.kind !== "capability") throw new Error("expected Capability");
@@ -116,7 +153,7 @@ describe("Clober", () => {
 
     expect(decodeFunctionData({ abi: ERC20Abi, data: approval.transaction.data })).toEqual({
       functionName: "approve",
-      args: [CLOBER_CONTROLLER_ADDRESS, 1_500_000_000_000_000_000n],
+      args: [CLOBER_CONTROLLER_ADDRESS, 1_500_000n],
     });
     const decoded = decodeFunctionData({ abi: CloberControllerAbi, data: swap.transaction.data });
     expect(decoded).toEqual({
@@ -126,12 +163,12 @@ describe("Clober", () => {
           {
             id: expectedBookId,
             limitPrice: 0n,
-            baseAmount: 1_500_000_000_000_000_000n,
+            baseAmount: 1_500_000n,
             minQuoteAmount: 1_990_000n,
             hookData: zeroHash,
           },
         ],
-        [TOKEN_IN, USDC_ADDRESS],
+        [USDC_ADDRESS],
         [],
         1_700_001_200n,
       ],
@@ -139,14 +176,62 @@ describe("Clober", () => {
     expect(BigInt(swap.transaction.value)).toBe(0n);
   });
 
-  it("skips ERC-20 approval when the current allowance covers amountIn", async () => {
-    const { registry, readContract } = offlineRegistry({
-      base: TOKEN_IN,
-      allowance: 1_500_000_000_000_000_000n,
+  it("zero-resets a non-zero insufficient ERC-20 allowance before approving amountIn", async () => {
+    const { registry } = offlineRegistry({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      inputDecimals: 6,
+      outputDecimals: 18,
+      unitSize: 1_000_000_000_000n,
+      allowance: 500_000n,
     });
     const capability = await registry.action("clober", "swap", ACCOUNT, {
-      tokenIn: TOKEN_IN,
-      tokenOut: USDC_ADDRESS,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      amountIn: "1.5",
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+    const [reset, approval, swap] = flattenCapabilityTree(capability);
+    if (!reset || !approval || !swap) throw new Error("missing Clober transactions");
+
+    expect(flattenCapabilityTree(capability)).toHaveLength(3);
+    expect(reset.capability).toMatchObject({
+      protocol: "erc20",
+      method: "approve",
+      receipt: "approveReceipt",
+      params: { amount: "0" },
+    });
+    expect(approval.capability).toMatchObject({
+      protocol: "erc20",
+      method: "approve",
+      receipt: "approveReceipt",
+      params: { amount: "1500000" },
+    });
+    expect(decodeFunctionData({ abi: ERC20Abi, data: reset.transaction.data })).toEqual({
+      functionName: "approve",
+      args: [CLOBER_CONTROLLER_ADDRESS, 0n],
+    });
+    expect(decodeFunctionData({ abi: ERC20Abi, data: approval.transaction.data })).toEqual({
+      functionName: "approve",
+      args: [CLOBER_CONTROLLER_ADDRESS, 1_500_000n],
+    });
+    expect(
+      decodeFunctionData({ abi: CloberControllerAbi, data: swap.transaction.data }),
+    ).toMatchObject({ functionName: "spend" });
+  });
+
+  it("skips ERC-20 approval when the current allowance covers amountIn", async () => {
+    const { registry, readContract } = offlineRegistry({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      inputDecimals: 6,
+      outputDecimals: 18,
+      unitSize: 1_000_000_000_000n,
+      allowance: 1_500_000n,
+    });
+    const capability = await registry.action("clober", "swap", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
       amountIn: "1.5",
     });
     if (capability.kind !== "capability") throw new Error("expected Capability");
@@ -159,7 +244,7 @@ describe("Clober", () => {
     ).toMatchObject({ functionName: "spend" });
     expect(readContract).toHaveBeenCalledWith(
       expect.objectContaining({
-        address: TOKEN_IN,
+        address: USDC_ADDRESS,
         functionName: "allowance",
         args: [ACCOUNT, CLOBER_CONTROLLER_ADDRESS],
       }),
@@ -190,18 +275,19 @@ describe("Clober", () => {
   it("builds and parses the ERC-20 to native MON direction", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     const expectedBookId = bookId({
-      base: TOKEN_IN,
+      base: USDC_ADDRESS,
       quote: zeroAddress,
       unitSize: 1_000_000_000_000n,
     });
     const { registry } = offlineRegistry({
-      base: TOKEN_IN,
+      base: USDC_ADDRESS,
       quote: zeroAddress,
+      inputDecimals: 6,
       outputDecimals: 18,
       unitSize: 1_000_000_000_000n,
     });
     const capability = await registry.action("clober", "swap", ACCOUNT, {
-      tokenIn: TOKEN_IN,
+      tokenIn: USDC_ADDRESS,
       tokenOut: NATIVE,
       amountIn: "1",
     });
@@ -210,7 +296,7 @@ describe("Clober", () => {
     if (!approval || !swap) throw new Error("missing Clober transactions");
     expect(decodeFunctionData({ abi: ERC20Abi, data: approval.transaction.data })).toEqual({
       functionName: "approve",
-      args: [CLOBER_CONTROLLER_ADDRESS, 1_000_000_000_000_000_000n],
+      args: [CLOBER_CONTROLLER_ADDRESS, 1_000_000n],
     });
     const decoded = decodeFunctionData({ abi: CloberControllerAbi, data: swap.transaction.data });
     expect(decoded).toEqual({
@@ -220,12 +306,12 @@ describe("Clober", () => {
           {
             id: expectedBookId,
             limitPrice: 0n,
-            baseAmount: 1_000_000_000_000_000_000n,
+            baseAmount: 1_000_000n,
             minQuoteAmount: 1_990_000n,
             hookData: zeroHash,
           },
         ],
-        [TOKEN_IN],
+        [USDC_ADDRESS],
         [],
         1_700_001_200n,
       ],
@@ -234,41 +320,31 @@ describe("Clober", () => {
 
     const take = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 2n);
     const debit = erc20Transfer(
-      TOKEN_IN,
+      USDC_ADDRESS,
       ACCOUNT,
       CLOBER_BOOK_MANAGER_ADDRESS,
-      1_000_000_000_000_000_000n,
+      1_000_000n,
     );
     const credit = nativeTransfer(CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
     expect(registry.parseReceipt(capability, [take, debit, credit]).outcome).toMatchObject({
       fills: [{ bookId: expectedBookId.toString() }],
       settlements: [
-        { operation: "transfer", token: TOKEN_IN, from: ACCOUNT },
+        { operation: "transfer", token: USDC_ADDRESS, from: ACCOUNT },
         { operation: "transfer", token: NATIVE, to: ACCOUNT, amount: "2000000" },
       ],
     });
   });
 
-  it("uses the fixed 1e12 unit size for canonical WMON quote books", async () => {
-    const expectedBookId = bookId({
-      base: TOKEN_IN,
-      quote: WMON_ADDRESS,
-      unitSize: 1_000_000_000_000n,
-    });
-    const { registry, readContract } = offlineRegistry({
-      base: TOKEN_IN,
-      quote: WMON_ADDRESS,
-      outputDecimals: 6,
-      unitSize: 1_000_000_000_000n,
-    });
-    await registry.action("clober", "quote", ACCOUNT, {
-      tokenIn: TOKEN_IN,
-      tokenOut: WMON_ADDRESS,
-      amountIn: "1",
-    });
-    expect(readContract).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: "getBookKey", args: [expectedBookId] }),
-    );
+  it("rejects markets outside the curated catalog before any chain read", async () => {
+    const { registry, readContract } = offlineRegistry({ base: TOKEN_IN, quote: OTHER_TOKEN });
+    await expect(
+      registry.action("clober", "quote", ACCOUNT, {
+        tokenIn: TOKEN_IN,
+        tokenOut: OTHER_TOKEN,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("supports only native MON/USDC markets");
+    expect(readContract).not.toHaveBeenCalled();
   });
 
   it("rejects an on-chain BookKey mismatch before quoting or building calldata", async () => {
@@ -319,22 +395,32 @@ describe("Clober", () => {
   });
 
   it("parses Take fills and delegates every settlement with exact Change references", async () => {
-    const { registry } = offlineRegistry({ base: TOKEN_IN });
+    const { registry } = offlineRegistry({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      inputDecimals: 6,
+      outputDecimals: 18,
+      unitSize: 1_000_000_000_000n,
+    });
     const capability = await registry.action("clober", "swap", ACCOUNT, {
-      tokenIn: TOKEN_IN,
-      tokenOut: USDC_ADDRESS,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
       amountIn: "1",
     });
     if (capability.kind !== "capability") throw new Error("expected Capability");
-    const expectedBookId = bookId({ base: TOKEN_IN, quote: USDC_ADDRESS, unitSize: 1n });
+    const expectedBookId = bookId({
+      base: USDC_ADDRESS,
+      quote: zeroAddress,
+      unitSize: 1_000_000_000_000n,
+    });
     const take = takeChange(expectedBookId, CLOBER_CONTROLLER_ADDRESS, 123, 9n);
     const debit = erc20Transfer(
-      TOKEN_IN,
+      USDC_ADDRESS,
       ACCOUNT,
       CLOBER_BOOK_MANAGER_ADDRESS,
-      1_000_000_000_000_000_000n,
+      1_000_000n,
     );
-    const credit = erc20Transfer(USDC_ADDRESS, CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
+    const credit = nativeTransfer(CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
     const changes = [take, debit, credit] as const;
     const receipt = registry.parseReceipt(capability, changes);
 
@@ -353,14 +439,14 @@ describe("Clober", () => {
       settlements: [
         {
           operation: "transfer",
-          token: TOKEN_IN,
+          token: USDC_ADDRESS,
           from: ACCOUNT,
           to: CLOBER_BOOK_MANAGER_ADDRESS,
-          amount: "1000000000000000000",
+          amount: "1000000",
         },
         {
           operation: "transfer",
-          token: USDC_ADDRESS,
+          token: NATIVE,
           from: CLOBER_BOOK_MANAGER_ADDRESS,
           to: ACCOUNT,
           amount: "2000000",
@@ -369,7 +455,7 @@ describe("Clober", () => {
     });
     expect(receipt.changes[1]).toMatchObject({
       kind: "receipt",
-      outcome: [expect.objectContaining({ operation: "transfer", token: TOKEN_IN })],
+      outcome: [expect.objectContaining({ operation: "transfer", token: USDC_ADDRESS })],
     });
     expect(receipt.changes.map(firstChange)).toEqual(changes);
     expect(receipt.changes.map(firstChange)[0]).toBe(take);
@@ -497,15 +583,28 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("simulates native MON to USDC with zero Warnings", { timeout: 180_000 }, async () => {
+  it("matches a zero-slippage Viewer quote in Controller.spend simulation", {
+    timeout: 180_000,
+  }, async () => {
     const runtime = await monadRuntime();
     const registry = new Registry(runtime).use(Clober);
     const capability = await registry.action("clober", "swap", ACCOUNT, {
       tokenIn: NATIVE,
       tokenOut: USDC_ADDRESS,
       amountIn: "1",
+      slippage: 0,
     });
     if (capability.kind !== "capability") throw new Error("expected Capability");
+    const [swap] = flattenCapabilityTree(capability);
+    if (!swap) throw new Error("missing Clober transaction");
+    const decoded = decodeFunctionData({
+      abi: CloberControllerAbi,
+      data: swap.transaction.data,
+    });
+    if (decoded.functionName !== "spend") throw new Error("expected Controller.spend");
+    const viewerAmountOut = decoded.args[0][0]?.minQuoteAmount;
+    if (viewerAmountOut === undefined) throw new Error("missing Clober order");
+
     const outcome = await createTraceSimulator(runtime, {
       receipt: (node, changes) => registry.parseReceipt(node, changes),
     }).simulate(capability);
@@ -515,6 +614,22 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
       operation: "swap",
       protocol: "clober",
     });
+    const receipt = outcome.results[0]?.receipt;
+    if (!receipt) throw new Error("missing Clober receipt");
+    const swapOutcome = receipt.outcome as CloberSwapOutcome;
+    const actualAmountOut = swapOutcome.settlements.reduce((sum, settlement) => {
+      if (
+        settlement.operation === "transfer" &&
+        settlement.token !== NATIVE &&
+        settlement.token.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
+        settlement.to.toLowerCase() === ACCOUNT.toLowerCase()
+      ) {
+        return sum + BigInt(settlement.amount);
+      }
+      return sum;
+    }, 0n);
+    expect(viewerAmountOut).toBeGreaterThan(0n);
+    expect(actualAmountOut).toBeGreaterThanOrEqual(viewerAmountOut);
   });
 
   it("quotes the reverse USDC to native MON direction", { timeout: 60_000 }, async () => {
@@ -561,8 +676,6 @@ function offlineRegistry(options: OfflineOptions = {}) {
       functionName: string;
       args?: readonly unknown[];
     }) => {
-      if (functionName === "name") return "Mock Token";
-      if (functionName === "symbol") return "MOCK";
       if (functionName === "decimals") {
         return address.toLowerCase() === base.toLowerCase() ? inputDecimals : outputDecimals;
       }
