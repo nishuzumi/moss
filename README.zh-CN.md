@@ -49,6 +49,8 @@ pnpm test:offline
 
 [新手上路](./docs/getting-started.zh-CN.md)会逐步打开每个阶段，说明 MCP 配置，并最终带你创建一个 Protocol 包。
 
+[常见问题（FAQ）](./docs/faq.zh-CN.md)整理了中文社区新人最常问的问题。
+
 ### 作为 MCP server 使用
 
 构建仓库后，把 stdio server 加入 MCP client：
