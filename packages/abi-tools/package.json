@@ -1,0 +1,35 @@
+{
+  "name": "@themoss/abi-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build-time ABI tooling for Moss: fetch verified Monad mainnet ABIs from the explorer API and render typed as-const modules",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "moss-fetch-abi": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/bin.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "fetch-abi": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "abitype": "^1.2.3"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}

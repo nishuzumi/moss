@@ -25,6 +25,18 @@ Every ABI under `src/abis/` declares one origin:
 
 Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset.
 
+### Fetch an explorer ABI
+
+Export an [Etherscan API key](https://info.monadscan.com/myapikey/), then run the repository command:
+
+```bash
+export MONADSCAN_API_KEY=…
+pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter02 \
+  > packages/protocols/myprotocol/src/abis/swap-router-02.ts
+```
+
+The command calls the official Etherscan V2 ABI endpoint for Monad mainnet, prints the complete verified ABI as `export const swapRouter02Abi = [...] as const`, and stamps its public Monadscan source URL and UTC retrieval date. It writes TypeScript only to stdout and diagnostics only to stderr.
+
 Every fixed address cites a canonical source and has an on-chain bytecode check. Fixed token constants additionally verify expected metadata. Dynamic pools and tokens come from chain state and do not become global constants.
 
 ## 2. Export a self-describing Protocol

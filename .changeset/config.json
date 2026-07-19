@@ -17,6 +17,7 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
+    "@themoss/abi-tools",
     "@themoss/example-simple-flow",
     "@themoss/example-agent-swap",
     "@themoss/protocol-template"

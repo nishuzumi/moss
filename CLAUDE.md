@@ -55,7 +55,8 @@
   trace mechanics and ordered Change extraction; `erc` owns address-free
   standards; `system` owns the Monad Runtime and shared verified constants;
   `protocols/*` own protocol semantics and deployments; `mcp-server` owns only
-  transport and composition.
+  transport and composition; `abi-tools` owns build-time ABI retrieval and
+  rendering tooling, never runtime behavior.
 - Protocols must remain self-describing decorated classes discovered from
   selected top-level exports, with dependencies declared and injected. Reject
   import-time registration, separate registration objects, untyped Handles,
@@ -106,7 +107,9 @@
   ordered Change extraction; `erc` owns address-free standard semantics;
   `system` owns Monad Runtime and verified official constants;
   `protocols/*` own protocol ABIs, Capabilities, Queries, dependencies, and
-  Receipts; `mcp-server` owns transport and application composition only.
+  Receipts; `mcp-server` owns transport and application composition only;
+  `abi-tools` is a private build-time package owning explorer ABI fetching
+  (`pnpm fetch-abi`) and typed as-const rendering.
 - Protocol packages export self-describing `@Protocol` classes. Registry scans
   selected top-level module exports, recursively registers declared Protocol
   dependencies, and injects typed instances. There is no import-time

@@ -12,7 +12,8 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "fetch-abi": "pnpm --filter @themoss/abi-tools fetch-abi"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",

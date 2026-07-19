@@ -3,7 +3,7 @@
 ABIs are load-bearing security artifacts — one wrong function signature means wrong calldata means wrong fund flows. Every ABI in the repo lives in the package's `src/abis/` folder with an **ABI origin** header naming exactly one provenance tier:
 
 1. **compiled** — generated from contract source in the package (foundry project in `contracts/`, `pnpm gen:abis` runs `forge build` and emits the TS with an auto-stamped header: source file, solc version, date). The strongest tier; used by `@themoss/erc` for the ERC standard interfaces.
-2. **explorer** — pulled from a block explorer's *verified* contract page; header records the URL and retrieval date.
+2. **explorer** — pulled from a block explorer's *verified* contract page; header records the URL and retrieval date. The root `pnpm fetch-abi` command uses the official Etherscan V2 endpoint for Monad mainnet (`chainid=143`, `action=getabi`) and emits the full ABI as typed `as const` TypeScript; see [Protocol onboarding](../protocol-onboarding.md#fetch-an-explorer-abi).
 3. **vendored** — taken from a third-party verifiable source (official SDK on npm, protocol repo). Hand-copying is NOT vendoring: the package commits upstream files **verbatim** in `abis-src/` and deterministically regenerates the full TS artifact, so reviewers diff against upstream instead of trusting a transcription. Follow `dist-tags.latest` with a 7-day release-age guard, never highest-semver; the header records package@version, tarball sha256, and on-chain verification.
 
 If none of the three is possible, the protocol does not get an adapter.
