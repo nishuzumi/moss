@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {
