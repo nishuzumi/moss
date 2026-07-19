@@ -39,6 +39,11 @@ pnpm --filter @themoss/example-simple-flow wrap
 
 # quote and simulate a Kuru MON → USDC swap
 pnpm --filter @themoss/example-simple-flow swap
+
+# fetch a verified contract ABI from Monadscan (ADR 0007 "explorer" tier)
+# requires MONADSCAN_API_KEY — get one at https://info.monadscan.com/myapikey/
+pnpm fetch-abi <contract-address> <exportName> \
+  > packages/protocols/myprotocol/src/abis/<name>.ts
 ```
 
 Run the test suite without live RPC calls:
@@ -134,7 +139,7 @@ Build must precede typecheck because workspace packages resolve generated declar
 | --- | --- |
 | [Getting started](./docs/getting-started.md) ([中文](./docs/getting-started.zh-CN.md)) | Run and develop with Moss step by step |
 | [MCP tool contracts](./docs/mcp-tools.md) | Inputs and outputs of the four MCP tools |
-| [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package |
+| [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package; [`pnpm fetch-abi`](./docs/protocol-onboarding.md#quickstart-abi-fetcher) for the `explorer` ABI tier |
 | [Agent safety rules](./docs/agent-skill.md) | Mandatory simulation and intent-alignment rules |
 | [Agent swap example](./examples/agent-swap/README.md) | Separate Agent and signer on a local Monad fork |
 | [Architecture decisions](./docs/adr/) | Current design decisions and trade-offs |

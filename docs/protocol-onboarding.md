@@ -25,6 +25,43 @@ Every ABI under `src/abis/` declares one origin:
 
 Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset.
 
+### Quickstart: ABI fetcher (explorer tier)
+
+For a verified Monad mainnet contract, fetch the full ABI through the official Monadscan-supported Etherscan V2 endpoint and emit it as a typed `as const` export with the required origin header:
+
+```bash
+pnpm fetch-abi <contract-address> <exportName> \
+  > packages/protocols/myprotocol/src/abis/<name>.ts
+git diff packages/protocols/myprotocol/src/abis/<name>.ts
+```
+
+Get an API key at <https://info.monadscan.com/myapikey/>. The tool writes TypeScript to stdout and diagnostics to stderr; the tool does not own package layout, so redirect to the target file and review with `git diff`. One contract per invocation; no batching, no caching.
+
+### Proxy contracts (EIP-1967)
+
+If the target address is an upgradeable proxy, `pnpm fetch-abi <proxy-address>` returns the **proxy's own minimal ABI** (constructor, an `Upgraded` event, a few proxy lifecycle errors, and a delegate fallback) — not the implementation's ABI. That minimal ABI is useless for encoding calldata, so for proxy-deployed protocols you must pass the **implementation address** instead. The tool intentionally does not merge proxy + implementation ABIs (out of scope for issue #28).
+
+Find the implementation address, then fetch from it:
+
+```bash
+# Option A: foundry (recommended when available)
+cast implementation <proxy-address>
+# → <implementation-address>
+
+# Option B: read the EIP-1967 implementation slot directly
+cast storage <proxy-address> \
+  0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+
+# Option C: Monadscan web UI → contract page → "Read as Proxy" tab
+
+# Then fetch the implementation's ABI
+pnpm fetch-abi <implementation-address> <exportName> \
+  > packages/protocols/<protocol>/src/abis/<name>.ts
+git diff packages/protocols/<protocol>/src/abis/<name>.ts
+```
+
+You can spot a proxy fetch gone wrong by checking the entry-type counts: a healthy protocol ABI has many `function` entries; a proxy-only fetch has 0–1 functions plus an `Upgraded` event and a `fallback`.
+
 Every fixed address cites a canonical source and has an on-chain bytecode check. Fixed token constants additionally verify expected metadata. Dynamic pools and tokens come from chain state and do not become global constants.
 
 ## 2. Export a self-describing Protocol
