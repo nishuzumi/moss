@@ -39,6 +39,9 @@ pnpm --filter @themoss/example-simple-flow wrap
 
 # 报价并模拟一个 Kuru MON → USDC swap
 pnpm --filter @themoss/example-simple-flow swap
+
+# 导出 MONADSCAN_API_KEY 后，抓取一个已验证的完整 ABI（ADR 0007）
+pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter02
 ```
 
 离线运行测试：
@@ -134,7 +137,7 @@ workspace package 的类型来自构建产物，因此必须先 build 再 typech
 | --- | --- |
 | [新手上路](./docs/getting-started.zh-CN.md)（[English](./docs/getting-started.md)） | 逐步运行并开发 Moss |
 | [MCP 工具契约](./docs/mcp-tools.md) | 四个 MCP 工具的输入输出 |
-| [Protocol 接入指南](./docs/protocol-onboarding.md) | 开发并提交一个 Protocol 包 |
+| [Protocol 接入指南](./docs/protocol-onboarding.md) | 开发并提交一个 Protocol 包，包括获取已验证 ABI |
 | [Agent 安全规则](./docs/agent-skill.md) | 强制模拟与意图对齐规则 |
 | [Agent swap 示例](./examples/agent-swap/README.md) | 在本地 Monad fork 上分离 Agent 与签名方 |
 | [架构决策](./docs/adr/) | 当前设计与取舍 |

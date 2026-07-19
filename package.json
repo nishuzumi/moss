@@ -7,14 +7,13 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm test:scripts",
+    "test": "pnpm -r test",
     "test:offline": "MOSS_SKIP_E2E=1 pnpm test",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "changeset": "changeset",
-    "fetch-abi": "node --experimental-strip-types scripts/cli.ts",
-    "test:scripts": "node --experimental-strip-types --test scripts/fetch-abi.test.ts"
+    "fetch-abi": "pnpm --filter @themoss/abi-tools fetch-abi"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",
