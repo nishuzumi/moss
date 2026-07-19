@@ -1,4 +1,5 @@
 import {
+  type CapabilityNode,
   type Change,
   flattenCapabilityTree,
   type Hex,
@@ -7,11 +8,18 @@ import {
 } from "@themoss/core";
 import { ERC20Abi, WETH9Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
+import {
+  decodeFunctionData,
+  encodeAbiParameters,
+  encodeEventTopics,
+  formatUnits,
+  getAddress,
+} from "viem";
 import { describe, expect, it } from "vitest";
 import { AUSD_ADDRESS, monadRuntime, USDC_ADDRESS, WMON, WMON_ADDRESS } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+const RECEIVER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
 
 function depositChange(amount: bigint): Change {
@@ -110,6 +118,59 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad official token constants", (
       operation: "wrap",
       account: ACCOUNT,
       amount: "250000000000000000",
+    });
+  });
+
+  it("chains a live WMON wrap into a transfer", { timeout: 180_000 }, async () => {
+    const runtime = await monadRuntime();
+    const registry = new Registry(runtime).use(WMON);
+    const wrapAmount = 1_000_000_000_000n;
+    const initialBalance = await runtime.client.readContract({
+      address: WMON_ADDRESS,
+      abi: ERC20Abi,
+      functionName: "balanceOf",
+      args: [ACCOUNT],
+    });
+    const transferAmount = initialBalance + wrapAmount;
+    const wrap = await registry.action("wmon", "wrap", ACCOUNT, {
+      amount: formatUnits(wrapAmount, 18),
+    });
+    const transfer = await registry.action("erc20", "transfer", ACCOUNT, {
+      token: WMON_ADDRESS,
+      to: RECEIVER,
+      amount: formatUnits(transferAmount, 18),
+    });
+    if (wrap.kind !== "capability" || transfer.kind !== "capability") {
+      throw new Error("expected Capabilities");
+    }
+    const capability = {
+      ...transfer,
+      children: [wrap, ...transfer.children],
+    } satisfies CapabilityNode;
+    expect(() => registry.validateCapabilityTree(capability)).not.toThrow();
+    expect(flattenCapabilityTree(capability)).toHaveLength(2);
+
+    const outcome = await createTraceSimulator(runtime, {
+      receipt: (node, changes) => registry.parseReceipt(node, changes),
+    }).simulate(capability);
+
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.results.map(({ protocol, method }) => ({ protocol, method }))).toEqual([
+      { protocol: "wmon", method: "wrap" },
+      { protocol: "erc20", method: "transfer" },
+    ]);
+    expect(outcome.results.every(({ warnings }) => warnings.length === 0)).toBe(true);
+    expect(outcome.results[0]?.receipt?.outcome).toEqual({
+      operation: "wrap",
+      account: ACCOUNT,
+      amount: wrapAmount.toString(),
+    });
+    expect(outcome.results[1]?.receipt?.outcome).toEqual({
+      operation: "transfer",
+      token: WMON_ADDRESS.toLowerCase(),
+      from: ACCOUNT,
+      to: RECEIVER,
+      amount: transferAmount.toString(),
     });
   });
 });
