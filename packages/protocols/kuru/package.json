@@ -17,6 +17,7 @@
     "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:abi:online": "vitest run --config vitest.online.config.ts",
     "update:abis": "tsx scripts/update-abis.ts",
     "gen:abis": "tsx scripts/gen-abis.ts"
   },
@@ -26,6 +27,7 @@
     "@themoss/erc": "workspace:*"
   },
   "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
     "tsup": "^8.5.1",
     "typescript": "~5.9.0",
     "vitest": "^3.2.6",

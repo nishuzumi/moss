@@ -3,14 +3,12 @@ import { defineConfig } from "vitest/config";
 
 const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
+// The online explorer cross-check suite (pnpm test:abi:online). Kept apart
+// from the offline default so a missing MONADSCAN_API_KEY fails loudly here
+// without ever gating `pnpm test`.
 export default defineConfig({
-  // Stage-3 decorators: V8 cannot parse them natively yet, so the esbuild
-  // transform must lower them (ADR 0001 toolchain constraint). This is also
-  // why the repo pins vitest 3 — vite 8's oxc does not lower them.
   esbuild: { target: "es2022" },
-  // The keyed online explorer cross-check lives in test-online/ and runs only
-  // through vitest.online.config.ts (pnpm test:abi:online).
-  test: { include: ["test/**/*.test.ts"] },
+  test: { include: ["test-online/**/*.test.ts"] },
   resolve: {
     // Tests run against workspace sources, not dists, so a stale build can
     // never produce phantom failures.
@@ -19,6 +17,7 @@ export default defineConfig({
       "@themoss/simulator": src("../../simulator/src/index.ts"),
       "@themoss/erc": src("../../erc/src/index.ts"),
       "@themoss/system": src("../../system/src/index.ts"),
+      "@themoss/abi-tools": src("../../abi-tools/src/index.ts"),
     },
   },
 });

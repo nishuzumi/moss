@@ -2,7 +2,7 @@
   "name": "@themoss/abi-tools",
   "version": "0.0.0",
   "private": true,
-  "description": "Build-time ABI tooling for Moss: fetch verified Monad mainnet ABIs from the explorer API and render typed as-const modules",
+  "description": "Build-time ABI tooling for Moss: fetch verified Monad mainnet ABIs from the explorer API, compare deployed ABIs semantically, and render typed as-const modules",
   "license": "MIT",
   "type": "module",
   "bin": {

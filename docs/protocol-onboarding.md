@@ -23,7 +23,7 @@ Every ABI under `src/abis/` declares one origin:
 - `explorer`: retrieved from a verified-contract page with URL and date;
 - `vendored`: generated deterministically from committed full upstream artifacts with package version and tarball digest.
 
-Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset.
+Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset. A vendored ABI can additionally be cross-checked against the explorer-verified implementation behind the protocol's proxies: ship a `test:abi:online` script (the root command and the ABI cross-check workflow pick it up automatically) and build the suite from `@themoss/abi-tools` — `fetchAbi`, `compareDeployedAbi`, and the ERC-1967 helpers. See ADR 0007 and `packages/protocols/kuru` (`abis.json` + `test-online/`) for the reference implementation.
 
 ### Fetch an explorer ABI
 

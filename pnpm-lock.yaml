@@ -211,6 +211,9 @@ importers:
         specifier: ^2.54.3
         version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
+      '@themoss/abi-tools':
+        specifier: workspace:*
+        version: link:../../abi-tools
       '@themoss/simulator':
         specifier: workspace:*
         version: link:../../simulator

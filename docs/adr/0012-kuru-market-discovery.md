@@ -12,7 +12,7 @@ The Protocol implements the small HTTP request with the platform `fetch`; it doe
 
 The Kuru package owns the official `https://api.kuru.io` base URL. This protocol-specific service configuration does not enter Core, Runtime, or Capability parameters. Discovery failure, malformed responses, and failed on-chain verification stop quoting and Capability construction with an explicit error; there is no static-market fallback.
 
-The Kuru package also owns its fixed Router deployment and the private zero-address conversion used for native MON. Shared token addresses remain imports from `@themoss/system`; market addresses remain dynamic. The Router constant cites its official source and has an on-chain deployed-bytecode check.
+The Kuru package also owns its fixed Router deployment and the private zero-address conversion used for native MON. Shared token addresses remain imports from `@themoss/system`; market addresses remain dynamic. The Router constant cites its official source and has an on-chain deployed-bytecode check. The ABI cross-check manifest (`abis.json`, ADR 0007) pins the Router proxy's *implementation* address and the Router-reported market-template implementation for provenance verification only; they never enter runtime routing and do not weaken the dynamic-market rule.
 
 ## Considered Options
 
