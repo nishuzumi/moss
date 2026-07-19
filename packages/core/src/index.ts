@@ -17,6 +17,7 @@ export {
   verifyReceiptCoverage,
 } from "./framework.js";
 export { createHandle, type Handle, transaction } from "./handle.js";
+export { tokenMetadata } from "./observations.js";
 export {
   type ActionCtx,
   type Coordinate,
