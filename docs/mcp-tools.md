@@ -229,7 +229,7 @@ type TransactionSimulation = {
 };
 ```
 
-Core produces the MCP texts only after the complete recursive Receipt retains every exact input Change object with identical length and order. After a clean simulation, compare every ordered text with the user's original operation, assets, amounts, recipients, limits, approvals, and Protocol choice.
+Core produces the MCP texts only after the complete recursive Receipt retains every exact input Change object with identical length and order.A clean `simulate` response proves Receipt coverage, not user-intent alignment. Agents must run the post-simulation intent-alignment checklist before handing transactions to a signer. After a clean simulation, compare every ordered text with the user's original operation, assets, amounts, recipients, limits, approvals, and Protocol choice.
 
 ## Warnings
 

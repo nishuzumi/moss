@@ -189,6 +189,8 @@ A revert, trace failure, state-chaining failure, Receipt error, or coverage mism
 
 ## 9. Align structured Outcomes with intent
 
+Use the reusable checklist in [Agent safety rules](./agent-skill.md#post-simulation-intent-alignment-checklist), then apply the Kuru-specific checks below.
+
 Zero Warnings means every observed Change was parsed. It does not mean the result matches the user's request.
 
 For this swap, check the final structured Outcome for:
