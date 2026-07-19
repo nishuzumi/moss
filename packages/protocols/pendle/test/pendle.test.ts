@@ -32,6 +32,18 @@ describe("Pendle protocol", () => {
     expect(swap?.tags).toEqual(expect.arrayContaining(["yield", "pt"]));
   });
 
+  it("registers quote and markets as read-only queries", () => {
+    const registry = new Registry({ rpcUrl: "" } as MossRuntime).use(Pendle);
+    const byMethod = new Map(
+      registry
+        .discover({ protocol: "pendle" })
+        .map((coordinate) => [coordinate.method, coordinate]),
+    );
+
+    expect(byMethod.get("quote")).toMatchObject({ kind: "query" });
+    expect(byMethod.get("markets")).toMatchObject({ kind: "query" });
+  });
+
   it("rejects a swap where neither token is the market PT", async () => {
     const registry = new Registry(runtimeReadingTokens([SY, PT, YT])).use(Pendle);
     await expect(

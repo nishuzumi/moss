@@ -147,6 +147,37 @@ export type PendleSwapOutcome = Readonly<{
 }>;
 
 /**
+ * A read-only swap quote in display units for the public `quote` Query.
+ */
+export type PendleQuoteView = Readonly<{
+  direction: PendleSwapDirection;
+  market: AddressValue;
+  tokenIn: AddressValue;
+  tokenOut: AddressValue;
+  amountIn: string;
+  estimatedOut: string;
+  minOut: string;
+  expiryUtc: string;
+}>;
+
+/**
+ * One verified market for the public `markets` Query. `aggregatedApy` is Pendle-API inferred data,
+ * carried with its provenance and never presented as an on-chain guarantee.
+ */
+export type PendleMarketView = Readonly<{
+  market: AddressValue;
+  underlying: AddressValue;
+  pt: AddressValue;
+  sy: AddressValue;
+  expiryUtc: string;
+  decimals: Readonly<{ underlying: number; pt: number }>;
+  name: string;
+  protocol: string;
+  aggregatedApy: number | null;
+  apyProvenance: PendleApiMarketMetadata["provenance"];
+}>;
+
+/**
  * Isolates untrusted RouterStatic reads so the quoter can validate every returned value before use.
  */
 export interface PendleQuoteReader {
