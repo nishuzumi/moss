@@ -16,7 +16,7 @@ import {
   UnsignedIntegerString,
 } from "@themoss/core";
 import { decodeEventLog } from "viem";
-import { ierc1155Abi } from "./abis/erc.js";
+import { ierc1155Abi, ierc1155MetadataUriAbi } from "./abis/erc.js";
 
 const MAX_UINT256 = (1n << 256n) - 1n;
 
@@ -41,6 +41,11 @@ const erc1155BalanceParams = {
   collection: { type: Address, description: "Collection whose balance is requested." },
   tokenId: { type: ERC1155Uint256String, description: "Token selected within the collection." },
   owner: { type: Address, description: "Address whose token balance is read." },
+} satisfies ParamsSpec;
+
+const erc1155UriParams = {
+  collection: { type: Address, description: "Collection whose metadata URI is requested." },
+  tokenId: { type: ERC1155Uint256String, description: "Token selected within the collection." },
 } satisfies ParamsSpec;
 
 export type ERC1155TransferItem = {
@@ -74,7 +79,8 @@ export type ERC1155TransferOutcome = Extract<ERC1155Outcome, { event: "TransferS
 @Protocol({
   name: "erc1155",
   category: "nft",
-  description: "Generic ERC-1155 transfers, balances, and ordered transfer evidence.",
+  description:
+    "Generic ERC-1155 transfers, balances, metadata URIs, and ordered transfer evidence.",
   contracts: {},
 })
 export class ERC1155 {
@@ -82,6 +88,10 @@ export class ERC1155 {
 
   #handle(collection: AddressValue, account: AddressValue) {
     return createHandle(ierc1155Abi, collection, this.runtime.client, account);
+  }
+
+  #metadataHandle(collection: AddressValue, account: AddressValue) {
+    return createHandle(ierc1155MetadataUriAbi, collection, this.runtime.client, account);
   }
 
   @Capability<ERC1155, typeof erc1155TransferParams>({
@@ -115,6 +125,18 @@ export class ERC1155 {
       BigInt(params.tokenId),
     ]);
     return { ...params, balance: balance.toString() };
+  }
+
+  @Query({
+    intent: "Read an ERC-1155 metadata URI",
+    params: erc1155UriParams,
+    tags: ["metadata"],
+  })
+  async uri(params: InferParams<typeof erc1155UriParams>, ctx: ActionCtx) {
+    const uri = await this.#metadataHandle(params.collection, ctx.account).read.uri([
+      BigInt(params.tokenId),
+    ]);
+    return { ...params, uri };
   }
 
   @Receipt()

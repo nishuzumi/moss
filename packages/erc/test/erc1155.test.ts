@@ -19,12 +19,13 @@ const RECIPIENT = getAddress("0x1111111111111111111111111111111111111111");
 const COLLECTION = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 const MAX_UINT256 = ((1n << 256n) - 1n).toString();
 
-function registry(readBalance = 9n) {
+function registry(readBalance = 9n, readUri = "ipfs://example/{id}.json") {
   const runtime: MossRuntime = {
     rpcUrl: "http://offline",
     client: {
       readContract: async ({ functionName }: { functionName: string }) => {
         if (functionName === "balanceOf") return readBalance;
+        if (functionName === "uri") return readUri;
         throw new Error(`unexpected read ${functionName}`);
       },
     } as unknown as MossRuntime["client"],
@@ -92,6 +93,7 @@ describe("ERC1155", () => {
         verb: "transfer",
       }),
       expect.objectContaining({ protocol: "erc1155", method: "balanceOf", kind: "query" }),
+      expect.objectContaining({ protocol: "erc1155", method: "uri", kind: "query" }),
     ]);
     expect(
       Object.keys(instance.load([{ protocol: "erc1155", method: "transfer" }])[0]?.params ?? {}),
@@ -134,6 +136,21 @@ describe("ERC1155", () => {
     });
   });
 
+  it("runs the typed metadata URI query", async () => {
+    const instance = registry();
+    await expect(
+      instance.action("erc1155", "uri", ACCOUNT, {
+        collection: COLLECTION,
+        tokenId: "42",
+      }),
+    ).resolves.toEqual({
+      kind: "query",
+      protocol: "erc1155",
+      method: "uri",
+      data: { collection: COLLECTION, tokenId: "42", uri: "ipfs://example/{id}.json" },
+    });
+  });
+
   it("rejects uint256 overflow and non-string parameters before calldata construction", async () => {
     const overflow = (1n << 256n).toString();
     await expect(
@@ -160,6 +177,12 @@ describe("ERC1155", () => {
         to: RECIPIENT,
       }),
     ).rejects.toThrow("invalid parameters");
+    await expect(
+      registry().action("erc1155", "uri", ACCOUNT, {
+        collection: COLLECTION,
+        tokenId: overflow,
+      }),
+    ).rejects.toThrow("uint256 max");
   });
 
   it("parses single, batch, and single Changes exhaustively in original order", () => {
@@ -312,12 +335,23 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("ERC1155 on Monad mainnet", () => {
     "0x36B55a8C16bEc8CBe1Ec58cB190A8a25F32d2682",
   ].map((address) => getAddress(address));
 
-  it("simulates the happy path with zero Warnings and exhaustive Receipt coverage", {
+  it("reads metadata and simulates with zero Warnings and exhaustive Receipt coverage", {
     timeout: 120_000,
   }, async () => {
     const runtime = await createRuntime({ rpcUrl: "https://rpc.monad.xyz" });
     expect((await runtime.client.getCode({ address: collection }))?.length).toBeGreaterThan(2);
     const registry = new Registry(runtime).use(ERC1155);
+
+    const metadata = await registry.action("erc1155", "uri", RECIPIENT, {
+      collection,
+      tokenId,
+    });
+    expect(metadata).toMatchObject({
+      kind: "query",
+      data: { collection, tokenId },
+    });
+    if (metadata.kind !== "query") throw new Error("expected metadata URI query");
+    expect((metadata.data as { uri: string }).uri).toMatch(/^ipfs:\/\//);
 
     let holder: (typeof holderCandidates)[number] | undefined;
     for (const candidate of holderCandidates) {
