@@ -117,6 +117,17 @@ export async function verifyMarketCandidate(
     return tokens;
   });
 
+  const yieldToken = await atStage("underlying-identity", market, async () =>
+    parseAddress(await reader.yieldToken(sy), "SY yieldToken()"),
+  );
+  if (!sameAddress(underlying, yieldToken)) {
+    throw failure(
+      "underlying-identity",
+      market,
+      `expected underlying ${underlying} is not the SY yieldToken ${yieldToken}; a supported SY token is not by itself the canonical PT underlying`,
+    );
+  }
+
   for (const [role, address] of [
     ["SY", sy],
     ["PT", pt],
@@ -214,6 +225,12 @@ function runtimeReader(runtime: MossRuntime): MarketVerificationReader {
         address: market,
         abi: PendleMarketAbi,
         functionName: "expiry",
+      }),
+    yieldToken: (sy) =>
+      client.readContract({
+        address: sy,
+        abi: PendleStandardizedYieldAbi,
+        functionName: "yieldToken",
       }),
     tokensIn: (sy) =>
       client.readContract({

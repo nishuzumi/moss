@@ -185,7 +185,10 @@ export class Pendle {
 
   /**
    * Re-verifies a caller-supplied market on-chain and pins which side is the underlying, requiring
-   * exactly one of tokenIn/tokenOut to be the market's PT.
+   * exactly one of tokenIn/tokenOut to be the market's PT. The non-PT side is passed as the expected
+   * underlying, which verifyPendleMarket binds to the SY's on-chain yieldToken: a foreign token, or
+   * any other token the multi-token SY happens to support, is rejected rather than treated as the
+   * canonical underlying.
    */
   async #verifyForSwap(market: string, tokenIn: string, tokenOut: string): Promise<VerifiedMarket> {
     let pt: AddressValue;

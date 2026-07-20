@@ -98,6 +98,27 @@ describe("Pendle market verifier", () => {
     );
   });
 
+  it("rejects a claimed underlying that is not the SY yieldToken", async () => {
+    await expectFailure(
+      defaultReader({ yieldToken: async () => OTHER_TOKEN }),
+      "underlying-identity",
+      OTHER_TOKEN,
+    );
+  });
+
+  it("rejects a supported SY token that is not the yieldToken from masquerading as underlying", async () => {
+    // OTHER_TOKEN is a valid SY token (getTokensOut) but not the canonical yieldToken; a multi-token
+    // SY must not let it stand in for the underlying (Blocker 2).
+    let error: unknown;
+    try {
+      await verifyMarketCandidate(defaultReader(), { market: MARKET }, OTHER_TOKEN);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PendleMarketVerificationError);
+    expect(error).toMatchObject({ stage: "underlying-identity" });
+  });
+
   it("rejects an underlying unsupported for SY token-in", async () => {
     await expectFailure(
       defaultReader({ tokensIn: async () => [OTHER_TOKEN] }),
@@ -172,6 +193,7 @@ function defaultReader(
     marketFactory: async () => PENDLE_MARKET_FACTORY_ADDRESS,
     marketTokens: async () => [SY, PT, YT],
     marketExpiry: async () => EXPIRY,
+    yieldToken: async () => UNDERLYING,
     tokensIn: async () => [UNDERLYING],
     tokensOut: async () => [UNDERLYING, OTHER_TOKEN],
     decimals: async (token) => (token === UNDERLYING ? 6 : 18),

@@ -55,6 +55,8 @@ function verifiedMarketRuntime(): MossRuntime {
             return [SY, PT, YT];
           case "expiry":
             return 2_000_000_000n;
+          case "yieldToken":
+            return UNDERLYING;
           case "getTokensIn":
           case "getTokensOut":
             return [UNDERLYING];
@@ -116,6 +118,19 @@ describe("Pendle protocol", () => {
         slippageBps: 50,
       }),
     ).rejects.toThrow(ParameterError);
+  });
+
+  it("rejects a swap whose non-PT token is a foreign token, not the SY yieldToken", async () => {
+    const registry = new Registry(verifiedMarketRuntime()).use(Pendle);
+    await expect(
+      registry.action("pendle", "swap", ACCOUNT, {
+        market: MARKET,
+        tokenIn: PT,
+        tokenOut: OTHER,
+        amountIn: "1",
+        slippageBps: 50,
+      }),
+    ).rejects.toThrow(/yieldToken/);
   });
 
   it("rejects a swap against a market whose readTokens fails as a caller error", async () => {

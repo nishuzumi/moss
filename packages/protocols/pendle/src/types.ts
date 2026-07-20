@@ -203,6 +203,7 @@ export type MarketVerificationStage =
   | "factory-registration"
   | "factory-getter"
   | "read-tokens"
+  | "underlying-identity"
   | "dynamic-bytecode"
   | "expiry"
   | "token-support-in"
@@ -219,6 +220,7 @@ export interface MarketVerificationReader {
   marketFactory(market: AddressValue): Promise<unknown>;
   marketTokens(market: AddressValue): Promise<unknown>;
   marketExpiry(market: AddressValue): Promise<unknown>;
+  yieldToken(sy: AddressValue): Promise<unknown>;
   tokensIn(sy: AddressValue): Promise<unknown>;
   tokensOut(sy: AddressValue): Promise<unknown>;
   decimals(token: AddressValue): Promise<unknown>;
