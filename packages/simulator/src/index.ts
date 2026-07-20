@@ -2,6 +2,7 @@ import {
   type CapabilityNode,
   type Change,
   flattenCapabilityTree,
+  type Hex,
   type MossRuntime,
   type Receipt,
   ReceiptCoverageError,
@@ -14,6 +15,7 @@ import {
   type CallFrame,
   DEFAULT_SIMULATION_GAS,
   estimateGasWithOverrides,
+  resolveSimulationBlock,
   SimulatorUnavailableError,
   type StateOverrides,
   type TraceCall,
@@ -76,13 +78,41 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
       const overrides: StateOverrides = {};
       const results: TransactionSimulation[] = [];
 
+      // Pin one base block for the whole run so per-transaction evidence and
+      // state chaining cannot straddle a block boundary (ADR 0002).
+      let block: Hex;
+      try {
+        block = await resolveSimulationBlock(runtime.client);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const first = executable[0];
+        if (first) {
+          results.push({
+            protocol: first.capability.protocol,
+            method: first.capability.method,
+            transaction: first.transaction,
+            reverted: false,
+            warnings: [{ code: "TRACE_FAILED", message: reason }],
+            gas: null,
+          });
+        }
+        return { results, halted: { transactionIndex: 0, reason } };
+      }
+
       for (const [transactionIndex, { capability, transaction }] of executable.entries()) {
         const sender = transaction.from.toLowerCase() as keyof StateOverrides;
         overrides[sender] = { balance: prefund, ...overrides[sender] };
         const call: TraceCall = transaction;
         let frame: CallFrame;
         try {
-          frame = await traceWithCalls(runtime.client, runtime.rpcUrl, call, overrides, gasBudget);
+          frame = await traceWithCalls(
+            runtime.client,
+            runtime.rpcUrl,
+            call,
+            block,
+            overrides,
+            gasBudget,
+          );
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           results.push({
@@ -156,13 +186,14 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
           return { results, halted: { transactionIndex, reason } };
         }
 
-        const gas = await estimateGasWithOverrides(runtime.client, call, overrides);
+        const gas = await estimateGasWithOverrides(runtime.client, call, block, overrides);
         if (transactionIndex < executable.length - 1) {
           try {
             const diff = await traceWithDiff(
               runtime.client,
               runtime.rpcUrl,
               call,
+              block,
               overrides,
               gasBudget,
             );
