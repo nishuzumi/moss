@@ -94,6 +94,13 @@ describe("ERC1155", () => {
       }),
       expect.objectContaining({ protocol: "erc1155", method: "balanceOf", kind: "query" }),
       expect.objectContaining({ protocol: "erc1155", method: "uri", kind: "query" }),
+      expect.objectContaining({
+        protocol: "erc1155",
+        method: "approve",
+        kind: "capability",
+        verb: "approve",
+      }),
+      expect.objectContaining({ protocol: "erc1155", method: "isApprovedForAll", kind: "query" }),
     ]);
     expect(
       Object.keys(instance.load([{ protocol: "erc1155", method: "transfer" }])[0]?.params ?? {}),
@@ -312,6 +319,91 @@ describe("ERC1155", () => {
         changes: [secondLeaf, firstLeaf],
       }),
     ).toThrow("original object");
+  });
+
+  it("builds setApprovalForAll calldata for approve (1) and revoke (0)", async () => {
+    const instance = registry();
+
+    const approve = await instance.action("erc1155", "approve", ACCOUNT, {
+      collection: COLLECTION,
+      operator: OPERATOR,
+      approved: "1",
+    });
+    if (approve.kind !== "capability") throw new Error("expected capability");
+    const [approveTx] = flattenCapabilityTree(approve);
+    if (!approveTx) throw new Error("missing approve transaction");
+    expect(decodeFunctionData({ abi: ierc1155Abi, data: approveTx.transaction.data })).toEqual({
+      functionName: "setApprovalForAll",
+      args: [OPERATOR, true],
+    });
+
+    const revoke = await instance.action("erc1155", "approve", ACCOUNT, {
+      collection: COLLECTION,
+      operator: OPERATOR,
+      approved: "0",
+    });
+    if (revoke.kind !== "capability") throw new Error("expected capability");
+    const [revokeTx] = flattenCapabilityTree(revoke);
+    if (!revokeTx) throw new Error("missing revoke transaction");
+    expect(decodeFunctionData({ abi: ierc1155Abi, data: revokeTx.transaction.data })).toEqual({
+      functionName: "setApprovalForAll",
+      args: [OPERATOR, false],
+    });
+  });
+
+  it("runs isApprovedForAll query", async () => {
+    const runtime: MossRuntime = {
+      rpcUrl: "http://offline",
+      client: {
+        readContract: async ({ functionName }: { functionName: string }) => {
+          if (functionName === "isApprovedForAll") return true;
+          throw new Error(`unexpected read ${functionName}`);
+        },
+      } as unknown as MossRuntime["client"],
+    };
+    const instance = new Registry(runtime).use(ERC1155);
+    await expect(
+      instance.action("erc1155", "isApprovedForAll", ACCOUNT, {
+        collection: COLLECTION,
+        owner: RECIPIENT,
+        operator: OPERATOR,
+      }),
+    ).resolves.toEqual({
+      kind: "query",
+      protocol: "erc1155",
+      method: "isApprovedForAll",
+      data: { collection: COLLECTION, owner: RECIPIENT, operator: OPERATOR, approved: true },
+    });
+  });
+
+  it("parses ApprovalForAll Change into typed Receipt", () => {
+    const approval: Change = {
+      kind: "event",
+      address: COLLECTION,
+      topics: encodeEventTopics({
+        abi: ierc1155Abi,
+        eventName: "ApprovalForAll",
+        args: { account: ACCOUNT, operator: OPERATOR },
+      }) as readonly Hex[],
+      data: encodeAbiParameters([{ type: "bool", name: "approved" }], [true]),
+    };
+    const protocol = Object.create(ERC1155.prototype) as ERC1155;
+    const receipt = protocol.approvalReceipt([approval]);
+    expect(receipt.outcome).toEqual({
+      operation: "approvalForAll",
+      collection: COLLECTION,
+      account: ACCOUNT,
+      operator: OPERATOR,
+      approved: true,
+    });
+    expect(receipt.text).toContain("approved");
+  });
+
+  it("approvalReceipt rejects non-ApprovalForAll events", () => {
+    const transfer = transferSingle(1n, 1n);
+    const protocol = Object.create(ERC1155.prototype) as ERC1155;
+    expect(() => protocol.approvalReceipt([transfer])).toThrow("expected ApprovalForAll");
+    expect(() => protocol.approvalReceipt([])).toThrow("exactly one event");
   });
 });
 
