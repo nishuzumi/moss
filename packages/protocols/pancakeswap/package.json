@@ -16,7 +16,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "update:abis": "tsx scripts/update-abis.ts"
   },
   "dependencies": {
     "@themoss/core": "workspace:*",
@@ -25,7 +26,9 @@
     "@themoss/system": "workspace:*"
   },
   "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
     "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
     "typescript": "~5.9.0",
     "vitest": "^3.2.6"
   }

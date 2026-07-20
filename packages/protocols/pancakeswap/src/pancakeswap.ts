@@ -50,7 +50,8 @@ import {
 import { ERC20, ERC20Abi } from "@themoss/erc";
 import { WMON_ADDRESS } from "@themoss/system";
 import { parseUnits } from "viem";
-import { factoryAbi, swapRouter02Abi } from "./abis/v3.js";
+import { factoryAbi } from "./abis/factory.js";
+import { swapRouterAbi } from "./abis/swap-router.js";
 
 export const PANCAKESWAP_V3_ROUTER_ADDRESS: AddressValue =
   "0x1b81D678ffb9C0263b24A97847620C99d213eB14";
@@ -101,14 +102,14 @@ type SwapParams = InferredSwapParams;
     "PancakeSwap V3 single-hop swaps on Monad mainnet: exactInputSingle against " +
     "the canonical V3 Swap Router. Native MON is sent as msg.value; no pre-wrap needed.",
   contracts: {
-    router: { abi: swapRouter02Abi, addr: PANCAKESWAP_V3_ROUTER_ADDRESS },
+    router: { abi: swapRouterAbi, addr: PANCAKESWAP_V3_ROUTER_ADDRESS },
     factory: { abi: factoryAbi, addr: PANCAKESWAP_V3_FACTORY_ADDRESS },
   },
   protocols: { erc20: ERC20 },
   labels: { Router: PANCAKESWAP_V3_ROUTER_ADDRESS },
 })
 export class PancakeSwap {
-  declare router: Handle<typeof swapRouter02Abi>;
+  declare router: Handle<typeof swapRouterAbi>;
   declare factory: Handle<typeof factoryAbi>;
   declare erc20: ProtocolRef<ERC20>;
   declare runtime: MossRuntime;
@@ -133,11 +134,11 @@ export class PancakeSwap {
     fee: number,
   ): Promise<bigint> {
     try {
-      const [poolAddress] = (await this.factory.read.getPool([
+      const poolAddress = (await this.factory.read.getPool([
         actualTokenIn,
         tokenOut,
         fee,
-      ])) as readonly [Address, number, number];
+      ])) as Address;
       if (poolAddress === "0x0000000000000000000000000000000000000000") {
         return PancakeSwap.TICK_MIN_SQRT_RATIO_PLUS_ONE;
       }

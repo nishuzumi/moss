@@ -6,16 +6,16 @@ import {
   Registry,
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
-import {
-  decodeAbiParameters,
-  decodeFunctionData,
-  encodeAbiParameters,
-  encodeEventTopics,
-  getAddress,
-} from "viem";
+import { monadRuntime, USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { swapRouter02Abi } from "../src/abis/v3.js";
-import { PANCAKESWAP_V3_ROUTER_ADDRESS, PancakeSwap } from "../src/index.js";
+import { factoryAbi } from "../src/abis/factory.js";
+import { swapRouterAbi } from "../src/abis/swap-router.js";
+import {
+  PANCAKESWAP_V3_FACTORY_ADDRESS,
+  PANCAKESWAP_V3_ROUTER_ADDRESS,
+  PancakeSwap,
+} from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const TOKEN_A = getAddress("0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa");
@@ -71,16 +71,9 @@ describe("PancakeSwap param validation", () => {
   const registry = new Registry({
     rpcUrl: "http://offline",
     client: {
-      readContract: async ({
-        functionName,
-        args,
-      }: {
-        functionName: string;
-        args: readonly unknown[];
-      }) => {
+      readContract: async ({ functionName }: { functionName: string }) => {
         if (functionName === "decimals") return 18;
-        if (functionName === "getPool")
-          return ["0xPool0000000000000000000000000000000000000000", 3000, 10] as const;
+        if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
         if (functionName === "token0") return TOKEN_A;
         throw new Error(`unexpected readContract ${functionName}`);
       },
@@ -195,19 +188,9 @@ describe("PancakeSwap swap capability tree", () => {
     const registry = new Registry({
       rpcUrl: "http://offline",
       client: {
-        readContract: async ({
-          functionName,
-          args,
-        }: {
-          functionName: string;
-          args: readonly unknown[];
-        }) => {
+        readContract: async ({ functionName }: { functionName: string }) => {
           if (functionName === "decimals") return 18;
-          if (functionName === "getPool") {
-            const [a, b, f] = args as [string, string, number];
-            const k = `${a.toLowerCase()}:${b.toLowerCase()}:${f}`;
-            return [`0xPool${k.replace(/[^a-z0-9]/gi, "").slice(0, 32)}`, f, 10] as const;
-          }
+          if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
           if (functionName === "token0") return TOKEN_A;
           throw new Error(`unexpected readContract ${functionName}`);
         },
@@ -227,29 +210,23 @@ describe("PancakeSwap swap capability tree", () => {
     const txs = flattenCapabilityTree(capability);
 
     expect(txs.length).toBe(2);
-    expect(txs.at(-1)!.capability.protocol).toBe("pancakeswap");
-    const decoded = decodeFunctionData({
-      abi: swapRouter02Abi,
-      data: txs.at(-1)!.transaction.data,
-    });
-    expect(decoded.functionName).toBe("exactInputSingle");
-    expect(decoded.args).toBeDefined();
+    const swap = txs.at(-1);
+    if (!swap) throw new Error("missing swap transaction");
+    expect(swap.capability.protocol).toBe("pancakeswap");
+
+    const decoded = decodeFunctionData({ abi: swapRouterAbi, data: swap.transaction.data });
+    if (decoded.functionName !== "exactInputSingle") throw new Error("unexpected function");
+    const [routerParams] = decoded.args;
+    expect(routerParams.amountOutMinimum).toBe(EXPECTED_MIN_OUT);
   });
 
   it("sends native MON as msg.value (no pre-wrap) and builds exactInputSingle", async () => {
     const registry = new Registry({
       rpcUrl: "http://offline",
       client: {
-        readContract: async ({
-          functionName,
-          args,
-        }: {
-          functionName: string;
-          args: readonly unknown[];
-        }) => {
+        readContract: async ({ functionName }: { functionName: string }) => {
           if (functionName === "decimals") return 18;
-          if (functionName === "getPool")
-            return ["0xPool0000000000000000000000000000000000000000", 3000, 10] as const;
+          if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
           if (functionName === "token0") return "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A";
           throw new Error(`unexpected readContract ${functionName}`);
         },
@@ -269,11 +246,12 @@ describe("PancakeSwap swap capability tree", () => {
     const txs = flattenCapabilityTree(capability);
 
     expect(txs.length).toBe(1);
-    const first = txs.at(0)!;
+    const first = txs.at(0);
+    if (!first) throw new Error("missing swap transaction");
     expect(first.transaction.to.toLowerCase()).toBe(PANCAKESWAP_V3_ROUTER_ADDRESS.toLowerCase());
     expect(first.transaction.value).toBe("0xde0b6b3a7640000");
 
-    const decoded = decodeFunctionData({ abi: swapRouter02Abi, data: first.transaction.data });
+    const decoded = decodeFunctionData({ abi: swapRouterAbi, data: first.transaction.data });
     expect(decoded.functionName).toBe("exactInputSingle");
   });
 });
@@ -285,16 +263,9 @@ describe("PancakeSwap swapReceipt", () => {
     const registry = new Registry({
       rpcUrl: "http://offline",
       client: {
-        readContract: async ({
-          functionName,
-          args,
-        }: {
-          functionName: string;
-          args: readonly unknown[];
-        }) => {
+        readContract: async ({ functionName }: { functionName: string }) => {
           if (functionName === "decimals") return 18;
-          if (functionName === "getPool")
-            return ["0xPool0000000000000000000000000000000000000000", 3000, 10] as const;
+          if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
           if (functionName === "token0") return TOKEN_A;
           throw new Error(`unexpected readContract ${functionName}`);
         },
@@ -334,16 +305,9 @@ describe("PancakeSwap swapReceipt", () => {
     const registry = new Registry({
       rpcUrl: "http://offline",
       client: {
-        readContract: async ({
-          functionName,
-          args,
-        }: {
-          functionName: string;
-          args: readonly unknown[];
-        }) => {
+        readContract: async ({ functionName }: { functionName: string }) => {
           if (functionName === "decimals") return 18;
-          if (functionName === "getPool")
-            return ["0xPool0000000000000000000000000000000000000000", 3000, 10] as const;
+          if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
           if (functionName === "token0") return wmonAddr;
           throw new Error(`unexpected readContract ${functionName}`);
         },
@@ -386,16 +350,9 @@ describe("PancakeSwap swapReceipt", () => {
     const registry = new Registry({
       rpcUrl: "http://offline",
       client: {
-        readContract: async ({
-          functionName,
-          args,
-        }: {
-          functionName: string;
-          args: readonly unknown[];
-        }) => {
+        readContract: async ({ functionName }: { functionName: string }) => {
           if (functionName === "decimals") return 18;
-          if (functionName === "getPool")
-            return ["0xPool0000000000000000000000000000000000000000", 3000, 10] as const;
+          if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
           if (functionName === "token0") return TOKEN_A;
           throw new Error(`unexpected readContract ${functionName}`);
         },
@@ -435,16 +392,9 @@ describe("PancakeSwap swapReceipt", () => {
     const registry = new Registry({
       rpcUrl: "http://offline",
       client: {
-        readContract: async ({
-          functionName,
-          args,
-        }: {
-          functionName: string;
-          args: readonly unknown[];
-        }) => {
+        readContract: async ({ functionName }: { functionName: string }) => {
           if (functionName === "decimals") return 18;
-          if (functionName === "getPool")
-            return ["0xPool0000000000000000000000000000000000000000", 3000, 10] as const;
+          if (functionName === "getPool") return "0x63e48B725540A3Db24ACF6682a29f877808C53F2";
           if (functionName === "token0") return TOKEN_A;
           throw new Error(`unexpected readContract ${functionName}`);
         },
@@ -471,5 +421,43 @@ describe("PancakeSwap swapReceipt", () => {
       amountIn: "0",
       amountOut: "0",
     });
+  });
+});
+
+// ── Live Monad mainnet checks (free: read-only, Moss never signs/sends) ──
+
+describe.skipIf(!!process.env.MOSS_SKIP_E2E)("PancakeSwap mainnet", () => {
+  it("has deployed bytecode and self-consistent router/factory/WMON wiring", {
+    timeout: 60_000,
+  }, async () => {
+    const runtime = await monadRuntime();
+
+    for (const address of [PANCAKESWAP_V3_ROUTER_ADDRESS, PANCAKESWAP_V3_FACTORY_ADDRESS]) {
+      expect((await runtime.client.getCode({ address }))?.length ?? 0).toBeGreaterThan(2);
+    }
+
+    const [factoryAddress, weth9] = await Promise.all([
+      runtime.client.readContract({
+        address: PANCAKESWAP_V3_ROUTER_ADDRESS,
+        abi: swapRouterAbi,
+        functionName: "factory",
+      }),
+      runtime.client.readContract({
+        address: PANCAKESWAP_V3_ROUTER_ADDRESS,
+        abi: swapRouterAbi,
+        functionName: "WETH9",
+      }),
+    ]);
+    expect(getAddress(factoryAddress)).toBe(getAddress(PANCAKESWAP_V3_FACTORY_ADDRESS));
+    expect(getAddress(weth9)).toBe(getAddress(WMON_ADDRESS));
+
+    const pool = await runtime.client.readContract({
+      address: PANCAKESWAP_V3_FACTORY_ADDRESS,
+      abi: factoryAbi,
+      functionName: "getPool",
+      args: [WMON_ADDRESS, USDC_ADDRESS, 500],
+    });
+    expect(pool).not.toBe("0x0000000000000000000000000000000000000000");
+    expect((await runtime.client.getCode({ address: pool }))?.length ?? 0).toBeGreaterThan(2);
   });
 });
