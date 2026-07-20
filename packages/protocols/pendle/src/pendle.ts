@@ -28,12 +28,51 @@ import { buildPendleSwapPlan } from "./swap-builder.js";
 import { parsePendleSwapReceipt } from "./swap-receipt.js";
 import type {
   DiscoveredPendleMarket,
+  MarketDiscoveryRejection,
+  PendleMarketDiscoveryResult,
   PendleMarketView,
   PendleQuote,
   PendleQuoteView,
   PendleSwapOutcome,
   VerifiedMarket,
 } from "./types.js";
+
+const MAX_DIAGNOSTIC_LENGTH = 320;
+
+/**
+ * Raised when discovery nominated candidates but the on-chain verifier accepted none, so an empty
+ * verified set means "unavailable", not "no markets exist". Carries the structured rejections.
+ */
+export class PendleMarketsUnavailableError extends Error {
+  readonly candidateCount: number;
+  readonly rejections: readonly MarketDiscoveryRejection[];
+
+  constructor(candidateCount: number, rejections: readonly MarketDiscoveryRejection[]) {
+    super(
+      `Pendle market discovery verified none of ${candidateCount} candidate(s); ${summarizeRejections(rejections)}`,
+    );
+    this.name = "PendleMarketsUnavailableError";
+    this.candidateCount = candidateCount;
+    this.rejections = rejections;
+  }
+}
+
+/**
+ * Projects a discovery result into market views: the verified subset on any success (even partial),
+ * an empty list only when discovery found no candidates at all, and an explicit error when every
+ * nominated candidate was rejected.
+ */
+export function selectMarketViews(
+  result: PendleMarketDiscoveryResult,
+): readonly PendleMarketView[] {
+  if (result.verified.length > 0) {
+    return result.verified.map(toMarketView);
+  }
+  if (result.rejections.length > 0) {
+    throw new PendleMarketsUnavailableError(result.candidateCount, result.rejections);
+  }
+  return [];
+}
 
 const noParams = {} satisfies ParamsSpec;
 
@@ -121,8 +160,7 @@ export class Pendle {
     tags: ["yield", "pt", "market"],
   })
   async markets(): Promise<readonly PendleMarketView[]> {
-    const result = await discoverPendleMarkets(this.runtime);
-    return result.verified.map(toMarketView);
+    return selectMarketViews(await discoverPendleMarkets(this.runtime));
   }
 
   @Receipt()
@@ -173,6 +211,21 @@ export class Pendle {
     }
     return verifyPendleMarket(this.runtime, { market, expectedUnderlying: underlying });
   }
+}
+
+function summarizeRejections(rejections: readonly MarketDiscoveryRejection[]): string {
+  if (rejections.length === 0) return "no rejection detail was recorded";
+  const summary = rejections
+    .map((rejection) => {
+      const where = rejection.candidate
+        ? `${rejection.stage}@${rejection.candidate}`
+        : rejection.stage;
+      return `${where}: ${rejection.reason}`;
+    })
+    .join("; ");
+  return summary.length <= MAX_DIAGNOSTIC_LENGTH
+    ? summary
+    : `${summary.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`;
 }
 
 function expiryToIso(expiry: bigint): string {
