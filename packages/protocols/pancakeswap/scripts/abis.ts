@@ -1,6 +1,6 @@
 /**
  * The OFFLINE half of the ABI pipeline: the source-of-truth table mapping
- * each PancakeSwap V3 contract to its generated module under src/abis/.
+ * each PancakeSwap V2/V3 contract to its generated module under src/abis/.
  *
  * scripts/update-abis.ts fetches these verified ABIs from the explorer;
  * test/abis.test.ts enforces that every committed module is byte-exact
@@ -29,5 +29,15 @@ export const SOURCES: readonly AbiSource[] = [
     exportName: "factory",
     file: "factory.ts",
     address: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865",
+  },
+  {
+    exportName: "pancakeV2Router",
+    file: "v2-router.ts",
+    address: "0xB1Bc24c34e88f7D43D5923034E3a14B24DaACfF9",
+  },
+  {
+    exportName: "pancakeV2Pair",
+    file: "v2-pair.ts",
+    address: "0x27aa322b3f8ba9d0041df99c33fe4f3cc135e054",
   },
 ];

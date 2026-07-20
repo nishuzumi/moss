@@ -6,6 +6,10 @@ import {
   PANCAKESWAP_V3_FACTORY_ADDRESS,
   PANCAKESWAP_V3_ROUTER_ADDRESS,
 } from "../src/pancakeswap.js";
+import {
+  PANCAKESWAP_V2_PAIR_ABI_SOURCE_ADDRESS,
+  PANCAKESWAP_V2_ROUTER_ADDRESS,
+} from "../src/pancakeswap-v2.js";
 
 // The provenance chain, enforced: every committed src/abis module must be
 // byte-exact renderAbiModule output for its SOURCES entry — same address,
@@ -41,6 +45,8 @@ describe("explorer ABI derivation (ADR 0007)", () => {
     expect(SOURCES.map((s) => s.address)).toEqual([
       PANCAKESWAP_V3_ROUTER_ADDRESS,
       PANCAKESWAP_V3_FACTORY_ADDRESS,
+      PANCAKESWAP_V2_ROUTER_ADDRESS,
+      PANCAKESWAP_V2_PAIR_ABI_SOURCE_ADDRESS,
     ]);
   });
 });

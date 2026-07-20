@@ -14,6 +14,7 @@ import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
+import { defaultProtocolModules } from "../src/composition.js";
 import { createMossServer, toAgentSimulation } from "../src/server.js";
 
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
@@ -23,7 +24,10 @@ async function connectedClient(simulateOutcome?: SimulateOutcome) {
 }
 
 async function connectedHarness(simulateOutcome?: SimulateOutcome) {
-  const { server, simulator } = createMossServer({ runtime, protocols: [system, erc, kuru] });
+  const { server, simulator } = createMossServer({
+    runtime,
+    protocols: defaultProtocolModules,
+  });
   if (simulateOutcome) {
     simulator.simulate = async () => simulateOutcome;
   }
@@ -65,7 +69,7 @@ describe("moss MCP server", () => {
     expect(receipt.text).toContain("Trusted(USDC)");
   });
 
-  it("discovers direct Protocol exports and loads type plus field descriptions", async () => {
+  it("discovers and loads the Protocols selected by the default CLI composition", async () => {
     const client = await connectedClient();
     const discovered = parseText(
       await client.callTool({ name: "discover", arguments: { verb: "wrap" } }),
@@ -73,10 +77,22 @@ describe("moss MCP server", () => {
     expect(discovered).toEqual([
       expect.objectContaining({ protocol: "wmon", method: "wrap", kind: "capability" }),
     ]);
+    const swaps = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "swap" } }),
+    ) as { protocol: string; method: string }[];
+    expect(swaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          protocol: "pancakeswap-v2",
+          method: "swap",
+          kind: "capability",
+        }),
+      ]),
+    );
     const loaded = parseText(
       await client.callTool({
         name: "load",
-        arguments: { items: [{ protocol: "kuru", method: "swap" }] },
+        arguments: { items: [{ protocol: "pancakeswap-v2", method: "swap" }] },
       }),
     ) as { params: Record<string, { type: unknown; description: string }> }[];
     expect(loaded[0]?.params.slippage).toMatchObject({
