@@ -139,6 +139,38 @@ function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
   return "protocol" in receipt && typeof receipt.protocol === "string";
 }
 
+function freezeReceiptOwnedStructure(root: Receipt): Receipt {
+  const receipts = new WeakSet<object>();
+  const jsonValues = new WeakSet<object>();
+  const freezeJson = (value: JsonSafeValue): void => {
+    if (value === null || typeof value !== "object" || jsonValues.has(value)) return;
+    jsonValues.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) freezeJson(entry);
+    } else {
+      for (const entry of Object.values(value)) freezeJson(entry);
+    }
+    Object.freeze(value);
+  };
+  const freezeReceipt = (receipt: Receipt): void => {
+    if (receipts.has(receipt)) return;
+    receipts.add(receipt);
+    freezeJson(receipt.outcome);
+    for (const child of receipt.changes) {
+      if (child.kind === "receipt") {
+        freezeReceipt(child);
+      } else {
+        freezeJson(child.data);
+        Object.freeze(child);
+      }
+    }
+    Object.freeze(receipt.changes);
+    Object.freeze(receipt);
+  };
+  freezeReceipt(root);
+  return root;
+}
+
 export class Registry {
   #protocols = new Map<string, Registered>();
   #assignedReceiptProtocols = new WeakMap<object, string>();
@@ -400,7 +432,7 @@ export class Registry {
     // biome-ignore lint/suspicious/noExplicitAny: registration validates Receipt dispatch
     const result = (instance as any)[receiptName](changes) as ReceiptResult;
     verifyReceiptCoverage(changes, result);
-    return this.#attachProtocol(result, protocol);
+    return freezeReceiptOwnedStructure(this.#attachProtocol(result, protocol));
   }
 
   #attachProtocol(result: ReceiptResult, protocol: string): Receipt {

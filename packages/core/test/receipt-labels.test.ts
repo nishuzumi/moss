@@ -250,8 +250,8 @@ class ForgedReceiptProtocol {
   @Receipt()
   forgedReceipt(changes: readonly Change[]): ReceiptResult<null> {
     const child = this.deep.renderReceipt(changes);
-    child.protocol = "unrelated";
-    return { kind: "receipt", outcome: null, text: "root", changes: [child] };
+    const forged = { ...child, protocol: "unrelated" };
+    return { kind: "receipt", outcome: null, text: "root", changes: [forged] };
   }
 }
 
@@ -396,7 +396,7 @@ describe("Registry Receipt labels", () => {
     );
   });
 
-  it("rejects mutation of a Registry-assigned child Receipt Protocol", () => {
+  it("rejects a cloned child Receipt with a forged Protocol", () => {
     const registry = new Registry(runtime).use(ForgedReceiptProtocol, UnrelatedProtocol);
     const node = {
       kind: "capability",
@@ -413,7 +413,7 @@ describe("Registry Receipt labels", () => {
     } satisfies Change;
 
     expect(() => registry.parseReceipt(node, [change])).toThrow(
-      'Receipt protocol "unrelated" does not match Registry-assigned "deep-token"',
+      'Receipt protocol "unrelated" was not assigned by Registry',
     );
   });
 });
