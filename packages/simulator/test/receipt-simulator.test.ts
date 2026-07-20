@@ -6,6 +6,7 @@ import type { CallFrame, PrestateDiff, StateOverrides } from "../src/trace.js";
 const A = "0x1111111111111111111111111111111111111111" as Address;
 const B = "0x2222222222222222222222222222222222222222" as Address;
 const C = "0x3333333333333333333333333333333333333333" as Address;
+const PINNED_BLOCK = "0x100";
 
 function capability(
   protocol: string,
@@ -48,8 +49,12 @@ function runtimeWithFrames(
   return {
     rpcUrl: "http://offline",
     client: {
-      request: async ({ method, params }: { method: string; params: unknown[] }) => {
-        const tracer = (params[2] as { tracer?: string } | undefined)?.tracer;
+      request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+        if (method === "eth_blockNumber") {
+          requests?.push({ method });
+          return PINNED_BLOCK;
+        }
+        const tracer = (params?.[2] as { tracer?: string } | undefined)?.tracer;
         requests?.push({ method, ...(tracer ? { tracer } : {}) });
         if (method === "eth_estimateGas") return "0x5208";
         if (tracer === "callTracer") return frames[frameIndex++];
@@ -93,10 +98,11 @@ describe("Capability simulation", () => {
     const runtime: MossRuntime = {
       rpcUrl: "http://offline",
       client: {
-        request: async ({ method, params }: { method: string; params: unknown[] }) => {
-          requests.push({ method, params });
+        request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+          requests.push({ method, params: params ?? [] });
+          if (method === "eth_blockNumber") return PINNED_BLOCK;
           if (method === "eth_estimateGas") return "0x5208";
-          const tracer = (params[2] as { tracer?: string } | undefined)?.tracer;
+          const tracer = (params?.[2] as { tracer?: string } | undefined)?.tracer;
           if (tracer === "prestateTracer") return diff;
           if (tracer === "callTracer") {
             const to = callIndex++ === 0 ? B : C;
@@ -121,13 +127,20 @@ describe("Capability simulation", () => {
         tracer: (params[2] as { tracer?: string } | undefined)?.tracer,
       })),
     ).toEqual([
+      { method: "eth_blockNumber", tracer: undefined },
       { method: "debug_traceCall", tracer: "callTracer" },
       { method: "eth_estimateGas", tracer: undefined },
       { method: "debug_traceCall", tracer: "prestateTracer" },
       { method: "debug_traceCall", tracer: "callTracer" },
       { method: "eth_estimateGas", tracer: undefined },
     ]);
-    const secondCall = requests[3]?.params[2] as { stateOverrides?: StateOverrides } | undefined;
+    // Every trace, diff, and gas estimate in the run pins the same base block.
+    for (const { method, params } of requests) {
+      if (method === "debug_traceCall" || method === "eth_estimateGas") {
+        expect(params[1]).toBe(PINNED_BLOCK);
+      }
+    }
+    const secondCall = requests[4]?.params[2] as { stateOverrides?: StateOverrides } | undefined;
     expect(secondCall?.stateOverrides?.[B]).toEqual({
       balance: "0x10",
       nonce: "0x2",
@@ -141,9 +154,10 @@ describe("Capability simulation", () => {
     const runtime: MossRuntime = {
       rpcUrl: "http://offline",
       client: {
-        request: async ({ method, params }: { method: string; params: unknown[] }) => {
-          const tracer = (params[2] as { tracer?: string } | undefined)?.tracer;
+        request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+          const tracer = (params?.[2] as { tracer?: string } | undefined)?.tracer;
           requests.push(tracer ?? method);
+          if (method === "eth_blockNumber") return PINNED_BLOCK;
           if (method === "eth_estimateGas") return "0x5208";
           if (tracer === "callTracer") {
             return { type: "CALL", from: A, to: B, logs: [] } satisfies CallFrame;
@@ -159,7 +173,12 @@ describe("Capability simulation", () => {
       receipt: (node, changes) => coveringReceipt(node.protocol, changes),
     }).simulate(capability("parent", C, [capability("child", B)]));
 
-    expect(requests).toEqual(["callTracer", "eth_estimateGas", "prestateTracer"]);
+    expect(requests).toEqual([
+      "eth_blockNumber",
+      "callTracer",
+      "eth_estimateGas",
+      "prestateTracer",
+    ]);
     expect(outcome.results).toHaveLength(1);
     expect(outcome.results[0]?.receipt?.protocol).toBe("child");
     expect(outcome.results[0]?.warnings).toEqual([
@@ -202,7 +221,8 @@ describe("Capability simulation", () => {
     const runtime: MossRuntime = {
       rpcUrl: "http://offline",
       client: {
-        request: async () => {
+        request: async ({ method }: { method: string }) => {
+          if (method === "eth_blockNumber") return PINNED_BLOCK;
           throw new Error("debug_traceCall unavailable");
         },
         // biome-ignore lint/suspicious/noExplicitAny: minimal failing RPC fixture
@@ -215,6 +235,29 @@ describe("Capability simulation", () => {
       { code: "TRACE_FAILED", message: "debug_traceCall unavailable" },
     ]);
     expect(outcome.halted?.transactionIndex).toBe(0);
+  });
+
+  it("halts before any trace when the base block cannot be resolved", async () => {
+    const requests: string[] = [];
+    const runtime: MossRuntime = {
+      rpcUrl: "http://offline",
+      client: {
+        request: async ({ method }: { method: string }) => {
+          requests.push(method);
+          throw new Error("rpc unreachable");
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: minimal failing RPC fixture
+      } as any,
+    };
+    const outcome = await createTraceSimulator(runtime, {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    }).simulate(capability("fixture", B));
+    expect(requests).toEqual(["eth_blockNumber"]);
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0]?.warnings).toEqual([
+      { code: "TRACE_FAILED", message: "rpc unreachable" },
+    ]);
+    expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "rpc unreachable" });
   });
 
   it("classifies forged Change coverage and halts before later work", async () => {
@@ -248,7 +291,10 @@ describe("Capability simulation", () => {
       transactionIndex: 0,
       reason: "Receipt Change 0 does not retain the original object in order",
     });
-    expect(requests).toEqual([{ method: "debug_traceCall", tracer: "callTracer" }]);
+    expect(requests).toEqual([
+      { method: "eth_blockNumber" },
+      { method: "debug_traceCall", tracer: "callTracer" },
+    ]);
   });
 
   it("treats arbitrary Receipt parser failures as terminal warnings", async () => {
