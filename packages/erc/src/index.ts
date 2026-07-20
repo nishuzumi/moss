@@ -8,6 +8,7 @@ export { ERC20, type ERC20Outcome } from "./erc20.js";
 export { ERC721, type ERC721TransferOutcome } from "./erc721.js";
 export {
   ERC1155,
+  type ERC1155ApprovalOutcome,
   type ERC1155Outcome,
   type ERC1155TransferItem,
   type ERC1155TransferOutcome,

@@ -48,6 +48,31 @@ const erc1155UriParams = {
   tokenId: { type: ERC1155Uint256String, description: "Token selected within the collection." },
 } satisfies ParamsSpec;
 
+const erc1155ApprovalParams = {
+  collection: { type: Address, description: "Collection to manage operator approval for." },
+  operator: { type: Address, description: "Address authorized to manage the caller's tokens." },
+  approved: {
+    type: UnsignedIntegerString.refine(
+      (v) => v === "1" || v === "0",
+      'Expected "1" (approve) or "0" (revoke).',
+    ).describe('Pass "1" to approve the operator or "0" to revoke.'),
+    description: '"1" to approve the operator, "0" to revoke.',
+  },
+} satisfies ParamsSpec;
+
+const erc1155ApprovalCheckParams = {
+  collection: { type: Address, description: "Collection whose approval is checked." },
+  owner: { type: Address, description: "Address that may have granted approval." },
+  operator: { type: Address, description: "Address whose operator status is checked." },
+} satisfies ParamsSpec;
+
+export type ERC1155ApprovalOutcome = {
+  operation: "approvalForAll";
+  collection: AddressValue;
+  account: AddressValue;
+  operator: AddressValue;
+  approved: boolean;
+};
 export type ERC1155TransferItem = {
   tokenId: string;
   amount: string;
@@ -139,6 +164,34 @@ export class ERC1155 {
     return { ...params, uri };
   }
 
+  @Capability<ERC1155, typeof erc1155ApprovalParams>({
+    intent: "Set or revoke an ERC-1155 operator approval",
+    verb: "approve",
+    params: erc1155ApprovalParams,
+    receipt: "approvalReceipt",
+    risk: ["approval"],
+    tags: ["approval"],
+  })
+  async approve(params: InferParams<typeof erc1155ApprovalParams>, ctx: ActionCtx) {
+    return [
+      this.#handle(params.collection, ctx.account).setApprovalForAll([
+        params.operator,
+        params.approved === "1",
+      ]),
+    ];
+  }
+
+  @Query({
+    intent: "Check whether an operator is approved for an ERC-1155 collection",
+    params: erc1155ApprovalCheckParams,
+  })
+  async isApprovedForAll(params: InferParams<typeof erc1155ApprovalCheckParams>, ctx: ActionCtx) {
+    const approved = await this.#handle(params.collection, ctx.account).read.isApprovedForAll([
+      params.owner,
+      params.operator,
+    ]);
+    return { ...params, approved };
+  }
   @Receipt()
   transferReceipt(changes: readonly Change[]): MossReceipt<ERC1155TransferOutcome> {
     const receipt = this.changesReceipt(changes);
@@ -167,6 +220,44 @@ export class ERC1155 {
       outcome: outcomes,
       text: parsed.map(({ text }) => text).join("; "),
       changes: parsed,
+    };
+  }
+
+  @Receipt()
+  approvalReceipt(changes: readonly Change[]): MossReceipt<ERC1155ApprovalOutcome> {
+    const first = changes[0];
+    if (changes.length !== 1 || !first || first.kind !== "event") {
+      throw new Error("ERC1155 approval Receipt requires exactly one event Change");
+    }
+    let decoded: ReturnType<typeof decodeEventLog<typeof ierc1155Abi>>;
+    try {
+      decoded = decodeEventLog({
+        abi: ierc1155Abi,
+        topics: first.topics as [Hex, ...Hex[]],
+        data: first.data,
+        strict: true,
+      });
+    } catch {
+      throw new Error(`Unexpected Change: ${first.address} emitted an unsupported event`);
+    }
+    if (decoded.eventName !== "ApprovalForAll") {
+      throw new Error(
+        `Unexpected Change: ${first.address} emitted ${decoded.eventName}, expected ApprovalForAll`,
+      );
+    }
+    const outcome: ERC1155ApprovalOutcome = {
+      operation: "approvalForAll",
+      collection: first.address,
+      account: decoded.args.account,
+      operator: decoded.args.operator,
+      approved: decoded.args.approved,
+    };
+    const text = `ERC1155 ApprovalForAll: ${outcome.account} ${outcome.approved ? "approved" : "revoked"} ${outcome.operator} for ${outcome.collection}`;
+    return {
+      kind: "receipt",
+      outcome,
+      text,
+      changes: [{ kind: "change" as const, change: first, data: outcome, text }],
     };
   }
 }
