@@ -10,6 +10,7 @@
       "@themoss/erc",
       "@themoss/system",
       "@themoss/protocol-kuru",
+      "@themoss/protocol-pancakeswap",
       "@themoss/mcp-server"
     ]
   ],

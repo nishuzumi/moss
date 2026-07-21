@@ -31,11 +31,11 @@ Export an [Etherscan API key](https://info.monadscan.com/myapikey/), then run th
 
 ```bash
 export MONADSCAN_API_KEY=…
-pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter02 \
-  > packages/protocols/myprotocol/src/abis/swap-router-02.ts
+pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter \
+  > packages/protocols/myprotocol/src/abis/swap-router.ts
 ```
 
-The command calls the official Etherscan V2 ABI endpoint for Monad mainnet, prints the complete verified ABI as `export const swapRouter02Abi = [...] as const`, and stamps its public Monadscan source URL and UTC retrieval date. It writes TypeScript only to stdout and diagnostics only to stderr.
+The command calls the official Etherscan V2 ABI endpoint for Monad mainnet, prints the complete verified ABI as `export const swapRouterAbi = [...] as const`, and stamps its public Monadscan source URL and UTC retrieval date. It writes TypeScript only to stdout and diagnostics only to stderr. For repeatable regeneration, give the package an `update:abis` script that drives `@themoss/abi-tools`' `fetchAbi` + `renderAbiModule` from a committed source table, and pin the committed modules to the renderer's exact output with a derivation test (see `packages/protocols/pancakeswap/scripts/` and its `test/abis.test.ts`).
 
 Every fixed address cites a canonical source and has an on-chain bytecode check. Fixed token constants additionally verify expected metadata. Dynamic pools and tokens come from chain state and do not become global constants.
 

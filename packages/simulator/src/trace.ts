@@ -62,6 +62,17 @@ export interface TraceCall {
  */
 export const DEFAULT_SIMULATION_GAS = 10_000_000n;
 
+/**
+ * Resolve the base block for one simulate() run. Every trace, diff, and gas
+ * estimate in the run pins this block so evidence extraction and state
+ * chaining share a single base state even when new blocks land mid-run
+ * (ADR 0002). Monad's debug_traceCall accepts an explicit block number with
+ * stateOverrides (verified live 2026-07-20).
+ */
+export async function resolveSimulationBlock(client: PublicClient): Promise<Hex> {
+  return (await client.request({ method: "eth_blockNumber" })) as Hex;
+}
+
 export class SimulatorUnavailableError extends Error {
   constructor(rpcUrl: string) {
     super(
@@ -83,6 +94,7 @@ async function traceCall<T>(
   client: PublicClient,
   rpcUrl: string,
   call: TraceCall,
+  block: Hex,
   traceOpts: Record<string, unknown>,
   overrides: StateOverrides,
   gas: bigint,
@@ -94,7 +106,7 @@ async function traceCall<T>(
       // biome-ignore lint/suspicious/noExplicitAny: non-standard namespace, untyped in viem
       method: "debug_traceCall" as any,
       // biome-ignore lint/suspicious/noExplicitAny: non-standard namespace, untyped in viem
-      params: [{ ...call, gas: `0x${gas.toString(16)}` }, "latest", opts] as any,
+      params: [{ ...call, gas: `0x${gas.toString(16)}` }, block, opts] as any,
     })) as T;
   } catch (err) {
     if (isMethodNotFound(err)) throw new SimulatorUnavailableError(rpcUrl);
@@ -107,6 +119,7 @@ export function traceWithCalls(
   client: PublicClient,
   rpcUrl: string,
   call: TraceCall,
+  block: Hex,
   overrides: StateOverrides,
   gas: bigint = DEFAULT_SIMULATION_GAS,
 ): Promise<CallFrame> {
@@ -114,6 +127,7 @@ export function traceWithCalls(
     client,
     rpcUrl,
     call,
+    block,
     { tracer: "callTracer", tracerConfig: { withLog: true } },
     overrides,
     gas,
@@ -125,6 +139,7 @@ export function traceWithDiff(
   client: PublicClient,
   rpcUrl: string,
   call: TraceCall,
+  block: Hex,
   overrides: StateOverrides,
   gas: bigint = DEFAULT_SIMULATION_GAS,
 ): Promise<PrestateDiff> {
@@ -132,6 +147,7 @@ export function traceWithDiff(
     client,
     rpcUrl,
     call,
+    block,
     { tracer: "prestateTracer", tracerConfig: { diffMode: true } },
     overrides,
     gas,
@@ -147,10 +163,11 @@ export function traceWithDiff(
 export async function estimateGasWithOverrides(
   client: PublicClient,
   call: TraceCall,
+  block: Hex,
   overrides: StateOverrides,
 ): Promise<bigint | null> {
   try {
-    const params: unknown[] = [call, "latest"];
+    const params: unknown[] = [call, block];
     if (Object.keys(overrides).length > 0) params.push(overrides);
     const result = (await client.request({
       // biome-ignore lint/suspicious/noExplicitAny: overrides param is non-standard

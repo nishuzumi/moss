@@ -42,6 +42,10 @@ export const KURU_ROUTER_ADDRESS = "0xd651346d7c789536ebf06dc72aE3C8502cd695CC" 
 const KURU_API_URL = "https://api.kuru.io";
 const KURU_NATIVE = "0x0000000000000000000000000000000000000000" as const;
 const DEFAULT_SLIPPAGE_BPS = 50;
+const KURU_MARKET_DISCOVERY_TIMEOUT_MS = 10_000;
+const MAX_KURU_MARKET_DISCOVERY_BYTES = 1_000_000;
+const MAX_KURU_MARKET_CANDIDATES = 256;
+const MAX_KURU_MARKET_ROUTES = 256;
 
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
@@ -277,9 +281,15 @@ export class Kuru {
       candidates.map((candidate) => this.#verifyMarket(candidate, account)),
     );
     const routes: Route[] = [];
+    const addRoute = (route: Route): void => {
+      if (routes.length >= MAX_KURU_MARKET_ROUTES) {
+        throw new Error(`too many Kuru market routes; maximum is ${MAX_KURU_MARKET_ROUTES}`);
+      }
+      routes.push(route);
+    };
     for (const market of markets) {
       const leg = routeLeg(market, tokenIn);
-      if (leg && sameToken(leg.output, tokenOut)) routes.push([leg]);
+      if (leg && sameToken(leg.output, tokenOut)) addRoute([leg]);
     }
     if (tokenIn !== NATIVE && tokenOut !== NATIVE) {
       const firstLegs = markets
@@ -293,7 +303,7 @@ export class Kuru {
           if (first.outputDecimals !== second.inputDecimals) {
             throw new Error("verified Kuru markets disagree on native MON decimals");
           }
-          routes.push([first, second]);
+          addRoute([first, second]);
         }
       }
     }
@@ -417,27 +427,44 @@ export class Kuru {
 
 async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
   const pairs = requestedPairs(tokenIn, tokenOut);
-  let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), KURU_MARKET_DISCOVERY_TIMEOUT_MS);
+  let text: string;
   try {
-    response = await fetch(`${KURU_API_URL}/api/v1/markets/filtered`, {
+    const response = await fetch(`${KURU_API_URL}/api/v1/markets/filtered`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pairs }),
+      signal: controller.signal,
     });
+    if (!response.ok) {
+      throw new Error(`Kuru market discovery failed with HTTP ${response.status}`);
+    }
+    text = await readBoundedMarketDiscoveryResponse(response);
   } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `Kuru market discovery timed out after ${KURU_MARKET_DISCOVERY_TIMEOUT_MS}ms`,
+      );
+    }
+    if (error instanceof Error && error.message.startsWith("Kuru market discovery")) throw error;
     throw new Error(`Kuru market discovery failed: ${errorMessage(error)}`);
-  }
-  if (!response.ok) {
-    throw new Error(`Kuru market discovery failed with HTTP ${response.status}`);
+  } finally {
+    clearTimeout(timeout);
   }
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = JSON.parse(text);
   } catch (error) {
     throw new Error(`Kuru market discovery returned invalid JSON: ${errorMessage(error)}`);
   }
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
     throw new Error("Kuru market discovery returned an invalid response");
+  }
+  if (payload.data.length > MAX_KURU_MARKET_CANDIDATES) {
+    throw new Error(
+      `Kuru market discovery returned too many markets; maximum is ${MAX_KURU_MARKET_CANDIDATES}`,
+    );
   }
   const candidates = payload.data.map(parseMarketCandidate);
   const unique = new Map<string, MarketCandidate>();
@@ -453,6 +480,43 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
     unique.set(key, candidate);
   }
   return [...unique.values()];
+}
+
+async function readBoundedMarketDiscoveryResponse(response: Response) {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null) {
+    const length = Number(contentLength);
+    if (Number.isFinite(length) && length > MAX_KURU_MARKET_DISCOVERY_BYTES) {
+      throw new Error("Kuru market discovery response is too large");
+    }
+  }
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_KURU_MARKET_DISCOVERY_BYTES) {
+      throw new Error("Kuru market discovery response is too large");
+    }
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_KURU_MARKET_DISCOVERY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("Kuru market discovery response is too large");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function requestedPairs(tokenIn: TokenRef, tokenOut: TokenRef) {

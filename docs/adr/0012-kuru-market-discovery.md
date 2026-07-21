@@ -2,6 +2,8 @@
 
 Kuru has no pair-indexed on-chain `getPool`; its official SDK discovers candidate markets through the filtered-markets API. The Kuru Protocol follows that discovery path for direct and via-MON candidates, then verifies every returned market against the Router's on-chain `verifiedMarket` data before quoting or constructing a Capability. The API supplies candidates, never trusted market facts.
 
+The filtered-markets HTTP request is bounded by a timeout, maximum response size, maximum candidate count, and maximum constructed route count. Discovery failure, malformed responses, oversized responses, excessive candidates, and excessive direct or via-MON route combinations stop the Query or Capability before unbounded on-chain verification or quoting fanout.
+
 “Direct” and “via MON” are path classes, not single markets. Kuru quotes every verified direct market and every verified two-market combination through native MON, then selects the best result using the swap-side rules. API response order never determines the selected market; an equal quote still prefers a direct path.
 
 The public quote is advisory. Capability construction repeats discovery and quoting against current state, selects the path itself, and derives current slippage protection. An Agent cannot supply a market address, path, or quote identifier to `swap`; stale or manipulated routing data therefore cannot enter the Capability request.

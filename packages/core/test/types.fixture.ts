@@ -1,4 +1,4 @@
-import { type MossRuntime, Protocol, Registry } from "../src/index.js";
+import { type MossRuntime, Protocol, Registry, tokenMetadata } from "../src/index.js";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111" as const;
 
@@ -28,5 +28,20 @@ new Registry(runtime, {
   trustedTokens: [{ address: "not-an-address", label: "Token" }],
 });
 
+const metadataResult = tokenMetadata(
+  { kind: "metadata" as const, decimals: 18 as const },
+  { address: ADDRESS, symbol: "TOKEN", name: "Token" },
+);
+const metadataKind: "metadata" = metadataResult.kind;
+const metadataDecimals: 18 = metadataResult.decimals;
+// @ts-expect-error token metadata requires a valid EVM address.
+tokenMetadata({}, { address: "not-an-address", symbol: "TOKEN" });
+// @ts-expect-error token metadata symbol must be a string.
+tokenMetadata({}, { address: ADDRESS, symbol: 18 });
+// @ts-expect-error tokenMetadata attaches observations only to object Query results.
+tokenMetadata("metadata", { address: ADDRESS });
+
 void LabeledFixture;
 void InvalidLabeledFixture;
+void metadataKind;
+void metadataDecimals;

@@ -10,6 +10,7 @@ import {
   RECEIPT_META,
 } from "./decorators.js";
 import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
+import { queryObservationOf, type TokenMetadataObservation } from "./observations.js";
 import type { MossRuntime } from "./runtime.js";
 import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
 import type {
@@ -98,6 +99,10 @@ function requireMetadataText(value: unknown, path: string): void {
 const SAFE_LABEL_PART = /^[A-Za-z0-9 ._-]+$/;
 const ADDRESS_IN_TEXT = /(?<![0-9a-f])0x[0-9a-f]{40}(?![0-9a-f])/gi;
 
+function isSafeLabelName(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 32 && SAFE_LABEL_PART.test(value);
+}
+
 function collectLabels(
   entries: Iterable<readonly [name: string, address: Address]>,
   provenance: "Trusted" | "Package",
@@ -108,7 +113,7 @@ function collectLabels(
   const names = new Set<string>();
   for (const [name, address] of entries) {
     const payload = packageName ? `${packageName}:${name}` : name;
-    if (!SAFE_LABEL_PART.test(name) || payload.length > 32) {
+    if (!isSafeLabelName(name) || payload.length > 32) {
       throw new Error(`${owner} ${provenance} label must be a 1-32 character safe name`);
     }
     if (!isAddress(address, { strict: false })) {
@@ -139,9 +144,45 @@ function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
   return "protocol" in receipt && typeof receipt.protocol === "string";
 }
 
+function freezeReceiptOwnedStructure(root: Receipt): Receipt {
+  const receipts = new WeakSet<object>();
+  const jsonValues = new WeakSet<object>();
+  const freezeJson = (value: JsonSafeValue): void => {
+    if (value === null || typeof value !== "object" || jsonValues.has(value)) return;
+    jsonValues.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) freezeJson(entry);
+    } else {
+      for (const entry of Object.values(value)) freezeJson(entry);
+    }
+    Object.freeze(value);
+  };
+  const freezeReceipt = (receipt: Receipt): void => {
+    if (receipts.has(receipt)) return;
+    receipts.add(receipt);
+    freezeJson(receipt.outcome);
+    for (const child of receipt.changes) {
+      if (child.kind === "receipt") {
+        freezeReceipt(child);
+      } else {
+        freezeJson(child.data);
+        Object.freeze(child);
+      }
+    }
+    Object.freeze(receipt.changes);
+    Object.freeze(receipt);
+  };
+  freezeReceipt(root);
+  return root;
+}
+
 export class Registry {
   #protocols = new Map<string, Registered>();
   #assignedReceiptProtocols = new WeakMap<object, string>();
+  #onChainMetadata = new Map<
+    string,
+    Pick<TokenMetadataObservation, "address" | "symbol" | "name">
+  >();
   #trustedLabels: ReadonlyMap<string, string>;
   readonly runtime: MossRuntime;
 
@@ -388,7 +429,31 @@ export class Registry {
     const params = await parseParams(meta.spec.params, rawParams);
     const instance = this.#instantiate(protocol, account);
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
-    return toJsonSafe(await (instance as any)[method](params, { account } satisfies ActionCtx));
+    const result = await (instance as any)[method](params, { account } satisfies ActionCtx);
+    this.#processQueryObservation(result);
+    return toJsonSafe(result);
+  }
+
+  #processQueryObservation(result: unknown): void {
+    const observation = queryObservationOf(result);
+    if (!observation) return;
+    switch (observation.kind) {
+      case "tokenMetadata": {
+        const symbol = isSafeLabelName(observation.symbol) ? observation.symbol : undefined;
+        const name = isSafeLabelName(observation.name) ? observation.name : undefined;
+        const key = observation.address.toLowerCase();
+        if (!symbol && !name) {
+          this.#onChainMetadata.delete(key);
+          return;
+        }
+        this.#onChainMetadata.set(key, {
+          address: observation.address,
+          ...(symbol ? { symbol } : {}),
+          ...(name ? { name } : {}),
+        });
+        return;
+      }
+    }
   }
 
   #runReceipt(protocol: string, receiptName: string, changes: readonly Change[]): Receipt {
@@ -400,7 +465,7 @@ export class Registry {
     // biome-ignore lint/suspicious/noExplicitAny: registration validates Receipt dispatch
     const result = (instance as any)[receiptName](changes) as ReceiptResult;
     verifyReceiptCoverage(changes, result);
-    return this.#attachProtocol(result, protocol);
+    return freezeReceiptOwnedStructure(this.#attachProtocol(result, protocol));
   }
 
   #attachProtocol(result: ReceiptResult, protocol: string): Receipt {
@@ -570,7 +635,10 @@ export class Registry {
             if (label) return `Package(${scope.packageName}:${label})`;
           }
           const dependency = current.dependencies.get(key);
-          return dependency ? `Package(${dependency.packageName}:${dependency.name})` : address;
+          if (dependency) return `Package(${dependency.packageName}:${dependency.name})`;
+          const onChain = this.#onChainMetadata.get(key);
+          const name = onChain?.symbol ?? onChain?.name;
+          return name ? `OnChain(${name},${address})` : address;
         });
 
       return {
