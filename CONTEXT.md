@@ -43,7 +43,7 @@ A reusable, context-free value contract carrying validation, transformation, def
 A Capability or Query input field pairing a Parameter type with a separate description of that field's specific role.
 
 **Risk label**:
-A Capability tag naming a category of danger, such as `fundOut`, `approval`, or `priceImpact`. It is authoring metadata, not runtime evidence.
+A Core-defined closed-set category of danger declared by a Capability, such as `fundOut`, `approval`, `priceImpact`, or `debt`. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. It is authoring metadata, not runtime evidence.
 _Avoid_: warning, flag
 
 **Protocol trust boundary**:
