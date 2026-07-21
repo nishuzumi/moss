@@ -1,0 +1,35 @@
+{
+  "name": "@themoss/protocol-fastlane",
+  "version": "0.1.0",
+  "description": "Moss protocol adapter for FastLane shMONAD liquid staking on Monad",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:abi:online": "vitest run --config vitest.online.config.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "viem": "^2.54.3"
+  },
+  "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}

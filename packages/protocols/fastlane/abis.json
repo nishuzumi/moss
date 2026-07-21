@@ -1,0 +1,7 @@
+{
+  "staking": {
+    "proxy": "0x1B68626dCa36c7fE922fD2d55E4f631d962dE19c",
+    "implementation": "0x856a4019228c265dee336df705277607c4a18e1b",
+    "allowedExplorerOnly": []
+  }
+}
