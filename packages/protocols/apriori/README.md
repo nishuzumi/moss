@@ -15,7 +15,7 @@ withdrawal queue:
 
 | Contract | Address | Status |
 |----------|---------|--------|
-| aprMON (stake entry) | `0x0c65a0bc65a5d819235b71f554d210d3f80e0852` | EIP-7702 delegated token; logic in impl `0x29fcb43b46531bca003ddc8fcb67ffe91900c762` |
+| aprMON (stake entry) | `0x0c65a0bc65a5d819235b71f554d210d3f80e0852` | Proxy (non-EIP-7702); logic in impl `0x29fcb43b46531bca003ddc8fcb67ffe91900c762` |
 | Entrypoints | `deposit` `0x6e553f65`, `requestRedeem` `0x107703ab`, `redeem` `0x492e47d2` | confirmed present on-chain |
 
 ## Parameters
