@@ -65,13 +65,6 @@ const erc1155ApprovalCheckParams = {
   operator: { type: Address, description: "Address whose operator status is checked." },
 } satisfies ParamsSpec;
 
-export type ERC1155ApprovalOutcome = {
-  operation: "approvalForAll";
-  collection: AddressValue;
-  account: AddressValue;
-  operator: AddressValue;
-  approved: boolean;
-};
 export type ERC1155TransferItem = {
   tokenId: string;
   amount: string;
@@ -96,9 +89,17 @@ export type ERC1155Outcome =
       from: AddressValue;
       to: AddressValue;
       items: readonly ERC1155TransferItem[];
+    }
+  | {
+      operation: "approvalForAll";
+      collection: AddressValue;
+      account: AddressValue;
+      operator: AddressValue;
+      approved: boolean;
     };
 
 export type ERC1155TransferOutcome = Extract<ERC1155Outcome, { event: "TransferSingle" }>;
+export type ERC1155ApprovalOutcome = Extract<ERC1155Outcome, { operation: "approvalForAll" }>;
 
 @Protocol({
   name: "erc1155",
@@ -194,11 +195,15 @@ export class ERC1155 {
   @Receipt()
   transferReceipt(changes: readonly Change[]): MossReceipt<ERC1155TransferOutcome> {
     const receipt = this.changesReceipt(changes);
-    const [outcome] = receipt.outcome;
-    if (!outcome || receipt.outcome.length !== 1 || outcome.event !== "TransferSingle") {
+    const transfers = receipt.outcome.filter(
+      (outcome): outcome is ERC1155TransferOutcome =>
+        outcome.operation === "transfer" && outcome.event === "TransferSingle",
+    );
+    const [transfer] = transfers;
+    if (!transfer || transfers.length !== 1 || receipt.outcome.length !== 1) {
       throw new Error("ERC1155 transfer Receipt requires exactly one TransferSingle Change");
     }
-    return { ...receipt, outcome, text: receipt.changes[0]?.text ?? receipt.text };
+    return { ...receipt, outcome: transfer, text: receipt.changes[0]?.text ?? receipt.text };
   }
 
   @Receipt()
@@ -224,40 +229,15 @@ export class ERC1155 {
 
   @Receipt()
   approvalReceipt(changes: readonly Change[]): MossReceipt<ERC1155ApprovalOutcome> {
-    const first = changes[0];
-    if (changes.length !== 1 || !first || first.kind !== "event") {
-      throw new Error("ERC1155 approval Receipt requires exactly one event Change");
+    const receipt = this.changesReceipt(changes);
+    const approvals = receipt.outcome.filter(
+      (outcome): outcome is ERC1155ApprovalOutcome => outcome.operation === "approvalForAll",
+    );
+    const [approval] = approvals;
+    if (!approval || approvals.length !== 1 || receipt.outcome.length !== 1) {
+      throw new Error("ERC1155 approval Receipt requires exactly one ApprovalForAll Change");
     }
-    let decoded: ReturnType<typeof decodeEventLog<typeof ierc1155Abi>>;
-    try {
-      decoded = decodeEventLog({
-        abi: ierc1155Abi,
-        topics: first.topics as [Hex, ...Hex[]],
-        data: first.data,
-        strict: true,
-      });
-    } catch {
-      throw new Error(`Unexpected Change: ${first.address} emitted an unsupported event`);
-    }
-    if (decoded.eventName !== "ApprovalForAll") {
-      throw new Error(
-        `Unexpected Change: ${first.address} emitted ${decoded.eventName}, expected ApprovalForAll`,
-      );
-    }
-    const outcome: ERC1155ApprovalOutcome = {
-      operation: "approvalForAll",
-      collection: first.address,
-      account: decoded.args.account,
-      operator: decoded.args.operator,
-      approved: decoded.args.approved,
-    };
-    const text = `ERC1155 ApprovalForAll: ${outcome.account} ${outcome.approved ? "approved" : "revoked"} ${outcome.operator} for ${outcome.collection}`;
-    return {
-      kind: "receipt",
-      outcome,
-      text,
-      changes: [{ kind: "change" as const, change: first, data: outcome, text }],
-    };
+    return { ...receipt, outcome: approval, text: receipt.changes[0]?.text ?? receipt.text };
   }
 }
 
@@ -291,6 +271,16 @@ function parseERC1155Change(change: Change): ERC1155Outcome {
     };
   }
 
+  if (decoded.eventName === "ApprovalForAll") {
+    return {
+      operation: "approvalForAll",
+      collection: change.address,
+      account: decoded.args.account,
+      operator: decoded.args.operator,
+      approved: decoded.args.approved,
+    };
+  }
+
   if (decoded.eventName === "TransferBatch") {
     if (decoded.args.ids.length !== decoded.args.values.length) {
       throw new Error("Unexpected Change: ERC1155 TransferBatch ids and values lengths differ");
@@ -316,6 +306,9 @@ function parseERC1155Change(change: Change): ERC1155Outcome {
 }
 
 function describeERC1155Outcome(outcome: ERC1155Outcome): string {
+  if (outcome.operation === "approvalForAll") {
+    return `ERC1155 ApprovalForAll: ${outcome.account} ${outcome.approved ? "approved" : "revoked"} ${outcome.operator} for ${outcome.collection}`;
+  }
   if (outcome.event === "TransferSingle") {
     return `ERC1155 TransferSingle: ${outcome.amount} of ${outcome.collection} #${outcome.tokenId} from ${outcome.from} to ${outcome.to} by ${outcome.operator}`;
   }
