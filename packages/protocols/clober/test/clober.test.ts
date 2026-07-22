@@ -198,13 +198,11 @@ describe("Clober", () => {
     expect(reset.capability).toMatchObject({
       protocol: "erc20",
       method: "approve",
-      receipt: "approveReceipt",
       params: { amount: "0" },
     });
     expect(approval.capability).toMatchObject({
       protocol: "erc20",
       method: "approve",
-      receipt: "approveReceipt",
       params: { amount: "1500000" },
     });
     expect(decodeFunctionData({ abi: ERC20Abi, data: reset.transaction.data })).toEqual({

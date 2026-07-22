@@ -21,7 +21,7 @@ Monad mainnet deployments come from the official Clober V2 SDK address book:
 
 Source: [Clober V2 SDK addresses](https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/constants/chain-configs/addresses.ts), retrieved 2026-07-16. Live tests verify deployed bytecode and contract relationships.
 
-ABIs are vendored verbatim from the guarded `@clober/v2-sdk` npm tarball and deterministically regenerated into `src/abis/clober.ts`. `test/abis.test.ts` enforces the source-to-generated chain.
+ABIs are vendored verbatim from the guarded `@clober/v2-sdk` npm tarball and deterministically regenerated into `src/abis/clober.ts`. `test/abis.test.ts` enforces the source-to-generated chain. `test-online/abi-explorer.test.ts` uses the shared `@themoss/abi-tools` pipeline to cross-check those vendored ABIs against Monadscan-verified deployed contracts. Controller and BookManager are pinned as non-proxy contracts; BookViewer is pinned as an ERC-1967 proxy whose current implementation is `0x3dc8156a2524d524e5825e7d73250fD0Aa4D8828`.
 
 ## Supported market catalog
 
@@ -62,4 +62,5 @@ pnpm build
 pnpm typecheck
 pnpm lint
 MOSS_SKIP_E2E=1 pnpm test
+MONADSCAN_API_KEY=... pnpm --filter @themoss/protocol-clober test:abi:online
 ```
