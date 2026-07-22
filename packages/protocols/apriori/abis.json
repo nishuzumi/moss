@@ -1,0 +1,12 @@
+{
+  "aprMon": {
+    "proxy": "0x0c65a0bc65a5d819235b71f554d210d3f80e0852",
+    "implementation": "0x29fcb43b46531bca003ddc8fcb67ffe91900c762",
+    "explorerUrl": "https://api.etherscan.io/v2/api",
+    "explorerRetrieved": "2026-07-18",
+    "allowedExplorerOnly": [
+      "Transfer",
+      "Approval"
+    ]
+  }
+}
