@@ -1,4 +1,5 @@
 import {
+  type ActionCtx,
   Address,
   type AddressValue,
   Capability,
@@ -6,15 +7,20 @@ import {
   type Handle,
   type Hex,
   type InferParams,
-  type ParamsSpec,
+  type MossRuntime,
+  NATIVE,
   PositiveDecimalString,
   Protocol,
+  type ProtocolRef,
+  Query,
   Receipt,
   type ReceiptResult,
+  TokenReference,
   UnsignedIntegerString,
 } from "@themoss/core";
 import { decodeEventLog, parseUnits } from "viem";
 import { AprMonAbi, APRMON_ADDRESS } from "./abis/apriori.js";
+import { ERC20 } from "@themoss/erc";
 
 const stakeParams = {
   amount: {
@@ -25,7 +31,10 @@ const stakeParams = {
     type: Address,
     description: "Address that receives the minted aprMON shares.",
   },
-} satisfies ParamsSpec;
+} satisfies {
+  amount: { type: typeof PositiveDecimalString; description: string };
+  receiver: { type: typeof Address; description: string };
+};
 
 const unstakeParams = {
   shares: {
@@ -36,7 +45,10 @@ const unstakeParams = {
     type: Address,
     description: "Address that will own the withdrawal request and can claim MON.",
   },
-} satisfies ParamsSpec;
+} satisfies {
+  shares: { type: typeof PositiveDecimalString; description: string };
+  receiver: { type: typeof Address; description: string };
+};
 
 const claimParams = {
   requestId: {
@@ -47,7 +59,10 @@ const claimParams = {
     type: Address,
     description: "Address that receives the claimed MON.",
   },
-} satisfies ParamsSpec;
+} satisfies {
+  requestId: { type: typeof UnsignedIntegerString; description: string };
+  receiver: { type: typeof Address; description: string };
+};
 
 type StakeOutcome = {
   operation: "stake";
@@ -68,6 +83,21 @@ type ClaimOutcome = {
   assets: string;
 };
 
+function tryDecodeAprioriEvent(
+  change: Extract<Change, { kind: "event" }>,
+) {
+  try {
+    return decodeEventLog({
+      abi: AprMonAbi,
+      topics: change.topics as [Hex, ...Hex[]],
+      data: change.data,
+      strict: true,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 @Protocol({
   name: "apriori",
   category: "staking",
@@ -76,9 +106,13 @@ type ClaimOutcome = {
   contracts: {
     aprMon: { abi: AprMonAbi, addr: APRMON_ADDRESS },
   },
+  protocols: {
+    erc20: ERC20,
+  },
 })
 export class AprioriProtocol {
   declare aprMon: Handle<typeof AprMonAbi>;
+  declare erc20: ProtocolRef<ERC20>;
 
   @Capability<AprioriProtocol, typeof stakeParams>({
     intent: "Deposit {amount} MON into aPriori for aprMON to {receiver}",
@@ -101,7 +135,7 @@ export class AprioriProtocol {
     verb: "unstake",
     params: unstakeParams,
     receipt: "unstakeReceipt",
-    risk: ["priceImpact"],
+    risk: ["fundOut", "priceImpact"],
     tags: ["staking", "liquid-staking", "withdrawal-queue"],
   })
   async unstake(params: InferParams<typeof unstakeParams>) {
@@ -128,12 +162,9 @@ export class AprioriProtocol {
 
   @Receipt()
   stakeReceipt(changes: readonly Change[]): ReceiptResult<StakeOutcome> {
-    let deposited: Extract<Change, { kind: "nativeTransfer" }> | undefined;
     let event: StakeOutcome | undefined;
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") {
-        if (deposited) throw new Error("aPriori stake emitted multiple native transfers");
-        deposited = change;
         return {
           kind: "change" as const,
           change,
@@ -141,20 +172,22 @@ export class AprioriProtocol {
           text: `Native MON Transfer: ${change.value} from ${change.from} to ${change.to}`,
         };
       }
-      if (change.kind !== "event") throw new Error("Unexpected Change kind");
-      let decoded: ReturnType<typeof decodeEventLog<typeof AprMonAbi>>;
-      try {
-        decoded = decodeEventLog({
-          abi: AprMonAbi,
-          topics: change.topics as [Hex, ...Hex[]],
-          data: change.data,
-          strict: true,
-        });
-      } catch {
-        throw new Error("Unexpected Change: unsupported aPriori event");
+      if (change.kind !== "event") {
+        return this.erc20.changesReceipt([change]).changes[0] ?? {
+          kind: "change" as const,
+          change,
+          data: { operation: "unknown", value: "" },
+          text: `aPriori unknown stake change`,
+        };
       }
-      if (decoded.eventName !== "Deposit" || event) {
-        throw new Error(`Unexpected Change: aPriori emitted ${decoded.eventName}`);
+      const decoded = tryDecodeAprioriEvent(change);
+      if (decoded?.eventName !== "Deposit" || event) {
+        return this.erc20.changesReceipt([change]).changes[0] ?? {
+          kind: "change" as const,
+          change,
+          data: { operation: "unknown", value: "" },
+          text: `aPriori unknown stake change`,
+        };
       }
       event = {
         operation: "stake",
@@ -169,8 +202,8 @@ export class AprioriProtocol {
         text: `aPriori Stake: ${event.assets} MON → ${event.shares} aprMON by ${event.account}`,
       };
     });
-    if (!event || !deposited || event.assets !== deposited.value) {
-      throw new Error("aPriori stake Receipt requires matching Deposit event and native transfer");
+    if (!event) {
+      throw new Error("aPriori stake Receipt requires a Deposit event");
     }
     return {
       kind: "receipt",
@@ -184,20 +217,22 @@ export class AprioriProtocol {
   unstakeReceipt(changes: readonly Change[]): ReceiptResult<UnstakeOutcome> {
     let event: UnstakeOutcome | undefined;
     const parsed = changes.map((change) => {
-      if (change.kind !== "event") throw new Error("Unexpected Change kind");
-      let decoded: ReturnType<typeof decodeEventLog<typeof AprMonAbi>>;
-      try {
-        decoded = decodeEventLog({
-          abi: AprMonAbi,
-          topics: change.topics as [Hex, ...Hex[]],
-          data: change.data,
-          strict: true,
-        });
-      } catch {
-        throw new Error("Unexpected Change: unsupported aPriori event");
+      if (change.kind !== "event") {
+        return this.erc20.changesReceipt([change]).changes[0] ?? {
+          kind: "change" as const,
+          change,
+          data: { operation: "unknown", value: "" },
+          text: `aPriori unknown unstake change`,
+        };
       }
-      if (decoded.eventName !== "RequestRedeem" || event) {
-        throw new Error(`Unexpected Change: aPriori emitted ${decoded.eventName}`);
+      const decoded = tryDecodeAprioriEvent(change);
+      if (decoded?.eventName !== "RequestRedeem" || event) {
+        return this.erc20.changesReceipt([change]).changes[0] ?? {
+          kind: "change" as const,
+          change,
+          data: { operation: "unknown", value: "" },
+          text: `aPriori unknown unstake change`,
+        };
       }
       event = {
         operation: "unstake",
@@ -212,7 +247,9 @@ export class AprioriProtocol {
         text: `aPriori Unstake: ${event.shares} aprMON queued, request ${event.requestId} by ${event.account}`,
       };
     });
-    if (!event) throw new Error("aPriori unstake Receipt requires a RequestRedeem event");
+    if (!event) {
+      throw new Error("aPriori unstake Receipt requires a RequestRedeem event");
+    }
     return {
       kind: "receipt",
       outcome: event,
@@ -225,20 +262,22 @@ export class AprioriProtocol {
   claimReceipt(changes: readonly Change[]): ReceiptResult<ClaimOutcome> {
     let event: ClaimOutcome | undefined;
     const parsed = changes.map((change) => {
-      if (change.kind !== "event") throw new Error("Unexpected Change kind");
-      let decoded: ReturnType<typeof decodeEventLog<typeof AprMonAbi>>;
-      try {
-        decoded = decodeEventLog({
-          abi: AprMonAbi,
-          topics: change.topics as [Hex, ...Hex[]],
-          data: change.data,
-          strict: true,
-        });
-      } catch {
-        throw new Error("Unexpected Change: unsupported aPriori event");
+      if (change.kind !== "event") {
+        return this.erc20.changesReceipt([change]).changes[0] ?? {
+          kind: "change" as const,
+          change,
+          data: { operation: "unknown", value: "" },
+          text: `aPriori unknown claim change`,
+        };
       }
-      if (decoded.eventName !== "Redeem" || event) {
-        throw new Error(`Unexpected Change: aPriori emitted ${decoded.eventName}`);
+      const decoded = tryDecodeAprioriEvent(change);
+      if (decoded?.eventName !== "Redeem" || event) {
+        return this.erc20.changesReceipt([change]).changes[0] ?? {
+          kind: "change" as const,
+          change,
+          data: { operation: "unknown", value: "" },
+          text: `aPriori unknown claim change`,
+        };
       }
       const requestIds = (decoded.args.requestIds ?? []).map((x: bigint) => x.toString());
       event = {
@@ -254,7 +293,9 @@ export class AprioriProtocol {
         text: `aPriori Claim: request ${requestIds.join(",")} → ${event.assets} MON by ${event.account}`,
       };
     });
-    if (!event) throw new Error("aPriori claim Receipt requires a Redeem event");
+    if (!event) {
+      throw new Error("aPriori claim Receipt requires a Redeem event");
+    }
     return {
       kind: "receipt",
       outcome: event,
