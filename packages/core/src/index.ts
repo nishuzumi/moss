@@ -31,6 +31,7 @@ export { createRuntime, type MossRuntime } from "./runtime.js";
 export {
   Address,
   BasisPoints,
+  BooleanFlag,
   describeParams,
   type InferParams,
   type ParameterDeclaration,
