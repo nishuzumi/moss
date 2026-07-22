@@ -199,11 +199,21 @@ describe("ERC1155", () => {
     ).rejects.toThrow("uint256 max");
   });
 
-  it("parses single, batch, and single Changes exhaustively in original order", () => {
+  it("parses single, batch, approval, and single Changes exhaustively in original order", () => {
     const first = transferSingle(7n, 0n, { operator: ACCOUNT, from: ACCOUNT, to: ACCOUNT });
     const batch = transferBatch([9n, 9n, 2n], [3n, 0n, 4n]);
+    const approval: Change = {
+      kind: "event",
+      address: COLLECTION,
+      topics: encodeEventTopics({
+        abi: ierc1155Abi,
+        eventName: "ApprovalForAll",
+        args: { account: ACCOUNT, operator: OPERATOR },
+      }) as readonly Hex[],
+      data: encodeAbiParameters([{ type: "bool", name: "approved" }], [true]),
+    };
     const last = transferSingle(11n, 5n);
-    const changes = [first, batch, last] as const;
+    const changes = [first, batch, approval, last] as const;
     const receipt = (Object.create(ERC1155.prototype) as ERC1155).changesReceipt(changes);
 
     expect(receipt.outcome).toEqual([
@@ -231,6 +241,13 @@ describe("ERC1155", () => {
         ],
       },
       {
+        operation: "approvalForAll",
+        collection: COLLECTION,
+        account: ACCOUNT,
+        operator: OPERATOR,
+        approved: true,
+      },
+      {
         operation: "transfer",
         event: "TransferSingle",
         collection: COLLECTION,
@@ -249,6 +266,7 @@ describe("ERC1155", () => {
     expect(() => verifyReceiptCoverage(changes, receipt)).not.toThrow();
     expect(receipt.text).toContain("TransferSingle");
     expect(receipt.text).toContain("TransferBatch");
+    expect(receipt.text).toContain("ApprovalForAll");
   });
 
   it("narrows a direct transfer Receipt to exactly one TransferSingle", () => {
@@ -280,17 +298,17 @@ describe("ERC1155", () => {
     } satisfies Change;
     expect(() => protocol.changesReceipt([native])).toThrow("only accept contract events");
 
-    const approval = {
+    const uriEvent = {
       kind: "event",
       address: COLLECTION,
       topics: encodeEventTopics({
         abi: ierc1155Abi,
-        eventName: "ApprovalForAll",
-        args: { account: ACCOUNT, operator: OPERATOR },
+        eventName: "URI",
+        args: { id: 1n },
       }) as readonly Hex[],
-      data: encodeAbiParameters([{ type: "bool", name: "approved" }], [true]),
+      data: encodeAbiParameters([{ type: "string", name: "value" }], ["ipfs://item"]),
     } satisfies Change;
-    expect(() => protocol.changesReceipt([approval])).toThrow("unsupported ERC-1155 event");
+    expect(() => protocol.changesReceipt([uriEvent])).toThrow("unsupported ERC-1155 event");
 
     const malformed = { ...transferSingle(1n, 1n), data: "0x" as Hex } satisfies Change;
     expect(() => protocol.changesReceipt([malformed])).toThrow("unsupported ERC-1155 event");
@@ -409,8 +427,11 @@ describe("ERC1155", () => {
   it("approvalReceipt rejects non-ApprovalForAll events", () => {
     const transfer = transferSingle(1n, 1n);
     const protocol = Object.create(ERC1155.prototype) as ERC1155;
-    expect(() => protocol.approvalReceipt([transfer])).toThrow("expected ApprovalForAll");
-    expect(() => protocol.approvalReceipt([])).toThrow("exactly one event");
+    expect(() => protocol.approvalReceipt([transfer])).toThrow("exactly one ApprovalForAll Change");
+    expect(() => protocol.approvalReceipt([])).toThrow("exactly one ApprovalForAll Change");
+    expect(() => protocol.transferReceipt([transfer, transfer])).toThrow(
+      "exactly one TransferSingle Change",
+    );
   });
 });
 
