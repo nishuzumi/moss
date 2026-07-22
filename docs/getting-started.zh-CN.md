@@ -241,7 +241,123 @@ cp -R packages/protocols/_template packages/protocols/myprotocol
 
 完整开发与 review checklist 见 [Protocol 接入指南](./protocol-onboarding.md)。
 
-## 12. 下一步
+## 12. 常见问题（FAQ）
+
+### 12.1 Windows 提示无法识别 `pnpm`，怎么办？
+
+先确认是否已经安装 pnpm：
+
+```powershell
+pnpm -v
+```
+
+如果 PowerShell 提示无法识别该命令，可执行：
+
+```powershell
+npm install -g pnpm
+```
+
+安装完成后关闭并重新打开 VS Code 终端，再次运行 `pnpm -v`。本项目需要 pnpm 11。
+
+### 12.2 为什么必须先运行 `pnpm build`，再运行 typecheck 或示例？
+
+Moss 是 pnpm monorepo，workspace package 的类型声明来自各 package 的 `dist` 构建产物。首次安装依赖后，应按顺序执行：
+
+```powershell
+pnpm build
+pnpm typecheck
+```
+
+构建成功时通常可以看到 `ESM Build success`、`DTS Build success`，并在相关 package 的 `dist` 目录中看到 `index.d.ts`。
+
+### 12.3 构建输出中出现 `examples are not built`，是否代表失败？
+
+不一定。部分 example package 的 `build` 脚本会主动跳过编译，因为示例通过 `tsx` 直接运行源码。
+
+应继续检查完整输出：如果各 package 显示 `Build success`、`DTS Build success` 或 `Done`，并且没有 `ERR_PNPM_*` 等终止错误，通常表示构建已完成。
+
+### 12.4 为什么不能把 `const candidates = ...` 直接输入 PowerShell？
+
+下面这种内容是 TypeScript 代码：
+
+```ts
+const candidates = registry.discover({ verb: "swap" });
+```
+
+它应写入 `examples/simple-flow/src/play.ts`，不能作为 PowerShell 命令执行。保存文件后，使用下面的终端命令运行：
+
+```powershell
+pnpm --filter @themoss/example-simple-flow exec tsx src/play.ts
+```
+
+可以这样区分：
+
+- `pnpm`、`node`、`git` 开头的内容通常是终端命令；
+- `const`、`import`、`await` 开头的内容通常是 TypeScript 代码；
+- `{ "mcpServers": ... }` 是 JSON 配置，应写入 MCP client 的配置文件。
+
+### 12.5 VS Code 提示找不到 `process` 或 `@themoss/system` 的类型，怎么办？
+
+先确认命令行构建是否真的失败：
+
+```powershell
+pnpm build
+pnpm typecheck
+```
+
+如果命令执行成功，并且例如 `packages/system/dist/index.d.ts` 已存在，则可能只是 VS Code 尚未刷新 monorepo 类型信息。可依次尝试：
+
+1. 确认 VS Code 打开的是 Moss 仓库根目录，而不是单独打开 `examples/simple-flow`；
+2. 在命令面板执行 `TypeScript: Select TypeScript Version`，选择 `Use Workspace Version`；
+3. 执行 `TypeScript: Restart TS Server`；
+4. 执行 `Developer: Reload Window`。
+
+不要安装类似 `@types/themoss__system` 的包。`@themoss/system` 是当前仓库中的 workspace package，不是需要单独安装类型的第三方包。
+
+### 12.6 运行 `wrap` 或 `swap` 示例会花费真实资产吗？
+
+不会。这些示例读取 Monad 主网状态，但只构建并模拟未签名交易，不需要私钥，也不会广播交易。
+
+不过，Moss 仍处于未经审计的 alpha 阶段。后续若将生成的交易交给其他钱包或签名方，必须先检查模拟结果，并避免使用生产资金。
+
+### 12.7 为什么模拟没有 Warning，仍不能直接批准交易？
+
+零 Warning 只说明模拟观察到的 Change 已被完整解析，不代表结果一定符合用户原始意图。
+
+对于 swap，还应检查结构化 Outcome，例如：
+
+- `operation` 和 `protocol` 是否正确；
+- sender、`tokenIn` 和 `tokenOut` 是否与请求一致；
+- 输入和输出数量是否合理；
+- Capability 是否保留预期的滑点限制。
+
+Receipt text 主要用于展示，不能替代结构化 Outcome 和 Warning 检查。
+
+### 12.8 MCP Server 的 JSON 配置应该在哪里执行？
+
+下面的内容不是终端命令：
+
+```json
+{
+  "mcpServers": {
+    "moss": {
+      "command": "node",
+      "args": ["<moss路径>/packages/mcp-server/dist/cli.js"],
+      "env": { "MOSS_RPC_URL": "https://rpc.monad.xyz" }
+    }
+  }
+}
+```
+
+它应添加到支持 MCP 的 client 配置文件中。`<moss路径>` 需要替换成实际绝对路径，例如 Windows 下可写为：
+
+```text
+C:/Users/<用户名>/moss/packages/mcp-server/dist/cli.js
+```
+
+配置前先执行 `pnpm build`，并确认 `packages/mcp-server/dist/cli.js` 已生成。
+
+## 13. 下一步
 
 - [Protocol template](../packages/protocols/_template)
 - [Kuru Protocol](../packages/protocols/kuru/src/kuru.ts)
