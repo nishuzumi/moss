@@ -2,6 +2,7 @@ import {
   type ActionCtx,
   Address,
   type AddressValue,
+  BooleanFlag,
   Capability,
   type Change,
   createHandle,
@@ -52,11 +53,9 @@ const erc1155ApprovalParams = {
   collection: { type: Address, description: "Collection to manage operator approval for." },
   operator: { type: Address, description: "Address authorized to manage the caller's tokens." },
   approved: {
-    type: UnsignedIntegerString.refine(
-      (v) => v === "1" || v === "0",
-      'Expected "1" (approve) or "0" (revoke).',
-    ).describe('Pass "1" to approve the operator or "0" to revoke.'),
-    description: '"1" to approve the operator, "0" to revoke.',
+    type: BooleanFlag,
+    description:
+      "true to grant the operator approval over the caller's tokens, false to revoke it.",
   },
 } satisfies ParamsSpec;
 
@@ -176,7 +175,7 @@ export class ERC1155 {
     return [
       this.#handle(params.collection, ctx.account).setApprovalForAll([
         params.operator,
-        params.approved === "1",
+        params.approved,
       ]),
     ];
   }

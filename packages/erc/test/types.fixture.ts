@@ -37,6 +37,27 @@ const missingRecipient: ERC1155TransferParams = {
   amount: "3",
 };
 
+type ERC1155ApprovalParams = Parameters<ERC1155["approve"]>[0];
+const erc1155ApprovalParams: ERC1155ApprovalParams = {
+  collection: "0x1111111111111111111111111111111111111111",
+  operator: "0x2222222222222222222222222222222222222222",
+  approved: true,
+};
+const erc1155RevokeParams: ERC1155ApprovalParams = {
+  ...erc1155ApprovalParams,
+  approved: false,
+};
+const invalidApprovedString: ERC1155ApprovalParams = {
+  ...erc1155ApprovalParams,
+  // @ts-expect-error The approved flag is a JSON boolean, not a string.
+  approved: "1",
+};
+const invalidApprovedNumber: ERC1155ApprovalParams = {
+  ...erc1155ApprovalParams,
+  // @ts-expect-error The approved flag is a JSON boolean, not a number.
+  approved: 1,
+};
+
 type ERC1155DirectOutcome = ReturnType<ERC1155["transferReceipt"]>["outcome"];
 const directEvent: ERC1155DirectOutcome["event"] = "TransferSingle";
 // @ts-expect-error The direct transfer Receipt cannot report a TransferBatch event.
@@ -67,6 +88,10 @@ class ERC1155CompileFixture {
 void erc1155Params;
 void invalidTokenId;
 void missingRecipient;
+void erc1155ApprovalParams;
+void erc1155RevokeParams;
+void invalidApprovedString;
+void invalidApprovedNumber;
 void directEvent;
 void invalidDirectEvent;
 void batchOutcome;
