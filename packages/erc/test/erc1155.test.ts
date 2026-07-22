@@ -185,6 +185,13 @@ describe("ERC1155", () => {
       }),
     ).rejects.toThrow("invalid parameters");
     await expect(
+      registry().action("erc1155", "approve", ACCOUNT, {
+        collection: COLLECTION,
+        operator: OPERATOR,
+        approved: "1",
+      }),
+    ).rejects.toThrow("invalid parameters");
+    await expect(
       registry().action("erc1155", "uri", ACCOUNT, {
         collection: COLLECTION,
         tokenId: overflow,
@@ -321,13 +328,13 @@ describe("ERC1155", () => {
     ).toThrow("original object");
   });
 
-  it("builds setApprovalForAll calldata for approve (1) and revoke (0)", async () => {
+  it("builds setApprovalForAll calldata for approve (true) and revoke (false)", async () => {
     const instance = registry();
 
     const approve = await instance.action("erc1155", "approve", ACCOUNT, {
       collection: COLLECTION,
       operator: OPERATOR,
-      approved: "1",
+      approved: true,
     });
     if (approve.kind !== "capability") throw new Error("expected capability");
     const [approveTx] = flattenCapabilityTree(approve);
@@ -340,7 +347,7 @@ describe("ERC1155", () => {
     const revoke = await instance.action("erc1155", "approve", ACCOUNT, {
       collection: COLLECTION,
       operator: OPERATOR,
-      approved: "0",
+      approved: false,
     });
     if (revoke.kind !== "capability") throw new Error("expected capability");
     const [revokeTx] = flattenCapabilityTree(revoke);
