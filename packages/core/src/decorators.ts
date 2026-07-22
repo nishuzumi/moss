@@ -8,8 +8,9 @@ import type {
   Category,
   Change,
   JsonSafeValue,
+  Receipt as ParsedReceipt,
   ProtocolRef,
-  Receipt as ReceiptResult,
+  ReceiptResult,
   RiskLabel,
   Verb,
 } from "./types.js";
@@ -30,12 +31,17 @@ export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Reco
   category: Category;
   description: string;
   contracts: Record<string, ContractConfig>;
+  labels?: Record<string, Address>;
   protocols?: Dependencies;
 }
 
 type ReceiptNames<This> = {
-  [K in keyof This]: This[K] extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>
-    ? K
+  [K in keyof This]: This[K] extends (changes: readonly Change[]) => infer Result
+    ? Result extends ParsedReceipt<JsonSafeValue>
+      ? never
+      : Result extends ReceiptResult<JsonSafeValue>
+        ? K
+        : never
     : never;
 }[keyof This] &
   string;
@@ -67,7 +73,7 @@ export const RECEIPT_META = Symbol.for("moss.receipt");
 export function Protocol<Dependencies extends ProtocolDependencies = Record<never, never>>(
   config: ProtocolConfig<Dependencies>,
 ) {
-  if (!/^[a-z][a-z0-9-]*$/.test(config.name)) {
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
   }
   return <T extends new () => object & InjectedProtocols<Dependencies>>(
@@ -157,7 +163,7 @@ export function Query<Params extends ParamsSpec>(spec: QuerySpec<Params>) {
 
 export function Receipt() {
   return <This, Method extends (changes: readonly Change[]) => ReceiptResult<JsonSafeValue>>(
-    method: Method,
+    method: Method & (ReturnType<Method> extends ParsedReceipt<JsonSafeValue> ? never : unknown),
     context: ClassMethodDecoratorContext<This, Method>,
   ): void => {
     if (context.kind !== "method" || context.static) {
@@ -167,5 +173,5 @@ export function Receipt() {
   };
 }
 
-/** Result type returned by a method decorated with `@Receipt()`. */
-export type Receipt<TOutcome extends JsonSafeValue = JsonSafeValue> = ReceiptResult<TOutcome>;
+/** Core-identified Receipt returned by Registry and injected Receipt dependencies. */
+export type Receipt<TOutcome extends JsonSafeValue = JsonSafeValue> = ParsedReceipt<TOutcome>;

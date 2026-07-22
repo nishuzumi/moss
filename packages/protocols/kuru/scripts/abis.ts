@@ -48,8 +48,13 @@ export function generate(packageRoot: string): string {
 //   tarball:  sha256 ${vendor.tarballSha256}
 //   vendored: ${vendor.vendoredAt} (release-age guard: ${vendor.releaseAgeGuardDays}d)
 //   verification: functions exercised live on Monad mainnet via rpc.monad.xyz;
-//   the adapter's e2e tests pin observable behavior.
-//   caveat:   Kuru contracts are upgradeable proxies (ERC-1967).
+//   the adapter's e2e tests pin observable behavior. The Router ABI is also
+//   cross-checked against the explorer-verified implementation by
+//   \`pnpm test:abi:online\` (abis.json records the expected addresses).
+//   caveat:   Kuru contracts are upgradeable proxies (ERC-1967). The OrderBook
+//   ABI is vendored-only: this SDK version matches neither of the two deployed
+//   implementations checked on 2026-07-20 — see test-online/abi-explorer.test.ts
+//   for the required-surface verification record and the upgrade tripwire.
 `;
 
   for (const source of SOURCES) {

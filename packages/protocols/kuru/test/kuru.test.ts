@@ -50,7 +50,10 @@ const MARKETS: readonly MockMarket[] = [
   market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
 ];
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("Kuru", () => {
   it("loads separate human-amount fields and requires exactly one side", async () => {
@@ -118,6 +121,7 @@ describe("Kuru", () => {
       pairs: readonly unknown[];
     };
     expect(request.pairs).toHaveLength(6);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
 
     const capability = await registry.action("kuru", "swap", ACCOUNT, {
       tokenIn: USDC_ADDRESS,
@@ -259,6 +263,147 @@ describe("Kuru", () => {
       }),
     ).rejects.toThrow("invalid base token decimals");
   });
+
+  it("bounds Kuru market discovery response size from content-length", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response("{}", { status: 200, headers: { "content-length": "1000001" } }),
+    );
+    const { registry } = offlineRegistry([], fetchMock);
+
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("response is too large");
+  });
+
+  it("accepts a Kuru market discovery response at the exact byte limit", async () => {
+    const prefix = '{"data":[],"padding":"';
+    const suffix = '"}';
+    const body = `${prefix}${"x".repeat(1_000_000 - prefix.length - suffix.length)}${suffix}`;
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(body, { status: 200 }),
+    );
+    const { registry } = offlineRegistry([], fetchMock);
+
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("no verified Kuru market path");
+  });
+
+  it("bounds Kuru market discovery response size from the body", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response("x".repeat(1_000_001), { status: 200 }),
+    );
+    const { registry } = offlineRegistry([], fetchMock);
+
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("response is too large");
+  });
+
+  it("bounds the number of Kuru market candidates before on-chain verification", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: Array.from({ length: 257 }, () => ({})) }), {
+          status: 200,
+        }),
+    );
+    const { registry } = offlineRegistry([], fetchMock);
+
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("too many markets");
+  });
+
+  it("accepts the exact Kuru market candidate limit", async () => {
+    const directMarket = MARKETS[0];
+    if (!directMarket) throw new Error("expected direct market fixture");
+    const candidate = {
+      market: directMarket.address,
+      baseasset: directMarket.base,
+      quoteasset: directMarket.quote,
+    };
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: Array.from({ length: 256 }, () => candidate) }), {
+          status: 200,
+        }),
+    );
+    const { registry } = offlineRegistry([directMarket], fetchMock);
+
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+
+    expect(quote.kind).toBe("query");
+  });
+
+  it("accepts the exact Kuru market route limit", async () => {
+    const { registry } = offlineRegistry(viaMonMarkets(16, 16));
+
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+
+    expect(quote.kind).toBe("query");
+  });
+
+  it("bounds via-MON route combinations before quoting", async () => {
+    const { registry } = offlineRegistry(viaMonMarkets(16, 16, true));
+
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("too many Kuru market routes");
+  });
+
+  it("times out Kuru market discovery", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
+        }),
+    );
+    const { registry } = offlineRegistry([], fetchMock);
+
+    const quote = registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    const assertion = expect(quote).rejects.toThrow("timed out after 10000ms");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await assertion;
+  });
 });
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
@@ -301,21 +446,11 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
   });
 });
 
-function offlineRegistry(markets: readonly MockMarket[] = MARKETS) {
+function offlineRegistry(
+  markets: readonly MockMarket[] = MARKETS,
+  fetchMock = marketDiscoveryFetch(markets),
+) {
   const byAddress = new Map(markets.map((entry) => [entry.address.toLowerCase(), entry]));
-  const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-    Promise.resolve({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: markets.map(({ address, base, quote }) => ({
-          market: address,
-          baseasset: base,
-          quoteasset: quote,
-        })),
-      }),
-    } as Response),
-  );
   vi.stubGlobal("fetch", fetchMock);
   const client = {
     readContract: async ({
@@ -391,6 +526,22 @@ function offlineRegistry(markets: readonly MockMarket[] = MARKETS) {
   };
 }
 
+function marketDiscoveryFetch(markets: readonly MockMarket[]) {
+  return vi.fn(
+    async (_input: string | URL | Request, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          data: markets.map(({ address, base, quote }) => ({
+            market: address,
+            baseasset: base,
+            quoteasset: quote,
+          })),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+  );
+}
+
 function market(
   address: `0x${string}`,
   base: `0x${string}`,
@@ -411,6 +562,49 @@ function market(
     buyNumerator: sellDenominator,
     buyDenominator: sellNumerator,
   };
+}
+
+function viaMonMarkets(
+  firstCount: number,
+  secondCount: number,
+  includeDirect = false,
+): MockMarket[] {
+  const firstLegs = Array.from({ length: firstCount }, (_, index) =>
+    market(
+      getAddress(`0x${(index + 100).toString(16).padStart(40, "0")}`),
+      USDC_ADDRESS,
+      ZERO,
+      6,
+      18,
+      1n,
+      1n,
+    ),
+  );
+  const secondLegs = Array.from({ length: secondCount }, (_, index) =>
+    market(
+      getAddress(`0x${(index + 200).toString(16).padStart(40, "0")}`),
+      ZERO,
+      AUSD_ADDRESS,
+      18,
+      6,
+      1n,
+      1n,
+    ),
+  );
+  const direct = includeDirect
+    ? [
+        market(
+          getAddress(`0x${(300).toString(16).padStart(40, "0")}`),
+          USDC_ADDRESS,
+          AUSD_ADDRESS,
+          6,
+          6,
+          1n,
+          1n,
+        ),
+      ]
+    : [];
+  return [...direct, ...firstLegs, ...secondLegs];
 }
 
 function convertUnits(

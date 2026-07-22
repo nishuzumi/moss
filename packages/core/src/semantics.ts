@@ -51,6 +51,8 @@ export const BasisPoints = z
   .max(10_000)
   .describe("An integer basis-point count from 0 through 10000; 1 bps equals 0.01%.");
 
+export const BooleanFlag = z.boolean().describe("A JSON boolean: true or false.");
+
 export async function parseParams<S extends ParamsSpec>(
   spec: S,
   raw: Record<string, unknown>,

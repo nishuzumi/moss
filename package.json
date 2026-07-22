@@ -9,10 +9,12 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:offline": "MOSS_SKIP_E2E=1 pnpm test",
+    "test:abi:online": "pnpm -r --if-present test:abi:online",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "fetch-abi": "pnpm --filter @themoss/abi-tools fetch-abi"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",

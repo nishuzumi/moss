@@ -22,8 +22,12 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 | WMON | `@themoss/system` | `wrap`、`unwrap` | `balanceOf` |
 | ERC-20 与 native MON | `@themoss/erc` | `transfer`、`approve` | `balanceOf`、`allowance`、`metadata` |
 | ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`、`balanceOf` |
-| Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
-| aPriori | `@themoss/protocol-apriori` | `stake`、`unstake`、`claim` | — |
+| ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
+|| Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
+|| aPriori | `@themoss/protocol-apriori` | `stake`、`unstake`、`claim` | — |
+|| PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+
+ERC-1155 `transfer` 接收 collection、token ID、amount 和 recipient。token ID 与 amount 使用十进制 uint256 字符串（允许零）。该 Capability 只构建一笔 `safeTransferFrom`，目前不暴露批量转账构建；Receipt 仍会解析 `TransferSingle` 和 `TransferBatch` Change，并保留批量条目的原始顺序，不做聚合。
 
 ## 快速开始
 
@@ -40,6 +44,9 @@ pnpm --filter @themoss/example-simple-flow wrap
 
 # 报价并模拟一个 Kuru MON → USDC swap
 pnpm --filter @themoss/example-simple-flow swap
+
+# 导出 MONADSCAN_API_KEY 后，抓取一个已验证的完整 ABI（ADR 0007）
+pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter02
 ```
 
 离线运行测试：
@@ -135,7 +142,7 @@ workspace package 的类型来自构建产物，因此必须先 build 再 typech
 | --- | --- |
 | [新手上路](./docs/getting-started.zh-CN.md)（[English](./docs/getting-started.md)） | 逐步运行并开发 Moss |
 | [MCP 工具契约](./docs/mcp-tools.md) | 四个 MCP 工具的输入输出 |
-| [Protocol 接入指南](./docs/protocol-onboarding.md) | 开发并提交一个 Protocol 包 |
+| [Protocol 接入指南](./docs/protocol-onboarding.md) | 开发并提交一个 Protocol 包，包括获取已验证 ABI |
 | [Agent 安全规则](./docs/agent-skill.md) | 强制模拟与意图对齐规则 |
 | [Agent swap 示例](./examples/agent-swap/README.md) | 在本地 Monad fork 上分离 Agent 与签名方 |
 | [架构决策](./docs/adr/) | 当前设计与取舍 |

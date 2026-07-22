@@ -1,3 +1,4 @@
+import { isAddress } from "viem";
 import {
   METHOD_META,
   type MethodMeta,
@@ -9,6 +10,7 @@ import {
   RECEIPT_META,
 } from "./decorators.js";
 import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
+import { queryObservationOf, type TokenMetadataObservation } from "./observations.js";
 import type { MossRuntime } from "./runtime.js";
 import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
 import type {
@@ -18,7 +20,11 @@ import type {
   Category,
   Change,
   JsonSafeValue,
+  LabelScope,
+  PackageLabel,
   Receipt,
+  ReceiptResult,
+  RegistryOptions,
   RiskLabel,
   Verb,
 } from "./types.js";
@@ -68,6 +74,8 @@ interface Registered {
   config: ProtocolConfig<ProtocolDependencies>;
   methods: Record<string, MethodMeta>;
   receipts: Set<string>;
+  packageName: string;
+  packageLabels: ReadonlyMap<string, string>;
 }
 
 type CapabilityMethodMeta = Extract<MethodMeta, { kind: "capability" }>;
@@ -88,12 +96,103 @@ function requireMetadataText(value: unknown, path: string): void {
   }
 }
 
+const SAFE_LABEL_PART = /^[A-Za-z0-9 ._-]+$/;
+const ADDRESS_IN_TEXT = /(?<![0-9a-f])0x[0-9a-f]{40}(?![0-9a-f])/gi;
+
+function isSafeLabelName(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 32 && SAFE_LABEL_PART.test(value);
+}
+
+function collectLabels(
+  entries: Iterable<readonly [name: string, address: Address]>,
+  provenance: "Trusted" | "Package",
+  owner: string,
+  packageName?: string,
+): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  const names = new Set<string>();
+  for (const [name, address] of entries) {
+    const payload = packageName ? `${packageName}:${name}` : name;
+    if (!isSafeLabelName(name) || payload.length > 32) {
+      throw new Error(`${owner} ${provenance} label must be a 1-32 character safe name`);
+    }
+    if (!isAddress(address, { strict: false })) {
+      throw new Error(`${owner} ${provenance} label has an invalid address`);
+    }
+    const key = address.toLowerCase();
+    if (labels.has(key)) {
+      throw new Error(`${owner} assigns multiple ${provenance} names to address "${address}"`);
+    }
+    const nameKey = name.toLowerCase();
+    if (names.has(nameKey)) {
+      throw new Error(`${owner} assigns ${provenance} name "${name}" to multiple addresses`);
+    }
+    labels.set(key, name);
+    names.add(nameKey);
+  }
+  return labels;
+}
+
+function titleCaseSlug(slug: string): string {
+  return slug
+    .split("-")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
+  return "protocol" in receipt && typeof receipt.protocol === "string";
+}
+
+function freezeReceiptOwnedStructure(root: Receipt): Receipt {
+  const receipts = new WeakSet<object>();
+  const jsonValues = new WeakSet<object>();
+  const freezeJson = (value: JsonSafeValue): void => {
+    if (value === null || typeof value !== "object" || jsonValues.has(value)) return;
+    jsonValues.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) freezeJson(entry);
+    } else {
+      for (const entry of Object.values(value)) freezeJson(entry);
+    }
+    Object.freeze(value);
+  };
+  const freezeReceipt = (receipt: Receipt): void => {
+    if (receipts.has(receipt)) return;
+    receipts.add(receipt);
+    freezeJson(receipt.outcome);
+    for (const child of receipt.changes) {
+      if (child.kind === "receipt") {
+        freezeReceipt(child);
+      } else {
+        freezeJson(child.data);
+        Object.freeze(child);
+      }
+    }
+    Object.freeze(receipt.changes);
+    Object.freeze(receipt);
+  };
+  freezeReceipt(root);
+  return root;
+}
+
 export class Registry {
   #protocols = new Map<string, Registered>();
+  #assignedReceiptProtocols = new WeakMap<object, string>();
+  #onChainMetadata = new Map<
+    string,
+    Pick<TokenMetadataObservation, "address" | "symbol" | "name">
+  >();
+  #trustedLabels: ReadonlyMap<string, string>;
   readonly runtime: MossRuntime;
 
-  constructor(runtime: MossRuntime) {
+  constructor(runtime: MossRuntime, options: RegistryOptions = {}) {
     this.runtime = runtime;
+    this.#trustedLabels = collectLabels(
+      (options.trustedTokens ?? []).map(({ address, label }) => [label, address]),
+      "Trusted",
+      "trusted token catalog",
+    );
   }
 
   use(...sources: ProtocolSource[]): this {
@@ -136,6 +235,13 @@ export class Registry {
     if (stack.includes(config.name)) {
       throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
     }
+    const packageName = titleCaseSlug(config.name);
+    const packageLabels = collectLabels(
+      Object.entries(config.labels ?? {}),
+      "Package",
+      `protocol "${config.name}"`,
+      packageName,
+    );
     for (const dependency of Object.values(config.protocols ?? {})) {
       this.register(dependency, [...stack, config.name]);
     }
@@ -199,7 +305,15 @@ export class Registry {
     }
     const receiptCtor =
       (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET] ?? ctor;
-    this.#protocols.set(config.name, { ctor, receiptCtor, config, methods, receipts });
+    this.#protocols.set(config.name, {
+      ctor,
+      receiptCtor,
+      config,
+      methods,
+      receipts,
+      packageName,
+      packageLabels,
+    });
   }
 
   discover(filter: { verb?: Verb; category?: Category; protocol?: string } = {}): Coordinate[] {
@@ -265,7 +379,7 @@ export class Registry {
   parseReceipt(node: CapabilityNode, changes: readonly Change[]): Receipt {
     flattenCapabilityTree(node);
     const meta = this.#capabilityMeta(node.protocol, node.method);
-    return this.#runReceipt(node.protocol, meta.spec.receipt, changes);
+    return this.#renderReceipt(this.#runReceipt(node.protocol, meta.spec.receipt, changes));
   }
 
   validateCapabilityTree(root: CapabilityNode): void {
@@ -315,7 +429,31 @@ export class Registry {
     const params = await parseParams(meta.spec.params, rawParams);
     const instance = this.#instantiate(protocol, account);
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
-    return toJsonSafe(await (instance as any)[method](params, { account } satisfies ActionCtx));
+    const result = await (instance as any)[method](params, { account } satisfies ActionCtx);
+    this.#processQueryObservation(result);
+    return toJsonSafe(result);
+  }
+
+  #processQueryObservation(result: unknown): void {
+    const observation = queryObservationOf(result);
+    if (!observation) return;
+    switch (observation.kind) {
+      case "tokenMetadata": {
+        const symbol = isSafeLabelName(observation.symbol) ? observation.symbol : undefined;
+        const name = isSafeLabelName(observation.name) ? observation.name : undefined;
+        const key = observation.address.toLowerCase();
+        if (!symbol && !name) {
+          this.#onChainMetadata.delete(key);
+          return;
+        }
+        this.#onChainMetadata.set(key, {
+          address: observation.address,
+          ...(symbol ? { symbol } : {}),
+          ...(name ? { name } : {}),
+        });
+        return;
+      }
+    }
   }
 
   #runReceipt(protocol: string, receiptName: string, changes: readonly Change[]): Receipt {
@@ -325,9 +463,62 @@ export class Registry {
     }
     const instance = this.#instantiateReceipt(protocol);
     // biome-ignore lint/suspicious/noExplicitAny: registration validates Receipt dispatch
-    const receipt = (instance as any)[receiptName](changes) as Receipt;
-    verifyReceiptCoverage(changes, receipt);
-    return receipt;
+    const result = (instance as any)[receiptName](changes) as ReceiptResult;
+    verifyReceiptCoverage(changes, result);
+    return freezeReceiptOwnedStructure(this.#attachProtocol(result, protocol));
+  }
+
+  #attachProtocol(result: ReceiptResult, protocol: string): Receipt {
+    const dependencyNames = new Map<string, ReadonlySet<string>>();
+    const dependenciesFor = (parent: string): ReadonlySet<string> => {
+      const cached = dependencyNames.get(parent);
+      if (cached) return cached;
+      const names = new Set(
+        Object.values(this.#get(parent).config.protocols ?? {}).flatMap((dependency) => {
+          const name = configOf(dependency)?.name;
+          return name ? [name] : [];
+        }),
+      );
+      dependencyNames.set(parent, names);
+      return names;
+    };
+    const validate = (parent: string, child: ReceiptResult): Receipt => {
+      const assignedProtocol = this.#assignedReceiptProtocols.get(child);
+      if (!assignedProtocol || !hasProtocol(child)) {
+        const claimed = hasProtocol(child) ? ` "${child.protocol}"` : "";
+        throw new Error(`Receipt protocol${claimed} was not assigned by Registry`);
+      }
+      if (child.protocol !== assignedProtocol) {
+        throw new Error(
+          `Receipt protocol "${child.protocol}" does not match Registry-assigned "${assignedProtocol}"`,
+        );
+      }
+      if (assignedProtocol !== parent && !dependenciesFor(parent).has(assignedProtocol)) {
+        throw new Error(
+          `Receipt protocol "${assignedProtocol}" is not a dependency of "${parent}"`,
+        );
+      }
+      for (const grandchild of child.changes) {
+        if (grandchild.kind === "receipt") validate(assignedProtocol, grandchild);
+      }
+      return child;
+    };
+    const attach = (current: ReceiptResult): Receipt => {
+      const receipt: Receipt = {
+        ...current,
+        protocol,
+        changes: current.changes.map((child) => {
+          if (child.kind === "change") return child;
+          if (this.#assignedReceiptProtocols.has(child) || hasProtocol(child)) {
+            return validate(protocol, child);
+          }
+          return attach(child);
+        }),
+      };
+      this.#assignedReceiptProtocols.set(receipt, protocol);
+      return receipt;
+    };
+    return attach(result);
   }
 
   #instantiateReceipt(protocol: string): object {
@@ -394,6 +585,74 @@ export class Registry {
       throw new Error(`unknown capability "${protocol}.${method}"`);
     }
     return meta;
+  }
+
+  #renderReceipt(root: Receipt): Receipt {
+    const scopes = new Map<string, LabelScope>();
+    const scopeFor = (protocol: string): LabelScope => {
+      const cached = scopes.get(protocol);
+      if (cached) return cached;
+
+      const registered = this.#get(protocol);
+      const dependencies = new Map<string, PackageLabel | null>();
+      const visited = new Set<string>();
+      const collectDependencies = (current: Registered): void => {
+        for (const dependency of Object.values(current.config.protocols ?? {})) {
+          const name = configOf(dependency)?.name;
+          if (!name || visited.has(name)) continue;
+          visited.add(name);
+          const visible = this.#get(name);
+          for (const [address, label] of visible.packageLabels) {
+            dependencies.set(
+              address,
+              dependencies.has(address) ? null : { packageName: visible.packageName, name: label },
+            );
+          }
+          collectDependencies(visible);
+        }
+      };
+      collectDependencies(registered);
+
+      const scope = {
+        packageName: registered.packageName,
+        own: registered.packageLabels,
+        dependencies,
+      } satisfies LabelScope;
+      scopes.set(protocol, scope);
+      return scope;
+    };
+
+    const render = (receipt: Receipt, ancestors: readonly LabelScope[]): Receipt => {
+      const current = scopeFor(receipt.protocol);
+      const chain = [current, ...ancestors];
+      const renderText = (text: string): string =>
+        text.replace(ADDRESS_IN_TEXT, (address) => {
+          const key = address.toLowerCase();
+          const trusted = this.#trustedLabels.get(key);
+          if (trusted) return `Trusted(${trusted})`;
+          for (const scope of chain) {
+            const label = scope.own.get(key);
+            if (label) return `Package(${scope.packageName}:${label})`;
+          }
+          const dependency = current.dependencies.get(key);
+          if (dependency) return `Package(${dependency.packageName}:${dependency.name})`;
+          const onChain = this.#onChainMetadata.get(key);
+          const name = onChain?.symbol ?? onChain?.name;
+          return name ? `OnChain(${name},${address})` : address;
+        });
+
+      return {
+        ...receipt,
+        text: renderText(receipt.text),
+        changes: receipt.changes.map((child) =>
+          child.kind === "receipt"
+            ? render(child, chain)
+            : { ...child, text: renderText(child.text) },
+        ),
+      };
+    };
+
+    return render(root, []);
   }
 
   #get(protocol: string): Registered {

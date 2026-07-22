@@ -22,8 +22,12 @@ Moss currently targets Monad mainnet, chain ID `143`.
 | WMON | `@themoss/system` | `wrap`, `unwrap` | `balanceOf` |
 | ERC-20 and native MON | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `allowance`, `metadata` |
 | ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
-| Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
-| aPriori | `@themoss/protocol-apriori` | `stake`, `unstake`, `claim` | — |
+| ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
+|| Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
+|| aPriori | `@themoss/protocol-apriori` | `stake`, `unstake`, `claim` | — |
+|| PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+
+ERC-1155 `transfer` accepts a collection, token ID, amount, and recipient. Token IDs and amounts are base-10 uint256 strings, including zero. The Capability builds one `safeTransferFrom`; batch transfer construction is not currently exposed. Receipts still decode both `TransferSingle` and `TransferBatch` Changes without aggregating or reordering their items.
 
 ## Quickstart
 
@@ -40,6 +44,9 @@ pnpm --filter @themoss/example-simple-flow wrap
 
 # quote and simulate a Kuru MON → USDC swap
 pnpm --filter @themoss/example-simple-flow swap
+
+# after exporting MONADSCAN_API_KEY, fetch a verified full ABI (ADR 0007)
+pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter02
 ```
 
 Run the test suite without live RPC calls:
@@ -135,7 +142,7 @@ Build must precede typecheck because workspace packages resolve generated declar
 | --- | --- |
 | [Getting started](./docs/getting-started.md) ([中文](./docs/getting-started.zh-CN.md)) | Run and develop with Moss step by step |
 | [MCP tool contracts](./docs/mcp-tools.md) | Inputs and outputs of the four MCP tools |
-| [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package |
+| [Protocol onboarding](./docs/protocol-onboarding.md) | Build and submit a Protocol package, including verified ABI retrieval |
 | [Agent safety rules](./docs/agent-skill.md) | Mandatory simulation and intent-alignment rules |
 | [Agent swap example](./examples/agent-swap/README.md) | Separate Agent and signer on a local Monad fork |
 | [Architecture decisions](./docs/adr/) | Current design decisions and trade-offs |

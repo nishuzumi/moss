@@ -5,7 +5,7 @@ import {
   type Change,
   type Hex,
   type MossRuntime,
-  type ReceiptResult,
+  type Receipt,
   Registry,
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
@@ -14,6 +14,7 @@ import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
+import { defaultProtocolModules } from "../src/composition.js";
 import { createMossServer, toAgentSimulation } from "../src/server.js";
 
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
@@ -23,7 +24,10 @@ async function connectedClient(simulateOutcome?: SimulateOutcome) {
 }
 
 async function connectedHarness(simulateOutcome?: SimulateOutcome) {
-  const { server, simulator } = createMossServer({ runtime, protocols: [system, erc, kuru] });
+  const { server, simulator } = createMossServer({
+    runtime,
+    protocols: defaultProtocolModules,
+  });
   if (simulateOutcome) {
     simulator.simulate = async () => simulateOutcome;
   }
@@ -49,7 +53,23 @@ describe("moss MCP server", () => {
     ]);
   });
 
-  it("discovers direct Protocol exports and loads type plus field descriptions", async () => {
+  it("passes the explicitly selected Trusted catalog into Registry", () => {
+    const token = system.USDC_ADDRESS;
+    const owner = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const spender = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const { registry } = createMossServer({
+      runtime,
+      protocols: [erc],
+      trustedTokens: [{ address: token, label: "USDC" }],
+    });
+    const receipt = registry.parseReceipt(receiptCapability("erc20", "approve"), [
+      erc20Change(token, "Approval", owner, spender, 1n),
+    ]);
+
+    expect(receipt.text).toContain("Trusted(USDC)");
+  });
+
+  it("discovers and loads the Protocols selected by the default CLI composition", async () => {
     const client = await connectedClient();
     const discovered = parseText(
       await client.callTool({ name: "discover", arguments: { verb: "wrap" } }),
@@ -57,10 +77,22 @@ describe("moss MCP server", () => {
     expect(discovered).toEqual([
       expect.objectContaining({ protocol: "wmon", method: "wrap", kind: "capability" }),
     ]);
+    const swaps = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "swap" } }),
+    ) as { protocol: string; method: string }[];
+    expect(swaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          protocol: "pancakeswap-v2",
+          method: "swap",
+          kind: "capability",
+        }),
+      ]),
+    );
     const loaded = parseText(
       await client.callTool({
         name: "load",
-        arguments: { items: [{ protocol: "kuru", method: "swap" }] },
+        arguments: { items: [{ protocol: "pancakeswap-v2", method: "swap" }] },
       }),
     ) as { params: Record<string, { type: unknown; description: string }> }[];
     expect(loaded[0]?.params.slippage).toMatchObject({
@@ -295,14 +327,16 @@ function eventChange(address: `0x${string}`): Change {
 function successfulSimulationResult(): SimulateOutcome["results"][number] {
   const first = eventChange("0x1111111111111111111111111111111111111111");
   const second = eventChange("0x2222222222222222222222222222222222222222");
-  const nested: ReceiptResult = {
+  const nested: Receipt = {
     kind: "receipt",
+    protocol: "erc20",
     outcome: { operation: "transfer" },
     text: "nested summary",
     changes: [{ kind: "change", change: second, data: { amount: "2" }, text: "second" }],
   };
-  const receipt: ReceiptResult = {
+  const receipt: Receipt = {
     kind: "receipt",
+    protocol: "kuru",
     outcome: { operation: "swap" },
     text: "root summary",
     changes: [{ kind: "change", change: first, data: { amount: "1" }, text: "first" }, nested],
@@ -379,7 +413,7 @@ function kuruEventChange(
   };
 }
 
-function simulationResult(protocol: string, method: string, receipt: ReceiptResult) {
+function simulationResult(protocol: string, method: string, receipt: Receipt) {
   return {
     protocol,
     method,

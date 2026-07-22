@@ -25,6 +25,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@themoss/core": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/protocol-pancakeswap": "workspace:*",
     "zod": "^3.25.0",
     "@themoss/erc": "workspace:*",
     "@themoss/system": "workspace:*",

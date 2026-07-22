@@ -36,6 +36,26 @@ export type JsonSafeValue =
   | readonly JsonSafeValue[]
   | { readonly [key: string]: JsonSafeValue };
 
+export interface TrustedToken {
+  address: Address;
+  label: string;
+}
+
+export interface RegistryOptions {
+  trustedTokens?: readonly TrustedToken[];
+}
+
+export interface PackageLabel {
+  packageName: string;
+  name: string;
+}
+
+export interface LabelScope {
+  packageName: string;
+  own: ReadonlyMap<string, string>;
+  dependencies: ReadonlyMap<string, PackageLabel | null>;
+}
+
 export interface UnsignedTx {
   from: Address;
   to: Address;
@@ -68,8 +88,8 @@ export type ProtocolRef<T> = {
   ) => infer Result
     ? Awaited<Result> extends CapabilityResult
       ? (params: Params) => Promise<CapabilityNode>
-      : Result extends Receipt
-        ? T[K]
+      : Result extends ReceiptResult<infer Outcome>
+        ? (params: Params, ...args: _Rest) => Receipt<Outcome>
         : (params: Params) => Promise<Awaited<Result>>
     : never;
 };
@@ -95,9 +115,15 @@ export interface ReceiptChange {
   text: string;
 }
 
-export interface Receipt<TOutcome extends JsonSafeValue = JsonSafeValue> {
+export interface ReceiptResult<TOutcome extends JsonSafeValue = JsonSafeValue> {
   kind: "receipt";
   outcome: TOutcome;
   text: string;
+  changes: readonly (ReceiptChange | ReceiptResult<JsonSafeValue>)[];
+}
+
+export interface Receipt<TOutcome extends JsonSafeValue = JsonSafeValue>
+  extends ReceiptResult<TOutcome> {
+  protocol: string;
   changes: readonly (ReceiptChange | Receipt<JsonSafeValue>)[];
 }

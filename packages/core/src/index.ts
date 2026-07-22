@@ -17,6 +17,7 @@ export {
   verifyReceiptCoverage,
 } from "./framework.js";
 export { createHandle, type Handle, transaction } from "./handle.js";
+export { tokenMetadata } from "./observations.js";
 export {
   type ActionCtx,
   type Coordinate,
@@ -30,6 +31,7 @@ export { createRuntime, type MossRuntime } from "./runtime.js";
 export {
   Address,
   BasisPoints,
+  BooleanFlag,
   describeParams,
   type InferParams,
   type ParameterDeclaration,
@@ -51,12 +53,14 @@ export {
   type JsonSafeValue,
   NATIVE,
   type ProtocolRef,
-  type Receipt as ReceiptResult,
   type ReceiptChange,
+  type ReceiptResult,
+  type RegistryOptions,
   RISK_LABELS,
   type RiskLabel,
   type TokenRef,
   type TransactionNode,
+  type TrustedToken,
   type UnsignedTx,
   VERBS,
   type Verb,

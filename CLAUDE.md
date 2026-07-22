@@ -55,11 +55,23 @@
   trace mechanics and ordered Change extraction; `erc` owns address-free
   standards; `system` owns the Monad Runtime and shared verified constants;
   `protocols/*` own protocol semantics and deployments; `mcp-server` owns only
-  transport and composition.
+  transport and composition; `abi-tools` owns build-time ABI retrieval,
+  semantic ABI comparison, and rendering tooling, never runtime behavior.
 - Protocols must remain self-describing decorated classes discovered from
   selected top-level exports, with dependencies declared and injected. Reject
   import-time registration, separate registration objects, untyped Handles,
   or decorated Protocol inheritance.
+- Trusted token labels enter only through the explicit Registry composition
+  option; ordinary Protocol exports cannot grant Trusted provenance. Package
+  labels belong to Protocol metadata independently of Handles. Trusted renders
+  as `Trusted(name)` and Package as `Package(Title Cased Slug:localName)`; their
+  payloads are 1–32 character safe names.
+- Registry renders Receipt text once after parsing. Resolution is Trusted,
+  current Package, nearest-to-farthest caller Package, one unambiguous
+  direct-or-transitive dependency Package of the current Protocol, then raw
+  address; unrelated or conflicting dependency labels remain raw, and
+  structured Receipt evidence is unchanged. Core, not Package parsers, stamps
+  each Receipt with its producing Protocol.
 - Every Capability must own exactly one direct TransactionNode and one pure,
   typed Receipt parser. Nested Capabilities own additional transactions; core
   alone validates and depth-first flattens the tree.
@@ -95,11 +107,18 @@
   ordered Change extraction; `erc` owns address-free standard semantics;
   `system` owns Monad Runtime and verified official constants;
   `protocols/*` own protocol ABIs, Capabilities, Queries, dependencies, and
-  Receipts; `mcp-server` owns transport and application composition only.
+  Receipts; `mcp-server` owns transport and application composition only;
+  `abi-tools` is a private build-time package owning explorer ABI fetching
+  (`pnpm fetch-abi`), deployed-ABI semantic comparison, and typed as-const
+  rendering.
 - Protocol packages export self-describing `@Protocol` classes. Registry scans
   selected top-level module exports, recursively registers declared Protocol
   dependencies, and injects typed instances. There is no import-time
   registration or separate package registration object.
+- Composition supplies Trusted token labels explicitly. Protocol metadata may
+  declare fixed Package labels; Registry applies Receipt caller-chain and
+  dependency-scoped precedence while projecting text without changing
+  structured evidence.
 - Every Capability owns exactly one direct TransactionNode and one typed pure
   Receipt parser. More transactions come from nested Capabilities. Core alone
   validates and depth-first flattens the tree.

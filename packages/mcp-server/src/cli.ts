@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import * as erc from "@themoss/erc";
-import * as kuru from "@themoss/protocol-kuru";
-import * as system from "@themoss/system";
 import { monadRuntime } from "@themoss/system";
+import { defaultProtocolModules } from "./composition.js";
 import { createMossServer } from "./server.js";
 
 const rpcUrl = process.env.MOSS_RPC_URL;
 const runtime = await monadRuntime({ ...(rpcUrl ? { rpcUrl } : {}) });
 const { server, registry } = createMossServer({
   runtime,
-  protocols: [system, erc, kuru],
+  protocols: defaultProtocolModules,
 });
 const catalog = registry.discover();
 console.error(

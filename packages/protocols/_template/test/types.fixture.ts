@@ -23,6 +23,7 @@ const validParams: InferParams<typeof fixtureParams> = { amount: "42" };
 const invalidParams: InferParams<typeof fixtureParams> = { amount: 42 };
 const dependency = null as unknown as ProtocolRef<ExampleProtocol>;
 void dependency.deposit;
+dependency.depositReceipt([]).protocol satisfies string;
 // @ts-expect-error Injected Protocol references expose methods, not Handles.
 void dependency.vault;
 
@@ -124,12 +125,29 @@ class ReceiptNameFixture extends ExampleProtocol {
     };
   }
 
+  // @ts-expect-error Package parsers return ReceiptResult; Core owns final Receipt provenance.
+  @Receipt()
+  identifiedReceipt(changes: readonly Change[]): Receipt<{ ok: true }> {
+    return {
+      kind: "receipt",
+      protocol: "forged",
+      outcome: { ok: true },
+      text: "invalid",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+
   // @ts-expect-error Receipt parsers accept only an immutable ordered Change list.
   @Receipt()
   invalidReceipt(_: string): ReceiptResult<{ ok: true }> {
     return { kind: "receipt", outcome: { ok: true }, text: "invalid", changes: [] };
   }
 }
+
+const author = null as unknown as ReceiptNameFixture;
+const authoredReceipt = author.typedReceipt([]);
+// @ts-expect-error Package-authored ReceiptResult has no Core-owned Protocol provenance.
+authoredReceipt.protocol;
 
 void validParams;
 void invalidParams;

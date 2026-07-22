@@ -1,0 +1,10 @@
+{
+  "router": {
+    "proxy": "0xd651346d7c789536ebf06dc72aE3C8502cd695CC",
+    "implementation": "0x0F2A2a5c0A78c406c26Adb2F1681D3e47322A9CD",
+    "allowedExplorerOnly": []
+  },
+  "orderBook": {
+    "expectedTemplateImplementation": "0x4C0bA1BA8404076E2B09c7a5d014EC999c3a27e2"
+  }
+}

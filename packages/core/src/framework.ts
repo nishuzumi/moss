@@ -3,8 +3,8 @@ import type {
   CapabilityNode,
   Change,
   JsonSafeValue,
-  Receipt,
   ReceiptChange,
+  ReceiptResult,
   TransactionNode,
   UnsignedTx,
 } from "./types.js";
@@ -124,7 +124,7 @@ function assertJsonSafe(value: unknown, path: string, seen = new WeakSet<object>
 }
 
 function flattenReceipt(
-  receipt: Receipt,
+  receipt: ReceiptResult,
   path = "Receipt",
   seen = new WeakSet<object>(),
 ): ReceiptChange[] {
@@ -153,7 +153,7 @@ function flattenReceipt(
   return leaves;
 }
 
-export function verifyReceiptCoverage(changes: readonly Change[], receipt: Receipt): void {
+export function verifyReceiptCoverage(changes: readonly Change[], receipt: ReceiptResult): void {
   const leaves = flattenReceipt(receipt);
   if (leaves.length !== changes.length) {
     throw new ReceiptCoverageError(

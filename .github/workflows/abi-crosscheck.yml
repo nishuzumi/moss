@@ -1,0 +1,46 @@
+name: ABI cross-check
+
+# Online + keyed by design (ADR 0007): runs every package's `test:abi:online`
+# suite (root script: `pnpm -r --if-present test:abi:online`). A protocol
+# package opts in by shipping that script; today that is kuru, which verifies
+# its vendored Router ABI against the explorer-verified implementation and
+# asserts the pinned proxy targets have not been upgraded. Fork PRs never
+# receive the secret — this workflow has no pull_request trigger at all;
+# offline `pnpm test` remains the only gate they need.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # A missing MONADSCAN_API_KEY fails the suite instead of skipping, so a
+      # misconfigured secret cannot produce a green run.
+      - name: Explorer cross-check
+        env:
+          MONADSCAN_API_KEY: ${{ secrets.MONADSCAN_API_KEY }}
+        run: pnpm test:abi:online

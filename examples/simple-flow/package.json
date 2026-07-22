@@ -6,6 +6,7 @@
   "scripts": {
     "wrap": "tsx src/wmon-wrap.ts",
     "swap": "tsx src/kuru-swap.ts",
+    "pancakeswap-v2": "tsx src/pancakeswap-v2-swap.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"examples are exercised by e2e tests in packages\" && exit 0",
     "build": "echo \"examples are not built\" && exit 0"
@@ -14,6 +15,7 @@
     "@themoss/core": "workspace:*",
     "@themoss/erc": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/protocol-pancakeswap": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
     "viem": "^2.54.3"
