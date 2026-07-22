@@ -1,4 +1,10 @@
-import { type MossRuntime, Protocol, Registry, tokenMetadata } from "../src/index.js";
+import {
+  type MossRuntime,
+  Protocol,
+  Registry,
+  type RiskLabel,
+  tokenMetadata,
+} from "../src/index.js";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111" as const;
 
@@ -28,6 +34,10 @@ new Registry(runtime, {
   trustedTokens: [{ address: "not-an-address", label: "Token" }],
 });
 
+const debtRisk: RiskLabel = "debt";
+// @ts-expect-error RiskLabel remains a closed set.
+const invalidRisk: RiskLabel = "not-a-risk";
+
 const metadataResult = tokenMetadata(
   { kind: "metadata" as const, decimals: 18 as const },
   { address: ADDRESS, symbol: "TOKEN", name: "Token" },
@@ -43,5 +53,7 @@ tokenMetadata("metadata", { address: ADDRESS });
 
 void LabeledFixture;
 void InvalidLabeledFixture;
+void debtRisk;
+void invalidRisk;
 void metadataKind;
 void metadataDecimals;

@@ -88,6 +88,8 @@ type Stub = {
 };
 ```
 
+`risk` uses Core's closed set. `fundOut` means assets leave the account in the current transaction and does not cover future repayment obligations. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. Free-form `tags` may add description, but do not replace risk classification.
+
 Each parameter contains two independent explanations:
 
 - `type` is generated JSON Schema plus the reusable representation, units, constraints, conversion, and examples;
