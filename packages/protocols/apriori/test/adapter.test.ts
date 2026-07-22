@@ -227,7 +227,7 @@ describe("AprioriProtocol", () => {
     expect(receipt.outcome).toEqual({
       operation: "claim",
       account: ACCOUNT,
-      requestId: "7",
+      requestIds: ["7"],
       assets: "990000000000000000",
     });
 

@@ -79,7 +79,7 @@ type UnstakeOutcome = {
 type ClaimOutcome = {
   operation: "claim";
   account: AddressValue;
-  requestId: string;
+  requestIds: string[];
   assets: string;
 };
 
@@ -119,7 +119,7 @@ export class AprioriProtocol {
     verb: "stake",
     params: stakeParams,
     receipt: "stakeReceipt",
-    risk: ["fundOut", "priceImpact"],
+    risk: ["fundOut"],
     tags: ["staking", "liquid-staking", "lst", "erc4626"],
   })
   async stake(params: InferParams<typeof stakeParams>) {
@@ -135,7 +135,7 @@ export class AprioriProtocol {
     verb: "unstake",
     params: unstakeParams,
     receipt: "unstakeReceipt",
-    risk: ["fundOut", "priceImpact"],
+    risk: ["fundOut"],
     tags: ["staking", "liquid-staking", "withdrawal-queue"],
   })
   async unstake(params: InferParams<typeof unstakeParams>) {
@@ -283,7 +283,7 @@ export class AprioriProtocol {
       event = {
         operation: "claim",
         account: decoded.args.owner,
-        requestId: requestIds[0] ?? "0",
+        requestIds,
         assets: decoded.args.assets.toString(),
       };
       return {
@@ -299,7 +299,7 @@ export class AprioriProtocol {
     return {
       kind: "receipt",
       outcome: event,
-      text: `aPriori Claim: request ${event.requestId} → ${event.assets} MON by ${event.account}`,
+      text: `aPriori Claim: request ${event.requestIds.join(",")} → ${event.assets} MON by ${event.account}`,
       changes: parsed,
     };
   }
