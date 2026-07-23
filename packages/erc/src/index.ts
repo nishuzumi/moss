@@ -5,7 +5,11 @@ export {
   iweth9Abi as WETH9Abi,
 } from "./abis/erc.js";
 export { ERC20, type ERC20Outcome } from "./erc20.js";
-export { ERC721, type ERC721TransferOutcome } from "./erc721.js";
+export {
+  ERC721,
+  type ERC721CollectionInspection,
+  type ERC721TransferOutcome,
+} from "./erc721.js";
 export {
   ERC1155,
   type ERC1155ApprovalOutcome,
