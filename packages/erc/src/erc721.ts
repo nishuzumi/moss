@@ -18,9 +18,24 @@ import {
 import { decodeEventLog } from "viem";
 import { ierc721Abi } from "./abis/erc.js";
 
+const ERC721_INTERFACE_IDS = {
+  erc165: "0x01ffc9a7",
+  erc721: "0x80ac58cd",
+  metadata: "0x5b5e139f",
+  enumerable: "0x780e9d63",
+  erc2981: "0x2a55205a",
+} as const;
+
 const tokenParams = {
   collection: { type: Address, description: "Collection containing the requested token." },
   tokenId: { type: UnsignedIntegerString, description: "Token selected within the collection." },
+} satisfies ParamsSpec;
+
+const inspectCollectionParams = {
+  collection: {
+    type: Address,
+    description: "Collection whose ERC-165 interface declarations are inspected.",
+  },
 } satisfies ParamsSpec;
 
 const transferParams = {
@@ -41,10 +56,21 @@ export type ERC721TransferOutcome = {
   tokenId: string;
 };
 
+export type ERC721CollectionInspection = {
+  collection: AddressValue;
+  supports: {
+    erc165: boolean;
+    erc721: boolean;
+    erc721Metadata: boolean;
+    erc721Enumerable: boolean;
+    erc2981Royalties: boolean;
+  };
+};
+
 @Protocol({
   name: "erc721",
   category: "nft",
-  description: "Generic ERC-721 transfers, ownership, and balance queries.",
+  description: "Generic ERC-721 transfers, ownership, balances, and declared interface inspection.",
   contracts: {},
 })
 export class ERC721 {
@@ -86,6 +112,47 @@ export class ERC721 {
       params.owner,
     ]);
     return { ...params, balance: balance.toString() };
+  }
+
+  @Query({
+    intent: "Inspect an ERC-721 collection's declared interfaces",
+    params: inspectCollectionParams,
+  })
+  async inspectCollection(
+    params: InferParams<typeof inspectCollectionParams>,
+    ctx: ActionCtx,
+  ): Promise<ERC721CollectionInspection> {
+    const handle = this.#handle(params.collection, ctx.account);
+    const erc165 = await handle.read.supportsInterface([ERC721_INTERFACE_IDS.erc165]);
+    if (!erc165) {
+      return {
+        collection: params.collection,
+        supports: {
+          erc165: false,
+          erc721: false,
+          erc721Metadata: false,
+          erc721Enumerable: false,
+          erc2981Royalties: false,
+        },
+      };
+    }
+
+    const [erc721, erc721Metadata, erc721Enumerable, erc2981Royalties] = await Promise.all([
+      handle.read.supportsInterface([ERC721_INTERFACE_IDS.erc721]),
+      handle.read.supportsInterface([ERC721_INTERFACE_IDS.metadata]),
+      handle.read.supportsInterface([ERC721_INTERFACE_IDS.enumerable]),
+      handle.read.supportsInterface([ERC721_INTERFACE_IDS.erc2981]),
+    ]);
+    return {
+      collection: params.collection,
+      supports: {
+        erc165,
+        erc721,
+        erc721Metadata,
+        erc721Enumerable,
+        erc2981Royalties,
+      },
+    };
   }
 
   @Receipt()

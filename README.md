@@ -21,10 +21,12 @@ Moss currently targets Monad mainnet, chain ID `143`.
 | --- | --- | --- | --- |
 | WMON | `@themoss/system` | `wrap`, `unwrap` | `balanceOf` |
 | ERC-20 and native MON | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `allowance`, `metadata` |
-| ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
+| ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf`, `inspectCollection` |
 | ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+
+ERC-721 `inspectCollection` accepts a collection address and reports the contract's ERC-165 declarations for ERC-165, ERC-721, ERC-721 Metadata, ERC-721 Enumerable, and ERC-2981 royalties. The flags reproduce the contract's direct declarations and may therefore be inconsistent. This inspection is not a security audit and does not prove that the contract fully complies with any reported standard.
 
 ERC-1155 `transfer` accepts a collection, token ID, amount, and recipient. Token IDs and amounts are base-10 uint256 strings, including zero. The Capability builds one `safeTransferFrom`; batch transfer construction is not currently exposed. Receipts still decode both `TransferSingle` and `TransferBatch` Changes without aggregating or reordering their items.
 

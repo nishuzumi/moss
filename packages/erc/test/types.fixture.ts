@@ -1,7 +1,8 @@
-import type { Change, ReceiptResult } from "@themoss/core";
+import type { ActionCtx, Change, ReceiptResult } from "@themoss/core";
 import { Receipt } from "@themoss/core";
 import type { ERC20 } from "../src/erc20.js";
 import type { ERC1155, ERC1155Outcome } from "../src/erc1155.js";
+import type { ERC721, ERC721CollectionInspection } from "../src/index.js";
 
 type TransferOperation = ReturnType<ERC20["transferReceipt"]>["outcome"]["operation"];
 type ApprovalOperation = ReturnType<ERC20["approveReceipt"]>["outcome"]["operation"];
@@ -96,3 +97,35 @@ void directEvent;
 void invalidDirectEvent;
 void batchOutcome;
 void ERC1155CompileFixture;
+
+type InspectCollectionParams = Parameters<ERC721["inspectCollection"]>[0];
+const inspectCollectionParams: InspectCollectionParams = {
+  collection: "0x1111111111111111111111111111111111111111",
+};
+const invalidInspectCollectionParams: InspectCollectionParams = {
+  // @ts-expect-error ERC-721 collection inspection requires an EVM address.
+  collection: "not-an-address",
+};
+const erc721 = null as unknown as ERC721;
+const inspectionPromise = erc721.inspectCollection(
+  inspectCollectionParams,
+  null as unknown as ActionCtx,
+);
+type InspectCollectionResult = Awaited<typeof inspectionPromise>;
+const inspectionResult = null as unknown as InspectCollectionResult;
+const publicInspection: ERC721CollectionInspection = inspectionResult;
+const supportsErc165: boolean = inspectionResult.supports.erc165;
+const supportsErc721: boolean = inspectionResult.supports.erc721;
+const supportsMetadata: boolean = inspectionResult.supports.erc721Metadata;
+const supportsEnumerable: boolean = inspectionResult.supports.erc721Enumerable;
+const supportsRoyalties: boolean = inspectionResult.supports.erc2981Royalties;
+// @ts-expect-error ERC-721 inspection results do not contain ERC-1155 support.
+void inspectionResult.supports.erc1155;
+
+void invalidInspectCollectionParams;
+void publicInspection;
+void supportsErc165;
+void supportsErc721;
+void supportsMetadata;
+void supportsEnumerable;
+void supportsRoyalties;

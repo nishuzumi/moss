@@ -21,10 +21,12 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 | --- | --- | --- | --- |
 | WMON | `@themoss/system` | `wrap`、`unwrap` | `balanceOf` |
 | ERC-20 与 native MON | `@themoss/erc` | `transfer`、`approve` | `balanceOf`、`allowance`、`metadata` |
-| ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`、`balanceOf` |
+| ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`、`balanceOf`、`inspectCollection` |
 | ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+
+ERC-721 `inspectCollection` 接收 collection 地址，并报告合约通过 ERC-165 直接声明的 ERC-165、ERC-721、ERC-721 Metadata、ERC-721 Enumerable 与 ERC-2981 royalties 支持情况。这些标志原样反映合约的声明，因此可能彼此不一致。此检查不是安全审计，也不能证明合约完全符合其所报告的任何标准。
 
 ERC-1155 `transfer` 接收 collection、token ID、amount 和 recipient。token ID 与 amount 使用十进制 uint256 字符串（允许零）。该 Capability 只构建一笔 `safeTransferFrom`，目前不暴露批量转账构建；Receipt 仍会解析 `TransferSingle` 和 `TransferBatch` Change，并保留批量条目的原始顺序，不做聚合。
 
