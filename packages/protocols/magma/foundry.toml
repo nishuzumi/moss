@@ -1,0 +1,5 @@
+[profile.default]
+src = "contracts"
+out = "out"
+cache_path = "cache"
+solc_version = "0.8.30"
