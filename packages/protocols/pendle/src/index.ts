@@ -12,4 +12,4 @@ export {
   PENDLE_ROUTER_STATIC_ADDRESS,
 } from "./addresses.js";
 export { Pendle } from "./pendle.js";
-export type { PendleSwapOutcome } from "./types.js";
+export type { PendleMarketView, PendleQuoteView, PendleSwapOutcome } from "./types.js";
