@@ -1,0 +1,19 @@
+{
+  "marketFactory": {
+    "proxy": "0xA3cb62a49b66eB2536cf6F3C7AC82293784888A3",
+    "implementation": "0x50fE28D319E62794d95E522863384D4F849Ba1C9",
+    "allowedMismatches": [
+      {
+        "signature": "function VERSION()",
+        "detail": "expected outputs=(uint256) stateMutability=pure, actual outputs=(uint256) stateMutability=view",
+        "reason": "Vendored 6.7.1 IPMarketFactory declares VERSION() pure; deployed PendleMarketFactoryV7Upg implements it view. Read-only relaxation, and Moss never calls VERSION() (the verifier uses isValidMarket/factory/readTokens/expiry/token support/decimals)."
+      }
+    ]
+  },
+  "selectorProxies": {
+    "note": "Router and RouterStatic are selector-proxies (Diamond-style) with a zero ERC-1967 slot; explorer getabi returns only the dispatcher, so compareDeployedAbi of the vendored full interface fails wholesale. They have no explorer cross-check and stay on the pinned @pendle/core-v2 vendored derivation (ADR 0007 vendored tier). Facet-enumeration cross-check support is tracked in the linked issue.",
+    "router": "0x888888888889758F76e7103c6CbF23ABbF58F946",
+    "routerStatic": "0x6813d43782395A1F2AAb42f39aeEDE03ac655e09",
+    "issue": "https://github.com/nishuzumi/moss/issues/118"
+  }
+}

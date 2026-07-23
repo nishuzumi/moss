@@ -1,0 +1,73 @@
+{
+  "name": "@pendle/core-v2",
+  "version": "6.7.1",
+  "distTag": "latest",
+  "publishedAt": "2026-05-26T03:11:08.642Z",
+  "tarball": "https://registry.npmjs.org/@pendle/core-v2/-/core-v2-6.7.1.tgz",
+  "tarballSha256": "6b484c5b9ab8f5a2f9b51616fa7b4ddeff3bcb8fce68c95b9a0158e4445ad9ae",
+  "vendoredAt": "2026-07-19",
+  "releaseAgeGuardDays": 7,
+  "skippedReleases": [
+    {
+      "version": "6.8.1",
+      "publishedAt": "2026-07-15T08:06:53.618Z",
+      "reason": "inside 7-day release-age guard"
+    },
+    {
+      "version": "6.8.0",
+      "publishedAt": "2026-07-15T07:59:22.738Z",
+      "reason": "inside 7-day release-age guard"
+    }
+  ],
+  "deploymentSource": {
+    "repository": "pendle-finance/pendle-core-v2-public",
+    "commit": "6cd4773218e57dbda8925d10dfb672a0f594a9db",
+    "path": "deployments/143-core.json",
+    "url": "https://github.com/pendle-finance/pendle-core-v2-public/blob/6cd4773218e57dbda8925d10dfb672a0f594a9db/deployments/143-core.json",
+    "chainId": 143
+  },
+  "artifacts": [
+    {
+      "file": "IPMarketFactory.json",
+      "sourcePath": "build/artifacts/contracts/interfaces/IPMarketFactory.sol/IPMarketFactory.json",
+      "exportName": "PendleMarketFactoryAbi",
+      "contractName": "IPMarketFactory",
+      "role": "marketFactoryV6 validation interface"
+    },
+    {
+      "file": "IPMarket.json",
+      "sourcePath": "build/artifacts/contracts/interfaces/IPMarket.sol/IPMarket.json",
+      "exportName": "PendleMarketAbi",
+      "contractName": "IPMarket",
+      "role": "dynamically discovered Market reads and events"
+    },
+    {
+      "file": "IStandardizedYield.json",
+      "sourcePath": "build/artifacts/contracts/interfaces/IStandardizedYield.sol/IStandardizedYield.json",
+      "exportName": "PendleStandardizedYieldAbi",
+      "contractName": "IStandardizedYield",
+      "role": "dynamically discovered SY token support and events"
+    },
+    {
+      "file": "IPAllActionV3.json",
+      "sourcePath": "build/artifacts/contracts/interfaces/IPAllActionV3.sol/IPAllActionV3.json",
+      "exportName": "PendleRouterAbi",
+      "contractName": "IPAllActionV3",
+      "role": "PendleRouterV4 selector-proxy composite interface"
+    },
+    {
+      "file": "IPRouterStatic.json",
+      "sourcePath": "build/artifacts/contracts/interfaces/IPRouterStatic.sol/IPRouterStatic.json",
+      "exportName": "PendleRouterStaticAbi",
+      "contractName": "IPRouterStatic",
+      "role": "PendleRouterStatic selector-proxy quote interface"
+    },
+    {
+      "file": "IPYieldToken.json",
+      "sourcePath": "build/artifacts/contracts/interfaces/IPYieldToken.sol/IPYieldToken.json",
+      "exportName": "PendleYieldTokenAbi",
+      "contractName": "IPYieldToken",
+      "role": "dynamically discovered YT swap-trace event evidence"
+    }
+  ]
+}

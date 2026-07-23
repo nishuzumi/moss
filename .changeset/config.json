@@ -11,6 +11,7 @@
       "@themoss/system",
       "@themoss/protocol-kuru",
       "@themoss/protocol-pancakeswap",
+      "@themoss/protocol-pendle",
       "@themoss/mcp-server"
     ]
   ],
