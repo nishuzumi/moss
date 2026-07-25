@@ -1,0 +1,60 @@
+{
+  "vendoredAt": "2026-07-25",
+  "releaseAgeGuardDays": 7,
+  "sources": [
+    {
+      "kind": "npm",
+      "name": "@aave/core-v3",
+      "version": "1.19.3",
+      "tarballSha256": "a7bd560885fa804a5233ceb8f9c4da4ef3336246590b6f35e4eaedef044a8679",
+      "files": [
+        {
+          "packagePath": "artifacts/contracts/interfaces/IPool.sol/IPool.json",
+          "file": "IPool.json",
+          "exportName": "NeverlandPoolAbi"
+        },
+        {
+          "packagePath": "artifacts/contracts/protocol/tokenization/AToken.sol/AToken.json",
+          "file": "AToken.json",
+          "exportName": "NeverlandATokenAbi"
+        },
+        {
+          "packagePath": "artifacts/contracts/protocol/tokenization/VariableDebtToken.sol/VariableDebtToken.json",
+          "file": "VariableDebtToken.json",
+          "exportName": "NeverlandVariableDebtTokenAbi"
+        }
+      ]
+    },
+    {
+      "kind": "npm",
+      "name": "@aave/periphery-v3",
+      "version": "2.5.2",
+      "tarballSha256": "beb9eff8e4874ebe4d7b4ff447f783b77911e3ea4e7a59db0f159719aa31cc4b",
+      "files": [
+        {
+          "packagePath": "artifacts/contracts/misc/interfaces/IWrappedTokenGatewayV3.sol/IWrappedTokenGatewayV3.json",
+          "file": "IWrappedTokenGatewayV3.json",
+          "exportName": "WrappedTokenGatewayAbi"
+        }
+      ]
+    },
+    {
+      "kind": "github",
+      "repo": "Neverland-Money/neverland-lending",
+      "commit": "057a2eab7c83ffe32077994c9536da4a89b148cb",
+      "path": "contracts/protocol/tokenization/base/PriceEmitter.sol",
+      "file": "PriceEmitter.sol",
+      "fileSha256": "4d97e971e682045844136e96990ef343e778f09f66e603bf157772fd9ed66415",
+      "exports": [{ "exportName": "PriceObservedAbi", "event": "PriceObserved" }]
+    },
+    {
+      "kind": "github",
+      "repo": "aave/aave-v3-periphery",
+      "commit": "9afa82664affda1af6f472dfa9492b5feb0d32a9",
+      "path": "contracts/rewards/interfaces/IRewardsDistributor.sol",
+      "file": "IRewardsDistributor.sol",
+      "fileSha256": "a40a257ff313a7d85bd8c4bb666c6a3f0353cc0b93bd0738ae602c018da0d137",
+      "exports": [{ "exportName": "NeverlandRewardsAbi", "event": "Accrued" }]
+    }
+  ]
+}

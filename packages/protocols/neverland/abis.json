@@ -1,0 +1,26 @@
+{
+  "pool": {
+    "proxy": "0x80F00661b13CC5F6ccd3885bE7b4C9c67545D585",
+    "implementation": "0x507c53dE7B334dae1ECFE2E6d8cF75716431c3fC",
+    "allowedExplorerOnly": [
+      "function POOL_REVISION()",
+      "function initialize(address)",
+      "function syncIndexesState(address)",
+      "function syncRatesState(address)"
+    ]
+  },
+  "gateway": {
+    "address": "0x800409dBd7157813BB76501c30e04596Cc478f25",
+    "allowedExplorerOnly": [
+      "event OwnershipTransferred(address,address)",
+      "fallback",
+      "function emergencyEtherTransfer(address,uint256)",
+      "function emergencyTokenTransfer(address,address,uint256)",
+      "function getWETHAddress()",
+      "function owner()",
+      "function renounceOwnership()",
+      "function transferOwnership(address)",
+      "receive"
+    ]
+  }
+}

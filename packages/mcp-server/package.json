@@ -28,6 +28,7 @@
     "@themoss/protocol-apriori": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
+    "@themoss/protocol-neverland": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",

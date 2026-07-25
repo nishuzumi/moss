@@ -2,6 +2,7 @@ import * as erc from "@themoss/erc";
 import * as apriori from "@themoss/protocol-apriori";
 import * as kuru from "@themoss/protocol-kuru";
 import * as monadCards from "@themoss/protocol-monad-cards";
+import * as neverland from "@themoss/protocol-neverland";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
 import * as system from "@themoss/system";
 
@@ -12,5 +13,6 @@ export const defaultProtocolModules = [
   apriori,
   kuru,
   monadCards,
+  neverland,
   pancakeswap,
 ] as const;
