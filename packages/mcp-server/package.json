@@ -28,6 +28,7 @@
     "@themoss/protocol-aave": "workspace:*",
     "@themoss/protocol-apriori": "workspace:*",
     "@themoss/protocol-clober": "workspace:*",
+    "@themoss/protocol-kintsu": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-nadfun": "workspace:*",
