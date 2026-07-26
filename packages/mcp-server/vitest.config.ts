@@ -16,6 +16,7 @@ export default defineConfig({
       "@themoss/simulator": src("../simulator/src/index.ts"),
       "@themoss/erc": src("../erc/src/index.ts"),
       "@themoss/protocol-apriori": src("../protocols/apriori/src/index.ts"),
+      "@themoss/protocol-kintsu": src("../protocols/kintsu/src/index.ts"),
       "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
       "@themoss/protocol-pancakeswap": src("../protocols/pancakeswap/src/index.ts"),
       "@themoss/system": src("../system/src/index.ts"),
