@@ -24,13 +24,14 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "@themoss/protocol-apriori": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
-    "zod": "^3.25.0",
-    "@themoss/erc": "workspace:*",
+    "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
-    "@themoss/simulator": "workspace:*"
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

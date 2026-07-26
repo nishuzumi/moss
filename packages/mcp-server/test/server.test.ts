@@ -89,6 +89,14 @@ describe("moss MCP server", () => {
         }),
       ]),
     );
+    const stakes = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "stake" } }),
+    ) as { protocol: string; method: string }[];
+    expect(stakes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "apriori", method: "stake", kind: "capability" }),
+      ]),
+    );
     const loaded = parseText(
       await client.callTool({
         name: "load",
@@ -117,6 +125,16 @@ describe("moss MCP server", () => {
       }),
     ) as { params: Record<string, { type: unknown; description: string }> }[];
     expect(loadedMonadCards[0]?.params).toEqual({});
+
+    const unstakeLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "apriori", method: "unstake" }] },
+      }),
+    ) as { params: Record<string, { description: string }> }[];
+    expect(unstakeLoaded[0]?.params.controller).toMatchObject({
+      description: expect.stringContaining("controller"),
+    });
   });
 
   it("round-trips a Capability tree through action JSON", async () => {

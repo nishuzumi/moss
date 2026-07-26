@@ -10,8 +10,8 @@ export default defineConfig({
     alias: {
       "@themoss/core": src("../../core/src/index.ts"),
       "@themoss/simulator": src("../../simulator/src/index.ts"),
-      "@themoss/system": src("../../system/src/index.ts"),
       "@themoss/erc": src("../../erc/src/index.ts"),
+      "@themoss/system": src("../../system/src/index.ts"),
     },
   },
 });
