@@ -29,14 +29,20 @@ const UINT96_MAX = (1n << 96n) - 1n;
 const KintsuSlippage = BasisPoints.max(9_999)
   .default(DEFAULT_SLIPPAGE_BPS)
   .describe("An integer basis-point count from 0 through 9999; 1 bps equals 0.01%.");
-const PositiveRawShares = UnsignedIntegerString.refine(
-  (value) => BigInt(value) > 0n,
-  "Expected a positive integer share amount.",
-).describe('A positive raw sMON share amount, such as "1" or "1000000000000000000".');
+const KintsuAmount = PositiveDecimalString.refine(
+  (value) => (value.split(".")[1]?.length ?? 0) <= 18,
+  "Expected at most 18 fractional decimal places.",
+).describe('A positive native MON amount with at most 18 decimals, such as "1" or "1.5".');
+const PositiveRawShares = UnsignedIntegerString.refine((value) => {
+  const shares = BigInt(value);
+  return shares > 0n && shares <= UINT96_MAX;
+}, "Expected a positive uint96 share amount.").describe(
+  'A positive raw sMON share amount, such as "1" or "1000000000000000000".',
+);
 
 const quoteDepositParams = {
   amount: {
-    type: PositiveDecimalString,
+    type: KintsuAmount,
     description: "Human-readable native MON amount to deposit; MON uses 18 decimals.",
   },
   slippage: {
