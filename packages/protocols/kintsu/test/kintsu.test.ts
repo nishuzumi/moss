@@ -242,6 +242,16 @@ describe("Kintsu", () => {
     ).rejects.toThrow("invalid parameters");
   });
 
+  it("rejects MON amounts that cannot be represented at 18 decimals", async () => {
+    const { registry } = offlineRegistry();
+    await expect(
+      registry.action("kintsu", "quoteDeposit", ACCOUNT, {
+        amount: "1.9999999999999999999",
+        slippage: 50,
+      }),
+    ).rejects.toThrow("invalid parameters");
+  });
+
   it("rejects deposits whose wei amount exceeds uint96", async () => {
     const { registry } = offlineRegistry();
     await expect(
@@ -250,6 +260,16 @@ describe("Kintsu", () => {
         slippage: 0,
       }),
     ).rejects.toThrow("kintsu.deposit amount exceeds uint96");
+  });
+
+  it("rejects convertToAssets shares outside uint96", async () => {
+    const { registry, readContract } = offlineRegistry();
+    await expect(
+      registry.action("kintsu", "convertToAssets", ACCOUNT, {
+        shares: (1n << 96n).toString(),
+      }),
+    ).rejects.toThrow("invalid parameters");
+    expect(readContract).not.toHaveBeenCalled();
   });
 
   it("propagates convertToShares RPC failures", async () => {
