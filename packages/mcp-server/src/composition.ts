@@ -2,6 +2,7 @@ import * as erc from "@themoss/erc";
 import * as aave from "@themoss/protocol-aave";
 import * as apriori from "@themoss/protocol-apriori";
 import * as clober from "@themoss/protocol-clober";
+import * as euler from "@themoss/protocol-euler";
 import * as kintsu from "@themoss/protocol-kintsu";
 import * as kuru from "@themoss/protocol-kuru";
 import * as monadCards from "@themoss/protocol-monad-cards";
@@ -18,6 +19,7 @@ export const defaultProtocolModules = [
   aave,
   apriori,
   clober,
+  euler,
   kintsu,
   kuru,
   monadCards,
