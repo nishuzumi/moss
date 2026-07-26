@@ -155,9 +155,7 @@ export class Kuru {
   swapReceipt(changes: readonly Change[]): ReceiptResult<KuruSwapOutcome> {
     let routerSwap: KuruSwapOutcome | undefined;
     let tradeEvents = 0;
-    const tradeEmitters = new Set<string>();
-    const flipEventEmitters = new Set<string>();
-    const parsed = changes.map((change) => {
+    const parsed = changes.map((change, index) => {
       if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
       if (sameAddress(change.address, KURU_ROUTER_ADDRESS)) {
         const event = decodeKuruEvent(KuruRouterAbi, change);
@@ -185,7 +183,7 @@ export class Kuru {
       const event = tryDecodeKuruEvent(KuruOrderbookAbi, change);
       if (!event) return this.erc20.changesReceipt([change]);
       if (event.eventName === "FlipOrderUpdated") {
-        flipEventEmitters.add(change.address.toLowerCase());
+        requireFollowingRouterTrade(changes, index, change.address);
         const data = {
           event: "FlipOrderUpdated",
           emitter: change.address,
@@ -200,7 +198,7 @@ export class Kuru {
         };
       }
       if (event.eventName === "FlippedOrderCreated") {
-        flipEventEmitters.add(change.address.toLowerCase());
+        requireFollowingRouterTrade(changes, index, change.address);
         const data = {
           event: "FlippedOrderCreated",
           emitter: change.address,
@@ -226,7 +224,6 @@ export class Kuru {
         throw new Error("Kuru Receipt Trade taker is not the Kuru router");
       }
       tradeEvents += 1;
-      tradeEmitters.add(change.address.toLowerCase());
       const data = {
         event: "Trade",
         emitter: change.address,
@@ -246,11 +243,6 @@ export class Kuru {
 
     if (!routerSwap) throw new Error("Kuru swap Receipt requires KuruRouterSwap");
     if (tradeEvents === 0) throw new Error("Kuru swap Receipt requires at least one Trade");
-    for (const emitter of flipEventEmitters) {
-      if (!tradeEmitters.has(emitter)) {
-        throw new Error("Kuru flip-order Receipt requires a Trade from the same market");
-      }
-    }
     const outcome: KuruSwapOutcome = routerSwap;
     return {
       kind: "receipt",
@@ -702,4 +694,21 @@ function decodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrderboo
   if (!event)
     throw new Error(`Unexpected Change: ${change.address} emitted an unsupported Kuru event`);
   return event;
+}
+
+function requireFollowingRouterTrade(
+  changes: readonly Change[],
+  index: number,
+  market: AddressValue,
+): void {
+  const next = changes[index + 1];
+  if (next?.kind === "event" && sameAddress(next.address, market)) {
+    const event = tryDecodeKuruEvent(KuruOrderbookAbi, next);
+    if (event?.eventName === "Trade" && sameAddress(event.args.takerAddress, KURU_ROUTER_ADDRESS)) {
+      return;
+    }
+  }
+  throw new Error(
+    "Kuru flip-order Receipt requires an immediately following Router Trade from the same market",
+  );
 }

@@ -296,7 +296,27 @@ describe("Kuru", () => {
     expect(firstChange(first)).toBe(flipped);
   });
 
-  it("rejects flip-order evidence without a Trade from the same market", async () => {
+  it("accepts multiple adjacent flip-order and Trade pairs", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const firstFlip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const firstTrade = tradeChange(MON_USDC, 8n);
+    const secondFlip = flippedOrderCreatedChange(MON_AUSD);
+    const secondTrade = tradeChange(MON_AUSD, 11n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+    const changes = [firstFlip, firstTrade, secondFlip, secondTrade, router] as const;
+
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.changes.map(firstChange)).toEqual([
+      firstFlip,
+      firstTrade,
+      secondFlip,
+      secondTrade,
+      router,
+    ]);
+  });
+
+  it("rejects a flip-order event followed by a Trade from another market", async () => {
     const { registry } = offlineRegistry();
     const capability = await swapCapability(registry);
     const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
@@ -304,8 +324,58 @@ describe("Kuru", () => {
     const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
 
     expect(() => registry.parseReceipt(capability, [flip, otherTrade, router])).toThrow(
-      "Kuru flip-order Receipt requires a Trade from the same market",
+      "requires an immediately following Router Trade from the same market",
     );
+  });
+
+  it("rejects Trade before its flip-order event", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const trade = tradeChange(MON_USDC, 8n);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [trade, flip, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects an unrelated Change between a flip-order event and Trade", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const transfer = erc20Transfer(USDC_ADDRESS, ACCOUNT, KURU_ROUTER_ADDRESS, 1n);
+    const trade = tradeChange(MON_USDC, 8n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [flip, transfer, trade, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects an isolated flip-order event", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flip = flippedOrderCreatedChange(MON_USDC);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [flip, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects crossed flip-order and Trade pairs", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const firstFlip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const secondTrade = tradeChange(MON_AUSD, 11n);
+    const secondFlip = flippedOrderCreatedChange(MON_AUSD);
+    const firstTrade = tradeChange(MON_USDC, 8n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() =>
+      registry.parseReceipt(capability, [firstFlip, secondTrade, secondFlip, firstTrade, router]),
+    ).toThrow("requires an immediately following Router Trade from the same market");
   });
 
   it("continues to reject unrelated OrderBook events", async () => {
