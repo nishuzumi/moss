@@ -3,7 +3,7 @@
 //   Endpoint:  Etherscan V2 (chainid=143, module=contract, action=getabi)
 //   Retrieved: 2026-07-26 (UTC)
 
-export const StakedMonadAbiAbi = [
+export const StakedMonadAbi = [
   {
     "inputs": [],
     "stateMutability": "nonpayable",

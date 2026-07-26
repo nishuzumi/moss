@@ -101,7 +101,7 @@ Expected: FAIL because the explorer source table and V2 generated ABI do not exi
 ```ts
 export const SOURCES = [{
   address: "0x6A4593baBDF617d5D8D6fbC04b53435d08Baf21f",
-  exportName: "StakedMonadAbi",
+  exportName: "StakedMonad",
   file: "staked-monad.ts",
 }] as const;
 ```
