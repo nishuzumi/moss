@@ -11,13 +11,8 @@ describe("Kintsu explorer ABI provenance", () => {
       exportName: "StakedMonad",
       file: "staked-monad.ts",
     });
-    const committed = readFileSync(
-      new URL("../src/abis/staked-monad.ts", import.meta.url),
-      "utf8",
-    );
-    const retrieved = /^\/\/ {3}Retrieved: (\d{4}-\d{2}-\d{2}) \(UTC\)$/m.exec(
-      committed,
-    )?.[1];
+    const committed = readFileSync(new URL("../src/abis/staked-monad.ts", import.meta.url), "utf8");
+    const retrieved = /^\/\/ {3}Retrieved: (\d{4}-\d{2}-\d{2}) \(UTC\)$/m.exec(committed)?.[1];
     const literal = /^export const \w+Abi = (\[[\s\S]*\]) as const;$/m.exec(committed)?.[1];
     expect(retrieved).toBeDefined();
     expect(literal).toBeDefined();
