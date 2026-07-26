@@ -1,5 +1,6 @@
 import * as erc from "@themoss/erc";
 import * as apriori from "@themoss/protocol-apriori";
+import * as euler from "@themoss/protocol-euler";
 import * as kuru from "@themoss/protocol-kuru";
 import * as monadCards from "@themoss/protocol-monad-cards";
 import * as nadfun from "@themoss/protocol-nadfun";
@@ -11,6 +12,7 @@ export const defaultProtocolModules = [
   system,
   erc,
   apriori,
+  euler,
   kuru,
   monadCards,
   nadfun,
