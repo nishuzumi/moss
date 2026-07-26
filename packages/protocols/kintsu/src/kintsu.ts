@@ -1,4 +1,5 @@
 import {
+  type ActionCtx,
   Address,
   type AddressValue,
   BasisPoints,
@@ -136,7 +137,7 @@ export class Kintsu {
     risk: ["fundOut", "priceImpact"],
     tags: ["liquid-staking"],
   })
-  async deposit(params: InferParams<typeof depositParams>) {
+  async deposit(params: InferParams<typeof depositParams>, _ctx: ActionCtx) {
     const prepared = await this.#prepareDeposit(params);
     return [
       this.stakedMonad.deposit([prepared.minimumShares, params.receiver], {
