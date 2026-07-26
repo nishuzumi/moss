@@ -155,6 +155,8 @@ export class Kuru {
   swapReceipt(changes: readonly Change[]): ReceiptResult<KuruSwapOutcome> {
     let routerSwap: KuruSwapOutcome | undefined;
     let tradeEvents = 0;
+    const tradeEmitters = new Set<string>();
+    const flipEventEmitters = new Set<string>();
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
       if (sameAddress(change.address, KURU_ROUTER_ADDRESS)) {
@@ -182,6 +184,41 @@ export class Kuru {
 
       const event = tryDecodeKuruEvent(KuruOrderbookAbi, change);
       if (!event) return this.erc20.changesReceipt([change]);
+      if (event.eventName === "FlipOrderUpdated") {
+        flipEventEmitters.add(change.address.toLowerCase());
+        const data = {
+          event: "FlipOrderUpdated",
+          emitter: change.address,
+          orderId: event.args.orderId.toString(),
+          size: event.args.size.toString(),
+        } as const;
+        return {
+          kind: "change" as const,
+          change,
+          data,
+          text: `Flip Order Updated: order ${data.orderId} has size ${data.size} emitted by ${data.emitter}`,
+        };
+      }
+      if (event.eventName === "FlippedOrderCreated") {
+        flipEventEmitters.add(change.address.toLowerCase());
+        const data = {
+          event: "FlippedOrderCreated",
+          emitter: change.address,
+          orderId: event.args.orderId.toString(),
+          flippedId: event.args.flippedId.toString(),
+          owner: event.args.owner,
+          size: event.args.size.toString(),
+          price: event.args.price.toString(),
+          flippedPrice: event.args.flippedPrice.toString(),
+          isBuy: event.args.isBuy,
+        } as const;
+        return {
+          kind: "change" as const,
+          change,
+          data,
+          text: `Flipped Order Created: order ${data.orderId} created ${data.flippedId} for ${data.owner}; size ${data.size}, price ${data.price}, flipped price ${data.flippedPrice}, is buy ${data.isBuy} emitted by ${data.emitter}`,
+        };
+      }
       if (event.eventName !== "Trade") {
         throw new Error(`Unexpected Change: Kuru market emitted ${event.eventName}`);
       }
@@ -189,6 +226,7 @@ export class Kuru {
         throw new Error("Kuru Receipt Trade taker is not the Kuru router");
       }
       tradeEvents += 1;
+      tradeEmitters.add(change.address.toLowerCase());
       const data = {
         event: "Trade",
         emitter: change.address,
@@ -208,6 +246,11 @@ export class Kuru {
 
     if (!routerSwap) throw new Error("Kuru swap Receipt requires KuruRouterSwap");
     if (tradeEvents === 0) throw new Error("Kuru swap Receipt requires at least one Trade");
+    for (const emitter of flipEventEmitters) {
+      if (!tradeEmitters.has(emitter)) {
+        throw new Error("Kuru flip-order Receipt requires a Trade from the same market");
+      }
+    }
     const outcome: KuruSwapOutcome = routerSwap;
     return {
       kind: "receipt",
