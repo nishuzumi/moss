@@ -4,7 +4,7 @@
 
 **Goal:** Add a self-describing Kintsu Adapter that quotes and deposits native MON for sMON on Monad mainnet.
 
-**Architecture:** A new `@themoss/protocol-kintsu` package owns the verified StakedMonad address, a reproducible full-ABI pipeline, one `stake` Capability, three Queries, and a pure exhaustive Receipt parser. The MCP composition root imports the package so Agents discover it by default, while keyed online tests pin the EIP-1967 implementation and verified ABI independently from the vendored Kintsu artifact.
+**Architecture:** A new `@themoss/protocol-kintsu` package owns the verified StakedMonad address, a reproducible explorer full-ABI pipeline, one `stake` Capability, three Queries, and a pure exhaustive Receipt parser. The MCP composition root imports the package so Agents discover it by default, while keyed online tests pin the EIP-1967 implementation and verified ABI.
 
 **Tech Stack:** TypeScript 5.9, pnpm workspace, viem, Moss decorators and Handles, Zod schemas from `@themoss/core`, Vitest 3, Changesets.
 
@@ -15,9 +15,7 @@
 - `packages/protocols/kintsu/src/kintsu.ts`: Protocol metadata, parameter schemas, quote math, transaction construction, and Receipt parsing.
 - `packages/protocols/kintsu/src/index.ts`: stable public exports.
 - `packages/protocols/kintsu/src/abis/staked-monad.ts`: deterministic generated full ABI.
-- `packages/protocols/kintsu/abis-src/StakedMonad.json`: verbatim Kintsu artifact.
-- `packages/protocols/kintsu/abis-src/VENDOR.json`: source URL, retrieval date, and content hash.
-- `packages/protocols/kintsu/scripts/*.ts`: online refresh and offline deterministic ABI generation.
+- `packages/protocols/kintsu/scripts/*.ts`: verified implementation source table and online ABI refresh.
 - `packages/protocols/kintsu/test/*.ts`: offline behavior, provenance, and compile-time fixtures.
 - `packages/protocols/kintsu/test-online/*.ts`: proxy, bytecode, and explorer ABI checks.
 - `packages/mcp-server/src/composition.ts`: default protocol selection.
@@ -33,10 +31,7 @@
 - Create: `packages/protocols/kintsu/tsconfig.json`
 - Create: `packages/protocols/kintsu/vitest.config.ts`
 - Create: `packages/protocols/kintsu/vitest.online.config.ts`
-- Create: `packages/protocols/kintsu/abis-src/StakedMonad.json`
-- Create: `packages/protocols/kintsu/abis-src/VENDOR.json`
 - Create: `packages/protocols/kintsu/scripts/abis.ts`
-- Create: `packages/protocols/kintsu/scripts/gen-abis.ts`
 - Create: `packages/protocols/kintsu/scripts/update-abis.ts`
 - Create: `packages/protocols/kintsu/test/abis.test.ts`
 - Create: `packages/protocols/kintsu/src/abis/staked-monad.ts`
@@ -51,8 +46,7 @@ Create the package as public version `0.1.0`. Its scripts are:
   "typecheck": "tsc --noEmit",
   "test": "vitest run",
   "test:abi:online": "vitest run --config vitest.online.config.ts",
-  "update:abis": "tsx scripts/update-abis.ts",
-  "gen:abis": "tsx scripts/gen-abis.ts"
+    "update:abis": "tsx scripts/update-abis.ts"
 }
 ```
 
@@ -67,55 +61,27 @@ workspace source packages; the default config includes only
 `test/**/*.test.ts`, and the online config includes only
 `test-online/**/*.test.ts`.
 
-- [ ] **Step 2: Vendor the official artifact verbatim**
+- [ ] **Step 2: Bootstrap the verified V2 implementation ABI**
 
-Run:
+Extract the complete ABI from the verified MonadScan implementation page at:
 
-```bash
-curl -fsSL \
-  https://content.gitbook.com/content/G6aohgZeWmJ4t4JLP7VO/blobs/rx3r82X6K65p0bYPKwH9/StakedMonad.json \
-  -o packages/protocols/kintsu/abis-src/StakedMonad.json
-shasum -a 256 packages/protocols/kintsu/abis-src/StakedMonad.json
-```
-
-Record the exact digest in `VENDOR.json` with this shape:
-
-```json
-{
-  "name": "Kintsu StakedMonad",
-  "source": "https://content.gitbook.com/content/G6aohgZeWmJ4t4JLP7VO/blobs/rx3r82X6K65p0bYPKwH9/StakedMonad.json",
-  "documentation": "https://docs.kintsu.xyz/the-kintsu-protocol/architecture-and-integration/monad-lst-architecture/contract-interface-abi-and-functions",
-  "sha256": "8eaf588446d1925d06755b66923bc90f6992433c051baaf9ca4c7cfe0bc615a1",
-  "vendoredAt": "2026-07-26"
-}
-```
+`https://monadscan.com/address/0x6a4593babdf617d5d8d6fbc04b53435d08baf21f`.
+Render all 142 entries with `@themoss/abi-tools` and retrieval date
+`2026-07-26`. Confirm the result includes `Deposit` and
+`VirtualSharesSnapshot`.
 
 - [ ] **Step 3: Write the failing provenance test**
 
 Create `test/abis.test.ts`:
 
 ```ts
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { type RenderAbiModuleOptions, renderAbiModule } from "@themoss/abi-tools";
 import { describe, expect, it } from "vitest";
-import { generate, readVendorInfo } from "../scripts/abis.js";
+import { SOURCES } from "../scripts/abis.js";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-describe("Kintsu ABI provenance", () => {
-  it("keeps the official artifact at its recorded sha256", () => {
-    const raw = readFileSync(join(root, "abis-src", "StakedMonad.json"));
-    expect(createHash("sha256").update(raw).digest("hex")).toBe(readVendorInfo(root).sha256);
-  });
-
-  it("derives the committed TypeScript ABI byte-for-byte", () => {
-    expect(readFileSync(join(root, "src", "abis", "staked-monad.ts"), "utf8")).toBe(
-      generate(root),
-    );
-  });
-});
+// Parse the committed literal and assert it is byte-exact renderAbiModule
+// output for SOURCES[0], then require Deposit and VirtualSharesSnapshot.
 ```
 
 - [ ] **Step 4: Run the provenance test and verify RED**
@@ -126,51 +92,32 @@ Run:
 pnpm --filter @themoss/protocol-kintsu test -- test/abis.test.ts
 ```
 
-Expected: FAIL because `scripts/abis.ts` and the generated ABI do not exist.
+Expected: FAIL because the explorer source table and V2 generated ABI do not exist.
 
-- [ ] **Step 5: Implement deterministic generation**
+- [ ] **Step 5: Implement explorer regeneration**
 
-`scripts/abis.ts` must:
-
-1. Read and type-check `VENDOR.json`.
-2. Verify the artifact SHA-256 before parsing.
-3. Accept either a bare ABI array or an artifact object with an `abi` array.
-4. Emit a provenance header and
-   `export const StakedMonadAbi = <full ABI> as const;`.
-
-Use this public surface:
+`scripts/abis.ts` exports:
 
 ```ts
-export interface VendorInfo {
-  name: string;
-  source: string;
-  documentation: string;
-  sha256: string;
-  vendoredAt: string;
-}
-
-export function readVendorInfo(packageRoot: string): VendorInfo;
-export function generate(packageRoot: string): string;
+export const SOURCES = [{
+  address: "0x6A4593baBDF617d5D8D6fbC04b53435d08Baf21f",
+  exportName: "StakedMonadAbi",
+  file: "staked-monad.ts",
+}] as const;
 ```
 
-`scripts/gen-abis.ts` writes `generate(packageRoot)` to
-`src/abis/staked-monad.ts`.
-
-`scripts/update-abis.ts` fetches `readVendorInfo(packageRoot).source`, rejects
-non-2xx responses, writes the response bytes verbatim, updates `sha256` and
-`vendoredAt`, then regenerates the TypeScript module. It must not alter the
-source or documentation URLs.
+`scripts/update-abis.ts` requires `MONADSCAN_API_KEY`, calls `fetchAbi` for
+each source, and rewrites the generated module with `renderAbiModule`.
 
 - [ ] **Step 6: Generate the ABI and verify GREEN**
 
 Run:
 
 ```bash
-pnpm --filter @themoss/protocol-kintsu gen:abis
 pnpm --filter @themoss/protocol-kintsu test -- test/abis.test.ts
 ```
 
-Expected: both provenance tests PASS.
+Expected: the V2 explorer provenance test PASS.
 
 - [ ] **Step 7: Commit the ABI foundation**
 
@@ -328,8 +275,9 @@ const minted = erc20Transfer(
   RECEIVER,
   950n,
 );
-const deposited = kintsuDeposit(ACCOUNT, RECEIVER, 1000n, 950n);
-const changes = [native, minted, deposited] as const;
+const snapshot = kintsuVirtualSharesSnapshot(0n);
+const deposited = kintsuDeposit(RECEIVER, 950n, 1000n);
+const changes = [native, snapshot, minted, deposited] as const;
 ```
 
 Parse the Receipt and assert:
@@ -344,8 +292,9 @@ expect(receipt.outcome).toEqual({
 });
 expect(flattenReceiptChanges(receipt)).toEqual(changes);
 expect(flattenReceiptChanges(receipt)[0]).toBe(native);
-expect(flattenReceiptChanges(receipt)[1]).toBe(minted);
-expect(flattenReceiptChanges(receipt)[2]).toBe(deposited);
+expect(flattenReceiptChanges(receipt)[1]).toBe(snapshot);
+expect(flattenReceiptChanges(receipt)[2]).toBe(minted);
+expect(flattenReceiptChanges(receipt)[3]).toBe(deposited);
 ```
 
 - [ ] **Step 2: Run the test and verify RED**
@@ -365,6 +314,7 @@ Map over the original list exactly once. For each entry:
 - represent a native transfer as a direct `ReceiptChange`;
 - decode events from the Kintsu address with `StakedMonadAbi`;
 - delegate each `Transfer` event to `this.erc20.changesReceipt([change])`;
+- represent `VirtualSharesSnapshot` as a direct `ReceiptChange`;
 - represent the single `Deposit` event as a direct `ReceiptChange`;
 - reject events from unsupported addresses or unsupported Kintsu event names.
 
@@ -485,7 +435,7 @@ Following Kuru's online test pattern, assert:
 2. the manifest proxy equals `KINTSU_STAKED_MONAD_ADDRESS`;
 3. `getBytecode(proxy)` is non-empty;
 4. EIP-1967 storage still resolves to the recorded implementation;
-5. the vendored ABI semantically matches the explorer-verified
+5. the committed ABI semantically matches the explorer-verified
    implementation ABI using `compareDeployedAbi`.
 
 Run:

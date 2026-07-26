@@ -17,13 +17,15 @@ processing, cooldown, and `redeem`) and should be designed separately.
 - Network: Monad mainnet, chain ID 143
 - StakedMonad Vault and sMON token:
   `0xA3227C5969757783154C60bF0bC1944180ed81B9`
+- Current verified StakedMonadV2 implementation:
+  `0x6A4593baBDF617d5D8D6fbC04b53435d08Baf21f`
 - Deposit entry point:
   `deposit(uint96 minShares, address receiver) payable returns (uint96 shares)`
 - Read methods:
   `convertToShares(uint96 assets)`, `convertToAssets(uint96 shares)`, and
   `totalShares()`
 - Deposit event:
-  `Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares)`
+  `Deposit(address indexed staker, uint256 shares, uint256 value)`
 
 Primary sources:
 
@@ -33,6 +35,8 @@ Primary sources:
   <https://docs.kintsu.xyz/the-kintsu-protocol/architecture-and-integration/monad-lst-architecture/contract-interface-abi-and-functions>
 - MonadScan verified proxy:
   <https://monadscan.com/address/0xa3227c5969757783154c60bf0bc1944180ed81b9>
+- MonadScan verified StakedMonadV2 implementation:
+  <https://monadscan.com/address/0x6a4593babdf617d5d8d6fbc04b53435d08baf21f>
 
 ## Package And Composition
 
@@ -102,14 +106,15 @@ It recognizes:
 - the native MON transfer into the StakedMonad Vault;
 - sMON ERC-20 `Transfer` events, delegated to the canonical
   `@themoss/erc` parser;
+- the management-fee `VirtualSharesSnapshot` event emitted before minting;
 - the Kintsu `Deposit` event emitted by the StakedMonad Vault.
 
 Every input Change appears exactly once in the returned Receipt tree, in the
 same order and with the same object identity. The parser rejects unsupported
 events from the Kintsu contract, duplicate Deposit events, missing required
-evidence, or mismatches between the native transfer, Deposit assets, receiver,
-and minted shares. Additional valid sMON Transfer events, such as protocol fee
-mints, remain represented and do not replace the Deposit outcome.
+evidence, or mismatches between the native transfer, Deposit value, receiver,
+and minted shares. Additional valid sMON Transfer events remain represented
+and do not replace the Deposit outcome.
 
 The typed outcome contains:
 
@@ -120,16 +125,19 @@ The typed outcome contains:
 
 ## ABI Provenance
 
-Use the complete StakedMonad artifact published by Kintsu, not a handwritten
-ABI subset. Commit the upstream artifact and provenance metadata, then generate
-the `as const` TypeScript ABI deterministically for Handle inference.
+Use the complete ABI from MonadScan's verified StakedMonadV2 implementation,
+not the stale V1 artifact still linked by Kintsu's documentation and not a
+handwritten subset. Commit the generated `as const` TypeScript ABI with the
+implementation address and retrieval date. A zero-argument `update:abis`
+script uses the official Etherscan V2 API for Monad mainnet.
 
-Offline tests assert that the generated TypeScript matches the committed
-upstream artifact. An online ABI test resolves the EIP-1967 implementation
-behind the pinned proxy, checks that the expected implementation is still
-active, and semantically compares the required callable and event surface with
-MonadScan's verified implementation ABI. A live bytecode check verifies that
-the fixed Vault address is deployed on Monad mainnet.
+Offline tests assert that the generated module has the exact standard explorer
+provenance form and includes the V2 events observed in a live deposit. An
+online ABI test resolves the EIP-1967 implementation behind the pinned proxy,
+checks that the expected implementation is still active, and semantically
+compares the committed ABI with MonadScan's verified implementation ABI. A
+live bytecode check verifies that the fixed Vault address is deployed on Monad
+mainnet.
 
 ## Testing
 
