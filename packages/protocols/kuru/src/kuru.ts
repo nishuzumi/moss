@@ -214,7 +214,7 @@ export class Kuru {
           kind: "change" as const,
           change,
           data,
-          text: `Flipped Order Created: order ${data.orderId} created ${data.flippedId} for ${data.owner}; size ${data.size}, price ${data.price}, flipped price ${data.flippedPrice}, is buy ${data.isBuy} emitted by ${data.emitter}`,
+          text: `Flipped Order Created: order ID ${data.orderId}, flipped ID ${data.flippedId}, owner ${data.owner}; size ${data.size}, price ${data.price}, flipped price ${data.flippedPrice}, is buy ${data.isBuy}, emitted by ${data.emitter}`,
         };
       }
       if (event.eventName !== "Trade") {
@@ -696,6 +696,7 @@ function decodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrderboo
   return event;
 }
 
+// The pinned OrderBook executes _fillOrder -> _handleFlipOrderUpdate -> _emitTrade.
 function requireFollowingRouterTrade(
   changes: readonly Change[],
   index: number,

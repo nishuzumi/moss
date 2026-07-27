@@ -277,7 +277,7 @@ describe("Kuru", () => {
     const receipt = registry.parseReceipt(capability, changes);
     expect(receipt.changes[0]).toMatchObject({
       kind: "change",
-      text: `Flipped Order Created: order 11 created 12 for ${ACCOUNT}; size 30, price 40, flipped price 50, is buy true emitted by ${MON_USDC}`,
+      text: `Flipped Order Created: order ID 11, flipped ID 12, owner ${ACCOUNT}; size 30, price 40, flipped price 50, is buy true, emitted by ${MON_USDC}`,
       data: {
         event: "FlippedOrderCreated",
         emitter: MON_USDC,

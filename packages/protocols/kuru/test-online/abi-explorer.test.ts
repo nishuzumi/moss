@@ -35,16 +35,21 @@
  * mismatch (`transferOwnership`: vendored payable, explorer nonpayable).
  *
  * The Moss-required surface was instead verified once by hand:
- * - `Trade`, `placeAndExecuteMarketBuy`, and `placeAndExecuteMarketSell`
- *   are field-for-field identical between the vendored ABI and the
- *   explorer ABI of 0xea2Cc876… (same comparison as above; all three are
- *   absent from every issue bucket), and
+ * - `Trade`, `FlipOrderUpdated`, `FlippedOrderCreated`,
+ *   `placeAndExecuteMarketBuy`, and `placeAndExecuteMarketSell` are
+ *   field-for-field identical between the vendored ABI and the explorer ABI
+ *   of 0xea2Cc876… (same comparison as above; all five are absent from every
+ *   issue bucket), and
  * - present in 0x4C0bA1BA…'s deployed bytecode (`eth_getCode`, then search
  *   the hex for the dispatcher selectors and the event topic):
  *     placeAndExecuteMarketBuy(uint96,uint256,bool,bool)  = 0x7c51d6cf
  *     placeAndExecuteMarketSell(uint96,uint256,bool,bool) = 0x532c46db
  *     Trade(uint40,address,bool,uint256,uint96,address,address,uint96)
  *       topic0 = 0xf16924fba1c18c108912fcacaac7450c98eb3f2d8c0a3cdf3df7066c08f21581
+ *     FlipOrderUpdated(uint40,uint96)
+ *       topic0 = 0xb74e966bc873b8c144fab39c9981210f50130885e89caf4556c0840cec741dcd
+ *     FlippedOrderCreated(uint40,uint40,address,uint96,uint32,uint32,bool)
+ *       topic0 = 0x49496a41b922bdba3ff7f57bb0992ab1a1a3ee95b5ae5bd7271c67861f018352
  * The template assertion below is the tripwire that forces this record to
  * be redone whenever Kuru upgrades.
  */
