@@ -1,4 +1,11 @@
-import { type MossRuntime, Protocol, Registry, tokenMetadata } from "../src/index.js";
+import {
+  type MossRuntime,
+  Protocol,
+  Registry,
+  type SelfRef,
+  type TransactionNode,
+  tokenMetadata,
+} from "../src/index.js";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111" as const;
 
@@ -45,3 +52,29 @@ void LabeledFixture;
 void InvalidLabeledFixture;
 void metadataKind;
 void metadataDecimals;
+
+class SelfRefFixture {
+  declare self: SelfRef<SelfRefFixture, "approve">;
+
+  async approve(_params: { amount: string }): Promise<TransactionNode[]> {
+    return [];
+  }
+
+  async transfer(_params: { to: string }): Promise<TransactionNode[]> {
+    return [];
+  }
+}
+
+declare const selfRef: SelfRefFixture["self"];
+// A named method nests through the builder with its declared params.
+void selfRef.approve({ amount: "1" });
+// @ts-expect-error the nested call keeps the method's parameter contract.
+void selfRef.approve({ amount: 1 });
+// @ts-expect-error only the named subset of the class is exposed.
+void selfRef.transfer;
+// @ts-expect-error SelfRef rejects method names the class does not have.
+type BadSelfRef = SelfRef<SelfRefFixture, "burn">;
+
+void SelfRefFixture;
+declare const badSelfRef: BadSelfRef;
+void badSelfRef;

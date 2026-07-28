@@ -58,6 +58,7 @@ export {
   type RegistryOptions,
   RISK_LABELS,
   type RiskLabel,
+  type SelfRef,
   type TokenRef,
   type TransactionNode,
   type TrustedToken,

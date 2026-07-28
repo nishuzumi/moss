@@ -85,10 +85,11 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
     const injected = class extends Base {
       constructor(...args: unknown[]) {
         super();
-        const [runtime, account, dependencies = {}] = args as [
+        const [runtime, account, dependencies = {}, self] = args as [
           MossRuntime,
           Address,
           Record<string, object>?,
+          object?,
         ];
         if (!runtime?.client || !account) {
           throw new Error(`protocol "${config.name}" must be constructed by Registry`);
@@ -100,6 +101,7 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
           });
         }
         Object.defineProperty(this, "runtime", { value: runtime, writable: false });
+        if (self) Object.defineProperty(this, "self", { value: self, writable: false });
         for (const key of Object.keys(config.protocols ?? {})) {
           const dependency = dependencies[key];
           if (!dependency) {

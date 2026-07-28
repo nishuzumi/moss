@@ -94,6 +94,18 @@ export type ProtocolRef<T> = {
     : never;
 };
 
+/**
+ * A Protocol's reference to a chosen subset of its OWN methods, injected as
+ * `self` by `@Protocol`. Calling a Capability through it nests that Capability
+ * through Registry's builder, so the nested node gets the same Zod parameter
+ * validation and the same protocol and method stamping as any dependency call.
+ *
+ * The methods are named explicitly rather than taken wholesale: `ProtocolRef<T>`
+ * over the whole class would map the `self` property back through itself, which
+ * TypeScript rejects as an infinitely deep instantiation.
+ */
+export type SelfRef<T, Methods extends keyof T> = ProtocolRef<Pick<T, Methods>>;
+
 export type Change =
   | {
       kind: "event";

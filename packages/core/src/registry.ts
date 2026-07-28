@@ -549,8 +549,12 @@ export class Registry {
       runtime: MossRuntime,
       account: Address,
       dependencies: Record<string, object>,
+      self: object,
     ) => object;
-    return new Ctor(this.runtime, account, dependencies);
+    // `self` routes a Protocol's own nested Capabilities through the same
+    // builder as a dependency call, so they are parameter-validated and
+    // stamped by core instead of hand-assembled in the Protocol package.
+    return new Ctor(this.runtime, account, dependencies, this.#dependency(protocol, account));
   }
 
   #dependency(protocol: string, account: Address): object {

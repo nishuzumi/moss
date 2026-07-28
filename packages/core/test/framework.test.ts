@@ -18,6 +18,7 @@ import {
   Query,
   Receipt,
   Registry,
+  type SelfRef,
   type TransactionNode,
   transaction,
   UnsignedIntegerString,
@@ -141,6 +142,52 @@ class ComposedProtocol {
 }
 
 class UndecoratedDependency {}
+
+@Protocol({
+  name: "selfnesting",
+  category: "token",
+  description: "Fixture Protocol nesting its own Capability through self.",
+  contracts: {},
+})
+class SelfNestingProtocol {
+  declare self: SelfRef<SelfNestingProtocol, "approve">;
+
+  @Capability<SelfNestingProtocol, typeof noParams>({
+    intent: "Compose a self-nested approval",
+    verb: "swap",
+    params: noParams,
+    receipt: "swapReceipt",
+    risk: ["fundOut"],
+  })
+  async swap(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [
+      await this.self.approve({ token: "1", amount: "10" }),
+      transaction(ctx.account, VAULT, { data: "0xabcd" }),
+    ];
+  }
+
+  @Capability<SelfNestingProtocol, typeof approvalParams>({
+    intent: "Approve fixture token",
+    verb: "transfer",
+    params: approvalParams,
+    receipt: "approvalReceipt",
+    risk: ["approval"],
+  })
+  async approve(params: InferParams<typeof approvalParams>, ctx: { account: AddressValue }) {
+    if (typeof params.amount !== "string") throw new Error("self call skipped parameter parsing");
+    return [transaction(ctx.account, VAULT, { data: "0x1234" })];
+  }
+
+  @Receipt()
+  swapReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    return receiptFor("swap", changes);
+  }
+
+  @Receipt()
+  approvalReceipt(changes: readonly Change[]): MossReceipt<{ operation: "approve" }> {
+    return receiptFor("approve", changes);
+  }
+}
 
 @Protocol({
   name: "broken-dependency",
@@ -373,6 +420,40 @@ describe("framework core seam", () => {
       "0x1234",
       "0xabcd",
     ]);
+  });
+
+  it("routes a Protocol's own nested Capability through core (self-injection)", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfNestingProtocol);
+
+    const result = await registry.action("selfnesting", "swap", ACCOUNT, {});
+    if (result.kind !== "capability") throw new Error("expected capability");
+
+    // The nested node must be stamped by core, not hand-assembled.
+    expect(result.children[0]).toMatchObject({
+      kind: "capability",
+      protocol: "selfnesting",
+      method: "approve",
+      params: { token: "1", amount: "10" },
+    });
+    expect(flattenCapabilityTree(result).map(({ transaction: tx }) => tx.data)).toEqual([
+      "0x1234",
+      "0xabcd",
+    ]);
+
+    // Registry must resolve the nested node's Receipt parser.
+    const changes: Change[] = [
+      { kind: "event", address: VAULT, topics: [], data: "0x" },
+      { kind: "event", address: VAULT, topics: [], data: "0x" },
+    ];
+    const nested = result.children[0];
+    if (nested?.kind !== "capability") throw new Error("expected nested capability");
+    expect(registry.parseReceipt(nested, [changes[0] as Change]).outcome).toEqual({
+      operation: "approve",
+    });
+    expect(registry.parseReceipt(result, [changes[1] as Change]).outcome).toEqual({
+      operation: "swap",
+    });
   });
 
   it("rejects inherited markers, undecorated dependencies, and invalid Capability metadata", () => {

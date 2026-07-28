@@ -52,6 +52,7 @@ import {
   Query,
   Receipt,
   type ReceiptResult,
+  type SelfRef,
   type TokenRef,
   TokenReference,
   type TransactionNode,
@@ -124,6 +125,16 @@ const MAX_UINT128 = (1n << 128n) - 1n;
 const MAX_UINT160 = (1n << 160n) - 1n;
 const MAX_UINT48 = (1n << 48n) - 1n;
 
+function boundedUnsignedIntegerString(max: bigint, description: string) {
+  return UnsignedIntegerString.refine((value) => {
+    try {
+      return BigInt(value) <= max;
+    } catch {
+      return false;
+    }
+  }, `Expected an integer no greater than ${max}.`).describe(description);
+}
+
 const UniswapSlippage = BasisPoints.min(1)
   .max(5_000)
   .describe("An integer basis-point count from 1 through 5000; 1 bps equals 0.01%.");
@@ -141,17 +152,28 @@ const swapParams = {
   },
 } satisfies ParamsSpec;
 
+// Permit2 packs its allowance into uint160 and its expiration into uint48,
+// so both are narrower than a plain unsigned integer string.
+const Uint160String = boundedUnsignedIntegerString(
+  MAX_UINT160,
+  "A base-10 uint160 integer string, from 0 through 2^160 - 1.",
+);
+const Uint48String = boundedUnsignedIntegerString(
+  MAX_UINT48,
+  "A base-10 uint48 integer string, from 0 through 2^48 - 1.",
+);
+
 const permit2ApproveParams = {
   token: {
     type: Address,
     description: "ERC-20 asset whose Permit2 allowance is granted to the Universal Router.",
   },
   amount: {
-    type: UnsignedIntegerString,
+    type: Uint160String,
     description: "Allowance in the token's smallest unit; use 0 to revoke it.",
   },
   expiration: {
-    type: UnsignedIntegerString,
+    type: Uint48String,
     description: "Unix timestamp in seconds after which the allowance expires.",
   },
 } satisfies ParamsSpec;
@@ -186,6 +208,8 @@ export class Uniswap {
   declare quoter: Handle<typeof V4QuoterAbi>;
   declare permit2: Handle<typeof Permit2Abi>;
   declare erc20: ProtocolRef<ERC20>;
+  /** Core-injected reference to this Protocol's own nestable Capabilities. */
+  declare self: SelfRef<Uniswap, "permit2Approve">;
 
   @Query({
     intent: "Quote swapping {amountIn} of {tokenIn} into {tokenOut} on Uniswap v4",
@@ -215,6 +239,8 @@ export class Uniswap {
   })
   async swap(params: SwapParams, ctx: ActionCtx): Promise<CapabilityResult> {
     const prepared = await this.#prepareSwap(params, ctx.account);
+    // Host clock, not chain time. A host running far behind produces a
+    // deadline already in the past, which surfaces as a simulation revert.
     const deadline = BigInt(Math.floor(Date.now() / 1000) + SWAP_DEADLINE_SECONDS);
     const children: (CapabilityNode | TransactionNode)[] = [];
 
@@ -229,7 +255,7 @@ export class Uniswap {
           spender: PERMIT2_ADDRESS,
           amount: prepared.amountIn.toString(),
         }),
-        this.#permit2ApproveNode({
+        await this.self.permit2Approve({
           token: params.tokenIn,
           amount: prepared.amountIn.toString(),
           expiration: deadline.toString(),
@@ -309,12 +335,14 @@ export class Uniswap {
     tags: ["permit2", "allowance"],
   })
   permit2Approve(params: Permit2ApproveParams): TransactionNode[] {
-    const amount = BigInt(params.amount);
-    const expiration = BigInt(params.expiration);
-    if (amount > MAX_UINT160) throw new ParameterError("amount exceeds uint160");
-    if (expiration > MAX_UINT48) throw new ParameterError("expiration exceeds uint48");
+    // Both bounds are enforced by the declared parameter types.
     return [
-      this.permit2.approve([params.token, UNISWAP_V4_ROUTER_ADDRESS, amount, Number(expiration)]),
+      this.permit2.approve([
+        params.token,
+        UNISWAP_V4_ROUTER_ADDRESS,
+        BigInt(params.amount),
+        Number(params.expiration),
+      ]),
     ];
   }
 
@@ -474,16 +502,6 @@ export class Uniswap {
     };
   }
 
-  #permit2ApproveNode(params: Permit2ApproveParams): CapabilityNode {
-    return {
-      kind: "capability",
-      protocol: "uniswap",
-      method: "permit2Approve",
-      params,
-      children: this.permit2Approve(params),
-    };
-  }
-
   async #prepareSwap(params: SwapParams, account: AddressValue): Promise<PreparedSwap> {
     if (sameToken(params.tokenIn, params.tokenOut)) {
       throw new ParameterError("tokenIn and tokenOut must differ");
@@ -526,6 +544,9 @@ export class Uniswap {
     const best = candidates.reduce((left, right) =>
       right.amountOut > left.amountOut ? right : left,
     );
+    // Registry-parsed params always carry the Zod default (pinned by the
+    // quote test); the fallback covers typed direct callers, whose SwapParams
+    // surface keeps slippage optional like the other DEX adapters.
     const slippage = BigInt(params.slippage ?? DEFAULT_SLIPPAGE_BPS);
     const minimumAmountOut = (best.amountOut * (10_000n - slippage)) / 10_000n;
     if (minimumAmountOut === 0n) {
