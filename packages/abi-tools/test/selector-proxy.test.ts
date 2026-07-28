@@ -344,6 +344,50 @@ describe("resolveSelectorProxy", () => {
       resolveSelectorProxy({ proxy: PROXY, call: facetsCall(manySelectors) }),
     ).rejects.toThrow(/maps over 8192 selectors/);
   });
+
+  it("bounds the facetAddresses() fanout before making the per-facet calls", async () => {
+    // The facet bound must reject right after the address list decodes: 257
+    // listed facets means zero facetFunctionSelectors calls, not 257 calls
+    // followed by the throw.
+    const manyFacets: FacetEntries = Array.from({ length: 257 }, (_, index) => [
+      `0x${(index + 1).toString(16).padStart(40, "0")}` as `0x${string}`,
+      [`0x${index.toString(16).padStart(8, "0")}` as Selector],
+    ]);
+    const inner = facetAddressesCall(manyFacets);
+    let selectorCalls = 0;
+    const counting: EthCall = async (request) => {
+      if (request.data.startsWith(FACET_FUNCTION_SELECTORS_SELECTOR)) selectorCalls += 1;
+      return inner(request);
+    };
+    await expect(resolveSelectorProxy({ proxy: PROXY, call: counting })).rejects.toThrow(
+      /257 facets, over 256/,
+    );
+    expect(selectorCalls).toBe(0);
+  });
+
+  it("stops the facetAddresses() fanout when the selector budget crosses mid-loop", async () => {
+    // The cumulative selector bound is checked as each facet's list decodes,
+    // so one over-budget facet early in the list stops before any call to
+    // the facets after it.
+    const bigFacet = [
+      FACET_A,
+      Array.from(
+        { length: 8193 },
+        (_, index) => `0x${index.toString(16).padStart(8, "0")}` as Selector,
+      ),
+    ] as const;
+    const entries: FacetEntries = [bigFacet, [FACET_B, [TRANSFER]]];
+    const inner = facetAddressesCall(entries);
+    let selectorCalls = 0;
+    const counting: EthCall = async (request) => {
+      if (request.data.startsWith(FACET_FUNCTION_SELECTORS_SELECTOR)) selectorCalls += 1;
+      return inner(request);
+    };
+    await expect(resolveSelectorProxy({ proxy: PROXY, call: counting })).rejects.toThrow(
+      /maps over 8192 selectors/,
+    );
+    expect(selectorCalls).toBe(1);
+  });
 });
 
 describe("unionFacetAbis", () => {

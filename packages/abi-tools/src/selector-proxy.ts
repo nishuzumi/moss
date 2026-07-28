@@ -276,6 +276,16 @@ export async function resolveSelectorProxy(
         functionName: "facetAddresses",
         data: addressesData,
       });
+      // Both bounds fire before the per-facet calls they would otherwise
+      // drive: the facet bound right after the address list decodes, the
+      // selector bound as each facet's list decodes, so an over-limit
+      // answer stops the fanout instead of merely failing after it.
+      if (facetAddresses.length > MAX_FACETS) {
+        throw new Error(
+          `selector proxy ${proxy} lists ${facetAddresses.length} facets, over ${MAX_FACETS}`,
+        );
+      }
+      let selectorBudget = 0;
       for (const facet of facetAddresses) {
         const selectorsData = await tryCall(
           encodeFunctionData({
@@ -293,6 +303,10 @@ export async function resolveSelectorProxy(
           functionName: "facetFunctionSelectors",
           data: selectorsData,
         });
+        selectorBudget += selectors.length;
+        if (selectorBudget > MAX_SELECTORS) {
+          throw new Error(`selector proxy ${proxy} maps over ${MAX_SELECTORS} selectors`);
+        }
         entries.push([facet, selectors] as const);
       }
     } catch (error) {
