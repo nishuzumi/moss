@@ -150,13 +150,17 @@ describe("capability tree complexity bounds", () => {
     expectTreeError(cap([tx("0xabc")]), "CALLDATA_PARTIAL_BYTE");
   });
 
-  it("bounds transaction values to canonical 32-byte hex quantities", () => {
+  it("bounds transaction values to 32-byte hex quantities in any spelling", () => {
     const max: `0x${string}` = `0x${"f".repeat(64)}`;
     expect(flattenCapabilityTree(cap([tx("0x", max)]))).toHaveLength(1);
+    // isHex accepts these spellings, so the quantity check must too: an Agent
+    // posting simulate input commonly emits "0x00", and BigInt downstream
+    // parses leading zeros and uppercase digits identically.
+    expect(flattenCapabilityTree(cap([tx("0x", "0x00")]))).toHaveLength(1);
+    expect(flattenCapabilityTree(cap([tx("0x", "0x0DE0")]))).toHaveLength(1);
+    expect(flattenCapabilityTree(cap([tx("0x", `0x${"F".repeat(64)}`)]))).toHaveLength(1);
     expectTreeError(cap([tx("0x", `0x1${"0".repeat(64)}`)]), "VALUE_OVERFLOW");
-    expectTreeError(cap([tx("0x", "0x00")]), "VALUE_QUANTITY");
-    expectTreeError(cap([tx("0x", "0x0DE0")]), "VALUE_QUANTITY");
-    expectTreeError(cap([tx("0x", `0x${"F".repeat(64)}`)]), "VALUE_QUANTITY");
+    expectTreeError(cap([tx("0x", "0x" as `0x${string}`)]), "VALUE_QUANTITY");
   });
 
   it("flattens a production-shaped tree in the exact recursive depth-first order", () => {

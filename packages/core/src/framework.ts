@@ -114,8 +114,8 @@ interface TreeBudget {
   calldataBytes: number;
 }
 
-/** Canonical JSON-RPC hex quantity: lowercase, no leading zeros, at most 32 bytes. */
-const CANONICAL_QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/;
+/** JSON-RPC hex quantity: 1 to 64 hex digits, any case, at most 32 bytes. */
+const HEX_QUANTITY = /^0x[0-9a-fA-F]{1,64}$/;
 
 function assertTransactionNode(node: TransactionNode, path: string, budget: TreeBudget): void {
   if (!node.transaction || typeof node.transaction !== "object") {
@@ -144,11 +144,11 @@ function assertTransactionNode(node: TransactionNode, path: string, budget: Tree
   if (value.length - 2 > 64) {
     throw new CapabilityTreeError("VALUE_OVERFLOW", `${path}.value`, "value exceeds 32 bytes");
   }
-  if (!CANONICAL_QUANTITY.test(value)) {
+  if (!HEX_QUANTITY.test(value)) {
     throw new CapabilityTreeError(
       "VALUE_QUANTITY",
       `${path}.value`,
-      "value must be a canonical hex quantity",
+      "value must be a hex quantity of 1 to 64 hex digits",
     );
   }
 }
@@ -355,14 +355,22 @@ function assertBoundedParams(value: unknown, path: string, budget: TreeBudget): 
     if (Object.getOwnPropertySymbols(current).length > 0) {
       throw new TypeError(`${currentPath} contains a symbol key`);
     }
-    const entries = Object.entries(current);
-    if (budget.parameterNodes + entries.length > CAPABILITY_TREE_LIMITS.maxParameterNodes) {
-      throw new CapabilityTreeError(
-        "PARAMETER_COUNT",
-        currentPath,
-        `total parameter nodes exceed ${CAPABILITY_TREE_LIMITS.maxParameterNodes}`,
-      );
+    // Reject a budget-exceeding container before materializing its entries,
+    // so frame memory stays bounded by the node budget (same guarantee as the
+    // array branch above).
+    let keyCount = 0;
+    for (const key in current) {
+      if (!Object.hasOwn(current, key)) continue;
+      keyCount += 1;
+      if (budget.parameterNodes + keyCount > CAPABILITY_TREE_LIMITS.maxParameterNodes) {
+        throw new CapabilityTreeError(
+          "PARAMETER_COUNT",
+          currentPath,
+          `total parameter nodes exceed ${CAPABILITY_TREE_LIMITS.maxParameterNodes}`,
+        );
+      }
     }
+    const entries = Object.entries(current);
     for (const [key] of entries) addParameterCharacters(key.length, currentPath, budget);
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index];
