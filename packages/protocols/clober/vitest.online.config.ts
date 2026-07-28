@@ -3,9 +3,8 @@ import { defineConfig } from "vitest/config";
 
 const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
-// The online explorer cross-check suite (pnpm test:abi:online). Kept apart
-// from the offline default so a missing MONADSCAN_API_KEY fails loudly here
-// without ever gating `pnpm test`.
+// The live ABI deployment-evidence suite (pnpm test:abi:online). Kept apart
+// from the default suite because it reads Monad mainnet bytecode and storage.
 export default defineConfig({
   esbuild: { target: "es2022" },
   test: { include: ["test-online/**/*.test.ts"] },

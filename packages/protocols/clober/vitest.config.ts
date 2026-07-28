@@ -5,7 +5,7 @@ const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
   esbuild: { target: "es2022" },
-  // The keyed online explorer cross-check lives in test-online/ and runs only
+  // Live ABI deployment evidence lives in test-online/ and runs only
   // through vitest.online.config.ts (pnpm test:abi:online).
   test: { include: ["test/**/*.test.ts"] },
   resolve: {

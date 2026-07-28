@@ -34,6 +34,9 @@ import {
 } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+// Public EOA used only as eth_call sender state. Verified with ample USDC and
+// zero Controller allowance when the reverse live fixture was recorded.
+const REVERSE_SIMULATION_ACCOUNT = getAddress("0xf70da97812CB96acDF810712Aa562db8dfA3dbEF");
 const TOKEN_IN = getAddress("0x1111111111111111111111111111111111111111");
 const OTHER_TOKEN = getAddress("0x2222222222222222222222222222222222222222");
 const MAKER_POLICY = 8_888_608;
@@ -43,15 +46,32 @@ const UINT192_MASK = (1n << 192n) - 1n;
 afterEach(() => vi.restoreAllMocks());
 
 describe("Clober", () => {
-  it("loads exact-input fields and returns an offline human-unit quote", async () => {
+  it("separates quote and swap field purposes while sharing human-unit semantics", async () => {
     const { registry, readContract } = offlineRegistry();
-    const [loaded] = registry.load([{ protocol: "clober", method: "quote" }]);
-    expect(loaded?.params.amountIn).toMatchObject({
-      description: expect.stringContaining("Fixed input"),
-      type: { description: expect.stringContaining("base-10 decimal") },
+    const [quoteLoaded, swapLoaded] = registry.load([
+      { protocol: "clober", method: "quote" },
+      { protocol: "clober", method: "swap" },
+    ]);
+    const quoteAmount = quoteLoaded?.params.amountIn;
+    const swapAmount = swapLoaded?.params.amountIn;
+    const quoteSlippage = quoteLoaded?.params.slippage;
+    const swapSlippage = swapLoaded?.params.slippage;
+    if (!quoteAmount || !swapAmount || !quoteSlippage || !swapSlippage) {
+      throw new Error("missing Clober parameter metadata");
+    }
+    expect(quoteAmount).toMatchObject({
+      description: expect.stringContaining("Viewer quote"),
+      type: {
+        description: expect.stringMatching(/display units.*decimals/),
+      },
     });
-    expect(loaded?.params.slippage).toMatchObject({
-      description: expect.stringContaining("adverse movement"),
+    expect(swapAmount).toMatchObject({
+      description: expect.stringContaining("Controller.spend"),
+      type: quoteAmount.type,
+    });
+    expect(quoteAmount.description).not.toBe(swapAmount.description);
+    expect(quoteSlippage).toMatchObject({
+      description: expect.stringContaining("returned minimumAmountOut"),
       type: {
         default: 50,
         minimum: 0,
@@ -59,6 +79,11 @@ describe("Clober", () => {
         description: expect.stringContaining("1 bps equals 0.01%"),
       },
     });
+    expect(swapSlippage).toMatchObject({
+      description: expect.stringContaining("Controller.spend"),
+      type: quoteSlippage.type,
+    });
+    expect(quoteSlippage.description).not.toBe(swapSlippage.description);
 
     const quote = await registry.action("clober", "quote", ACCOUNT, {
       tokenIn: NATIVE,
@@ -71,7 +96,7 @@ describe("Clober", () => {
       5_954_885_684_956_363_054_050_231_031_211_743_946_744_177_791_604_395_877_538n,
     );
     expect(quote.data).toEqual({
-      amountIn: "1",
+      maximumAmountIn: "1",
       estimatedAmountSpent: "1",
       estimatedAmountOut: "2",
       minimumAmountOut: "1.99",
@@ -105,7 +130,7 @@ describe("Clober", () => {
       amountIn: "1.0000000",
     });
     if (exact.kind !== "query") throw new Error("expected Query");
-    expect(exact.data).toMatchObject({ amountIn: "1", estimatedAmountSpent: "1" });
+    expect(exact.data).toMatchObject({ maximumAmountIn: "1", estimatedAmountSpent: "1" });
   });
 
   it("uses curated token decimals without requiring optional ERC-20 metadata", async () => {
@@ -320,6 +345,12 @@ describe("Clober", () => {
     const debit = erc20Transfer(USDC_ADDRESS, ACCOUNT, CLOBER_BOOK_MANAGER_ADDRESS, 1_000_000n);
     const credit = nativeTransfer(CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
     expect(registry.parseReceipt(capability, [take, debit, credit]).outcome).toMatchObject({
+      user: ACCOUNT,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      actualAmountIn: "1000000",
+      actualAmountOut: "2000000",
+      refundedAmountIn: "0",
       fills: [{ bookId: expectedBookId.toString() }],
       settlements: [
         { operation: "transfer", token: USDC_ADDRESS, from: ACCOUNT },
@@ -370,7 +401,7 @@ describe("Clober", () => {
         tokenOut: USDC_ADDRESS,
         amountIn: "1",
       }),
-    ).rejects.toThrow("cannot spend at least 99.9% of the input amount");
+    ).rejects.toThrow("cannot spend at least 99.9% of the maximum input");
   });
 
   it("enforces the conservative 99.9% utilization boundary exactly", async () => {
@@ -391,7 +422,7 @@ describe("Clober", () => {
         tokenOut: USDC_ADDRESS,
         amountIn: "1",
       }),
-    ).rejects.toThrow("cannot spend at least 99.9% of the input amount");
+    ).rejects.toThrow("cannot spend at least 99.9% of the maximum input");
   });
 
   it("rejects a non-zero small quote when whole-unit dust exceeds the policy", async () => {
@@ -405,10 +436,10 @@ describe("Clober", () => {
         tokenOut: USDC_ADDRESS,
         amountIn: "0.001",
       }),
-    ).rejects.toThrow("cannot spend at least 99.9% of the input amount");
+    ).rejects.toThrow("cannot spend at least 99.9% of the maximum input");
   });
 
-  it("rejects a Viewer quote that claims to spend more than the requested input", async () => {
+  it("rejects a Viewer quote that claims to spend more than the maximum input", async () => {
     const { registry } = offlineRegistry({ spentBaseAmount: 1_000_000_000_000_000_001n });
     await expect(
       registry.action("clober", "swap", ACCOUNT, {
@@ -416,7 +447,7 @@ describe("Clober", () => {
         tokenOut: USDC_ADDRESS,
         amountIn: "1",
       }),
-    ).rejects.toThrow("exceeds the requested input amount");
+    ).rejects.toThrow("exceeds the maximum input amount");
   });
 
   it("rejects dust quotes whose slippage floor would disable minimum-output protection", async () => {
@@ -458,11 +489,17 @@ describe("Clober", () => {
     expect(receipt.outcome).toEqual({
       operation: "swap",
       protocol: "clober",
+      user: ACCOUNT,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      actualAmountIn: "1000000",
+      actualAmountOut: "2000000",
+      refundedAmountIn: "0",
       fills: [
         {
           event: "Take",
           bookId: expectedBookId.toString(),
-          user: CLOBER_CONTROLLER_ADDRESS,
+          controller: CLOBER_CONTROLLER_ADDRESS,
           tick: "123",
           unit: "9",
         },
@@ -555,9 +592,15 @@ describe("Clober", () => {
     const output = erc20Transfer(USDC_ADDRESS, CLOBER_BOOK_MANAGER_ADDRESS, ACCOUNT, 2_000_000n);
     const refund = nativeTransfer(CLOBER_CONTROLLER_ADDRESS, ACCOUNT, 1_000n);
 
-    expect(() =>
-      registry.parseReceipt(capability, [input, take, settledInput, output, refund]),
-    ).not.toThrow();
+    const receipt = registry.parseReceipt(capability, [input, take, settledInput, output, refund]);
+    expect(receipt.outcome).toMatchObject({
+      user: ACCOUNT,
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      actualAmountIn: "999000",
+      actualAmountOut: "2000000",
+      refundedAmountIn: "1000",
+    });
 
     const invalidCases: readonly {
       name: string;
@@ -734,7 +777,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
       amountIn: "1",
     });
     if (quote.kind !== "query") throw new Error("expected Query");
-    expect(quote.data).toMatchObject({ amountIn: "1" });
+    expect(quote.data).toMatchObject({ maximumAmountIn: "1" });
     expect(
       Number((quote.data as { estimatedAmountOut: string }).estimatedAmountOut),
     ).toBeGreaterThan(0);
@@ -770,37 +813,99 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
     expect(outcome.results[0]?.receipt?.outcome).toMatchObject({
       operation: "swap",
       protocol: "clober",
+      user: ACCOUNT.toLowerCase(),
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
     });
     const receipt = outcome.results[0]?.receipt;
     if (!receipt) throw new Error("missing Clober receipt");
     const swapOutcome = receipt.outcome as CloberSwapOutcome;
-    const actualAmountOut = swapOutcome.settlements.reduce((sum, settlement) => {
-      if (
-        settlement.operation === "transfer" &&
-        settlement.token !== NATIVE &&
-        settlement.token.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
-        settlement.to.toLowerCase() === ACCOUNT.toLowerCase()
-      ) {
-        return sum + BigInt(settlement.amount);
-      }
-      return sum;
-    }, 0n);
     expect(viewerAmountOut).toBeGreaterThan(0n);
-    expect(actualAmountOut).toBeGreaterThanOrEqual(viewerAmountOut);
+    expect(BigInt(swapOutcome.actualAmountIn)).toBeGreaterThan(0n);
+    expect(BigInt(swapOutcome.actualAmountOut)).toBeGreaterThanOrEqual(viewerAmountOut);
   });
 
-  it("quotes the reverse USDC to native MON direction", { timeout: 60_000 }, async () => {
-    const quote = await new Registry(await monadRuntime())
-      .use(Clober)
-      .action("clober", "quote", ACCOUNT, {
-        tokenIn: USDC_ADDRESS,
-        tokenOut: NATIVE,
-        amountIn: "1",
-      });
-    if (quote.kind !== "query") throw new Error("expected Query");
-    expect(
-      Number((quote.data as { estimatedAmountOut: string }).estimatedAmountOut),
-    ).toBeGreaterThan(0);
+  it("simulates reverse USDC to MON through approval and Controller.spend", {
+    timeout: 180_000,
+  }, async () => {
+    const runtime = await monadRuntime();
+    const [balance, allowance] = await Promise.all([
+      runtime.client.readContract({
+        address: USDC_ADDRESS,
+        abi: ERC20Abi,
+        functionName: "balanceOf",
+        args: [REVERSE_SIMULATION_ACCOUNT],
+      }),
+      runtime.client.readContract({
+        address: USDC_ADDRESS,
+        abi: ERC20Abi,
+        functionName: "allowance",
+        args: [REVERSE_SIMULATION_ACCOUNT, CLOBER_CONTROLLER_ADDRESS],
+      }),
+    ]);
+    expect(balance).toBeGreaterThanOrEqual(1_000_000n);
+    expect(allowance).toBe(0n);
+
+    const registry = new Registry(runtime).use(Clober);
+    const capability = await registry.action("clober", "swap", REVERSE_SIMULATION_ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      amountIn: "1",
+      slippage: 0,
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+    const executable = flattenCapabilityTree(capability);
+    expect(executable.map(({ capability: node }) => `${node.protocol}.${node.method}`)).toEqual([
+      "erc20.approve",
+      "clober.swap",
+    ]);
+
+    const outcome = await createTraceSimulator(runtime, {
+      receipt: (node, changes) => registry.parseReceipt(node, changes),
+    }).simulate(capability);
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.results).toHaveLength(2);
+    expect(outcome.results.every(({ warnings }) => warnings.length === 0)).toBe(true);
+    expect(outcome.results[0]?.receipt?.outcome).toMatchObject({
+      operation: "approve",
+      token: USDC_ADDRESS.toLowerCase(),
+      owner: REVERSE_SIMULATION_ACCOUNT,
+      spender: CLOBER_CONTROLLER_ADDRESS,
+      amount: "1000000",
+    });
+
+    const receipt = outcome.results[1]?.receipt;
+    if (!receipt) throw new Error("missing reverse Clober receipt");
+    const swapOutcome = receipt.outcome as CloberSwapOutcome;
+    expect(swapOutcome).toMatchObject({
+      operation: "swap",
+      protocol: "clober",
+      user: REVERSE_SIMULATION_ACCOUNT,
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      actualAmountIn: "1000000",
+      refundedAmountIn: "0",
+    });
+    const inputSettlement = swapOutcome.settlements.find(
+      (settlement) => settlement.token !== NATIVE,
+    );
+    const outputSettlement = swapOutcome.settlements.find(
+      (settlement) => settlement.token === NATIVE,
+    );
+    expect(inputSettlement).toMatchObject({
+      operation: "transfer",
+      from: REVERSE_SIMULATION_ACCOUNT,
+      to: CLOBER_BOOK_MANAGER_ADDRESS,
+      amount: "1000000",
+    });
+    expect(inputSettlement?.token.toLowerCase()).toBe(USDC_ADDRESS.toLowerCase());
+    expect(outputSettlement).toMatchObject({
+      operation: "transfer",
+      token: NATIVE,
+    });
+    expect(outputSettlement?.from.toLowerCase()).toBe(CLOBER_BOOK_MANAGER_ADDRESS.toLowerCase());
+    expect(outputSettlement?.to.toLowerCase()).toBe(REVERSE_SIMULATION_ACCOUNT.toLowerCase());
+    expect(BigInt(swapOutcome.actualAmountOut)).toBeGreaterThan(0n);
   });
 });
 
