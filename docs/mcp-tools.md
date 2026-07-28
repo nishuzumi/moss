@@ -170,6 +170,8 @@ Execute one root Capability tree against Monad state and parse each successful t
 }
 ```
 
+Before decoding the recursive wire shape, `simulate` runs Core's iterative Capability-tree validator, which rejects cycles, shared nodes, and any tree over the centralized `CAPABILITY_TREE_LIMITS` bounds (Capability depth 16, 64 Capabilities, 64 children per Capability, parameter depth 32, 4096 parameter nodes, 262144 parameter characters, 262144 calldata bytes). An over-limit tree fails with a typed `CapabilityTreeError` before any Simulator or RPC work.
+
 Simulation traverses nested Capabilities in depth-first order and carries state forward. MCP projects the verified Receipt leaves into the small Agent-facing response:
 
 ```ts
