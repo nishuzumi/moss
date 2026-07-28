@@ -28,6 +28,7 @@ describe("Monad Cards explorer ABI derivation (ADR 0007)", () => {
 
   it("records the official address and complete totalMinted function", () => {
     expect(SOURCES.map(({ address }) => address)).toEqual([MONAD_CARDS_ADDRESS]);
+    // MonadScan's verified full ABI currently has 54 entries; pinning the count detects drift.
     expect(monadCardsAbi).toHaveLength(54);
     expect(
       monadCardsAbi.find((item) => item.type === "function" && item.name === "totalMinted"),

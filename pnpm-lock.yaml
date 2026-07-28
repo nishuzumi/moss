@@ -247,9 +247,6 @@ importers:
       '@themoss/core':
         specifier: workspace:*
         version: link:../../core
-      viem:
-        specifier: ^2.54.3
-        version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
       '@themoss/abi-tools':
         specifier: workspace:*
@@ -263,6 +260,9 @@ importers:
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
+      viem:
+        specifier: ^2.54.3
+        version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
       vitest:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@22.20.0)(tsx@4.23.0)

@@ -16,9 +16,6 @@ const noParams = {} satisfies ParamsSpec;
   contracts: {
     collection: { abi: monadCardsAbi, addr: MONAD_CARDS_ADDRESS },
   },
-  labels: {
-    Collection: MONAD_CARDS_ADDRESS,
-  },
 })
 export class MonadCards {
   declare collection: Handle<typeof monadCardsAbi>;

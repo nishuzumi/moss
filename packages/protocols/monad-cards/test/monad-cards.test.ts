@@ -1,7 +1,7 @@
 import { createRuntime, type MossRuntime, Registry } from "@themoss/core";
 import { getAddress } from "viem";
 import { describe, expect, it, vi } from "vitest";
-import { MONAD_CARDS_ADDRESS, MonadCards } from "../src/index.js";
+import { MONAD_CARDS_ADDRESS, MonadCards, monadCardsAbi } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 
@@ -71,13 +71,33 @@ describe("Monad Cards", () => {
 });
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad Cards on Monad mainnet", () => {
-  it("has deployed bytecode and returns a positive minted supply", {
+  it("is the Monad Cards collection and returns a positive minted supply", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await createRuntime({ rpcUrl: "https://rpc.monad.xyz" });
+    const runtime = await createRuntime({
+      rpcUrl: process.env.MOSS_RPC_URL ?? "https://rpc.monad.xyz",
+    });
     expect(
       (await runtime.client.getCode({ address: MONAD_CARDS_ADDRESS }))?.length,
     ).toBeGreaterThan(2);
+
+    const collection = {
+      address: MONAD_CARDS_ADDRESS,
+      abi: monadCardsAbi,
+    } as const;
+    expect(await runtime.client.readContract({ ...collection, functionName: "name" })).toBe(
+      "Monad Cards",
+    );
+    expect(await runtime.client.readContract({ ...collection, functionName: "symbol" })).toBe(
+      "CARDS",
+    );
+    expect(
+      await runtime.client.readContract({
+        ...collection,
+        functionName: "supportsInterface",
+        args: ["0x80ac58cd"],
+      }),
+    ).toBe(true);
 
     const query = await new Registry(runtime)
       .use(MonadCards)

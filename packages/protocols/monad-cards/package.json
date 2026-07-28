@@ -20,14 +20,14 @@
     "update:abis": "tsx scripts/update-abis.ts"
   },
   "dependencies": {
-    "@themoss/core": "workspace:*",
-    "viem": "^2.54.3"
+    "@themoss/core": "workspace:*"
   },
   "devDependencies": {
     "@themoss/abi-tools": "workspace:*",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "~5.9.0",
+    "viem": "^2.54.3",
     "vitest": "^3.2.6"
   }
 }
