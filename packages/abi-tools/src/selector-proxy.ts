@@ -31,10 +31,12 @@ import { ADDRESS_PATTERN } from "./fetch-abi.js";
  * A contract answering none of these resolves to `source: "none"` so callers
  * can fall back to the single-implementation cross-check path cleanly.
  *
- * Transport is injected (like `fetchAbi`'s fetch): `EthCall` must resolve with
- * the returned data and throw on revert. A transport failure can therefore
- * only surface as an unavailable view or an unmapped selector, both of which
- * turn the cross-check red, never silently green.
+ * Transport is injected (like `fetchAbi`'s fetch): `EthCall` must resolve
+ * with the returned data and throw `EthCallRevert` on revert. Any other
+ * throw is a transport failure (network, timeout, rate limit) and propagates
+ * out of resolution and the cross-check unchanged, so an unreachable
+ * registry fails the run loudly instead of being misread as an unavailable
+ * view or an unmapped selector.
  */
 
 /** 4-byte function selector, lowercase whenever this module produces one. */
@@ -47,20 +49,6 @@ export type Selector = `0x${string}`;
  */
 export type FacetSource = "facets" | "facetAddresses" | "facetAddress" | "selectorToFacet" | "none";
 
-/** `facets()` per EIP-2535. */
-export const FACETS_SELECTOR = "0x7a0ed627" as const;
-/** `facetAddresses()` per EIP-2535. */
-export const FACET_ADDRESSES_SELECTOR = "0x52ef6b2c" as const;
-/** `facetFunctionSelectors(address)` per EIP-2535. */
-export const FACET_FUNCTION_SELECTORS_SELECTOR = "0xadfca15e" as const;
-/** `facetAddress(bytes4)` per EIP-2535 and Pendle's `IPMiniDiamond`. */
-export const FACET_ADDRESS_SELECTOR = "0xcdffacc6" as const;
-/** `selectorToFacet(bytes4)`, Pendle's `IPActionStorageV4` registry view. */
-export const SELECTOR_TO_FACET_SELECTOR = "0xae7473ac" as const;
-
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const SELECTOR_PATTERN = /^0x[0-9a-fA-F]{8}$/;
-
 const LOUPE_ABI = parseAbi([
   "function facets() view returns ((address facetAddress, bytes4[] functionSelectors)[])",
   "function facetAddresses() view returns (address[])",
@@ -69,12 +57,64 @@ const LOUPE_ABI = parseAbi([
   "function selectorToFacet(bytes4 selector) view returns (address)",
 ]);
 
+/** Derives one loupe view's selector, so the exported constants stay pinned
+ * to `LOUPE_ABI` instead of being hand-maintained hex (ADR 0007's spirit). */
+function loupeSelector(name: (typeof LOUPE_ABI)[number]["name"]): Selector {
+  const fn = LOUPE_ABI.find((item) => item.name === name);
+  if (fn === undefined) throw new Error(`not a loupe view: ${name}`);
+  return toFunctionSelector(fn).toLowerCase() as Selector;
+}
+
+/** `facets()` per EIP-2535. */
+export const FACETS_SELECTOR = loupeSelector("facets");
+/** `facetAddresses()` per EIP-2535. */
+export const FACET_ADDRESSES_SELECTOR = loupeSelector("facetAddresses");
+/** `facetFunctionSelectors(address)` per EIP-2535. */
+export const FACET_FUNCTION_SELECTORS_SELECTOR = loupeSelector("facetFunctionSelectors");
+/** `facetAddress(bytes4)` per EIP-2535 and Pendle's `IPMiniDiamond`. */
+export const FACET_ADDRESS_SELECTOR = loupeSelector("facetAddress");
+/** `selectorToFacet(bytes4)`, Pendle's `IPActionStorageV4` registry view. */
+export const SELECTOR_TO_FACET_SELECTOR = loupeSelector("selectorToFacet");
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const SELECTOR_PATTERN = /^0x[0-9a-fA-F]{8}$/;
+
+// Fail-closed bounds on a complete facet map, so a hostile or corrupt loupe
+// answer cannot drive unbounded per-facet calls and explorer fetches
+// (precedent: discovery bounds in #41, tree bounds in #142). Real diamonds
+// carry tens of facets; either bound tripping means the answer is not a map.
+const MAX_FACETS = 256;
+const MAX_SELECTORS = 8192;
+
 /**
- * Injected `eth_call`: resolve with the returned data on success, throw on
- * revert. viem's `client.call` fits as
- * `async ({ to, data }) => (await client.call({ to, data })).data ?? "0x"`.
+ * Injected `eth_call`: resolve with the returned data on success, throw
+ * `EthCallRevert` on revert, and let transport failures throw anything else.
+ * viem's `client.call` fits as
+ * ```ts
+ * async ({ to, data }) => {
+ *   try {
+ *     return (await client.call({ to, data })).data ?? "0x";
+ *   } catch (error) {
+ *     if (error instanceof CallExecutionError) throw new EthCallRevert(error.message);
+ *     throw error;
+ *   }
+ * }
+ * ```
  */
 export type EthCall = (request: { to: `0x${string}`; data: `0x${string}` }) => Promise<string>;
+
+/**
+ * The one throw `EthCall` may use for an EVM revert. Everything else a
+ * transport throws (network, timeout, rate limit) propagates out of
+ * resolution and the cross-check, because "the registry answered no" and
+ * "the registry could not be reached" must never share a verdict.
+ */
+export class EthCallRevert extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EthCallRevert";
+  }
+}
 
 /** Injected `eth_getCode`: returns `"0x"` for an address with no code. */
 export type GetCode = (address: `0x${string}`) => Promise<string>;
@@ -89,6 +129,17 @@ export interface ResolveSelectorProxyOptions {
    * views ignore this and return the complete map.
    */
   selectors?: readonly string[];
+  /**
+   * Injected `eth_getCode`, enabling the fallback acceptance of a
+   * point-lookup view whose dispatcher implements it directly: such a view
+   * answers zero (or reverts) for its own selector, so the self-probe alone
+   * would resolve the proxy to `"none"`. With `getCode`, a view that fails
+   * the self-probe is still accepted when at least one probed selector
+   * resolves to an address with deployed code, which a fallback returning
+   * decodable garbage cannot fake. Without `getCode`, only the self-probe
+   * decides.
+   */
+  getCode?: GetCode;
 }
 
 export interface SelectorProxyResolution {
@@ -123,6 +174,9 @@ function buildCompleteResolution(
 ): SelectorProxyResolution {
   const selectorFacets = new Map<Selector, `0x${string}`>();
   const facets: `0x${string}`[] = [];
+  if (entries.length > MAX_FACETS) {
+    throw new Error(`selector proxy ${proxy} lists ${entries.length} facets, over ${MAX_FACETS}`);
+  }
   for (const [rawFacet, rawSelectors] of entries) {
     const facet = rawFacet.toLowerCase() as `0x${string}`;
     // Fail closed on a corrupt map: EIP-2535 forbids a selector without a
@@ -141,6 +195,9 @@ function buildCompleteResolution(
         );
       }
       selectorFacets.set(selector, facet);
+      if (selectorFacets.size > MAX_SELECTORS) {
+        throw new Error(`selector proxy ${proxy} maps over ${MAX_SELECTORS} selectors`);
+      }
     }
   }
   return { proxy, source, complete: true, selectorFacets, facets };
@@ -152,13 +209,16 @@ function buildCompleteResolution(
  * `facetAddresses()` + `facetFunctionSelectors`), then the point-lookup
  * registries (`facetAddress(bytes4)`, then `selectorToFacet(bytes4)`).
  *
- * A point-lookup view counts as available only when it resolves its own
- * selector to a non-zero facet: a dispatched registry view must be able to
- * find itself, while both revert shapes seen in the wild ("INVALID_SELECTOR"
- * for an undispatched view, "selector not found" from a registry that rejects
+ * A point-lookup view counts as available when it resolves its own selector
+ * to a non-zero facet: a dispatched registry view must be able to find
+ * itself, while both revert shapes seen in the wild ("INVALID_SELECTOR" for
+ * an undispatched view, "selector not found" from a registry that rejects
  * unknown selectors) stay distinguishable without matching revert strings.
- * Once a view passes that probe, a revert or zero answer for a specific
- * selector means "unmapped".
+ * When `getCode` is supplied, a view that fails that self-probe (a
+ * dispatcher implementing the view in its own bytecode) is still accepted
+ * if a probed selector resolves to an address with deployed code. Once a
+ * view is accepted, a revert or zero answer for a specific selector means
+ * "unmapped".
  */
 export async function resolveSelectorProxy(
   options: ResolveSelectorProxyOptions,
@@ -176,8 +236,11 @@ export async function resolveSelectorProxy(
       return typeof result === "string" && result.startsWith("0x")
         ? (result as `0x${string}`)
         : undefined;
-    } catch {
-      return undefined;
+    } catch (error) {
+      // Only a revert means "the contract answered no"; a transport failure
+      // propagates so it cannot masquerade as an unavailable view.
+      if (error instanceof EthCallRevert) return undefined;
+      throw error;
     }
   }
 
@@ -262,7 +325,8 @@ export async function resolveSelectorProxy(
   for (const view of ["facetAddress", "selectorToFacet"] as const) {
     const own = view === "facetAddress" ? FACET_ADDRESS_SELECTOR : SELECTOR_TO_FACET_SELECTOR;
     const self = await lookupFacet(view, own);
-    if (self === undefined || self === ZERO_ADDRESS) continue;
+    const selfResolved = self !== undefined && self !== ZERO_ADDRESS;
+    if (!selfResolved && options.getCode === undefined) continue;
     const selectorFacets = new Map<Selector, `0x${string}`>();
     const facets: `0x${string}`[] = [];
     for (const selector of probeSelectors) {
@@ -270,6 +334,22 @@ export async function resolveSelectorProxy(
       if (facet === undefined || facet === ZERO_ADDRESS) continue;
       selectorFacets.set(selector, facet);
       if (!facets.includes(facet)) facets.push(facet);
+    }
+    if (!selfResolved) {
+      // A dispatcher implementing the view in its own bytecode answers zero
+      // (or reverts) for its own selector, so the self-probe alone would
+      // miss it. Accept the view anyway when a probed selector resolved to
+      // deployed code: a fallback returning decodable garbage yields
+      // addresses without code, so this keeps the same protection.
+      let anyCode = false;
+      for (const facet of facets) {
+        const code = await options.getCode?.(facet);
+        if (code !== undefined && code.toLowerCase() !== "0x") {
+          anyCode = true;
+          break;
+        }
+      }
+      if (!anyCode) continue;
     }
     return { proxy, source: view, complete: false, selectorFacets, facets };
   }
@@ -391,7 +471,12 @@ export interface SelectorProxyCrossCheck {
    * Cross-facet conflicts plus `compareDeployedAbi(vendored, union)` in the
    * existing issue format. Functions are additionally verified per selector
    * in `rows`; events and errors are covered only here, against the union of
-   * the routed facets' ABIs.
+   * every facet the resolution names. With a complete loupe map that union
+   * is the whole deployed surface, so a missing event is real. With a
+   * point-lookup source the union covers only routed facets, so event and
+   * error coverage is best-effort: presence, mismatches, and conflicts
+   * surface, but an absent event is not reported as missing because it may
+   * live on a facet the registry cannot enumerate.
    */
   issues: readonly AbiComparisonIssue[];
 }
@@ -419,6 +504,7 @@ export async function crossCheckSelectorProxyAbi(
     proxy: options.proxy,
     call,
     selectors: [...new Set(targets.map(({ selector }) => selector))],
+    getCode,
   });
   if (resolution.source === "none") {
     return {
@@ -431,15 +517,13 @@ export async function crossCheckSelectorProxyAbi(
     };
   }
 
-  const routed = new Set(
-    targets
-      .map(({ selector }) => resolution.selectorFacets.get(selector))
-      .filter((facet) => facet !== undefined),
-  );
+  // Events and errors are not selector-routed, so a facet carrying a
+  // vendored event without any vendored function must still enter the
+  // union. A complete map already names every facet; fetch them all. A
+  // point-lookup map only ever names routed facets.
   const facetReports: FacetReport[] = [];
   const verifiedAbis = new Map<`0x${string}`, Abi>();
   for (const facet of resolution.facets) {
-    if (!routed.has(facet)) continue;
     const code = await getCode(facet);
     if (code.toLowerCase() === "0x") {
       facetReports.push({ facet, status: "no-code" });
@@ -460,9 +544,20 @@ export async function crossCheckSelectorProxyAbi(
   }
 
   const { union, conflicts } = unionFacetAbis(verifiedAbis);
+  const comparison = compareDeployedAbi(vendored, union, {
+    allowedActualOnly: options.allowedActualOnly,
+  });
+  // A point-lookup map names only routed facets, so an event or error absent
+  // from this union may simply live on a facet the registry cannot
+  // enumerate. Missing is a verdict the partial evidence cannot support;
+  // presence, a mismatch, or a conflict it can, so those still surface.
   const issues = [
     ...conflicts,
-    ...compareDeployedAbi(vendored, union, { allowedActualOnly: options.allowedActualOnly }),
+    ...(resolution.complete
+      ? comparison
+      : comparison.filter(
+          (issue) => issue.kind !== "missing" || issue.signature.startsWith("function "),
+        )),
   ];
 
   const reportByFacet = new Map(facetReports.map((report) => [report.facet, report]));

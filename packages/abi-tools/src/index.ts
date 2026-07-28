@@ -15,6 +15,7 @@ export {
   type CrossCheckSelectorProxyAbiOptions,
   crossCheckSelectorProxyAbi,
   type EthCall,
+  EthCallRevert,
   FACET_ADDRESS_SELECTOR,
   FACET_ADDRESSES_SELECTOR,
   FACET_FUNCTION_SELECTORS_SELECTOR,

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   crossCheckSelectorProxyAbi,
   type EthCall,
+  EthCallRevert,
   FACET_ADDRESS_SELECTOR,
   FACET_ADDRESSES_SELECTOR,
   FACET_FUNCTION_SELECTORS_SELECTOR,
@@ -82,10 +83,10 @@ function pointLookupCall(
   const own = view === "facetAddress" ? FACET_ADDRESS_SELECTOR : SELECTOR_TO_FACET_SELECTOR;
   return async ({ to, data }) => {
     expect(to).toBe(PROXY);
-    if (!data.startsWith(own)) throw new Error("INVALID_SELECTOR");
+    if (!data.startsWith(own)) throw new EthCallRevert("INVALID_SELECTOR");
     const facet = map[argSelector(data)];
     if (view === "facetAddress") {
-      if (facet === undefined) throw new Error("selector not found");
+      if (facet === undefined) throw new EthCallRevert("selector not found");
       return encodeFunctionResult({ abi: LOUPE, functionName: view, result: facet });
     }
     return encodeFunctionResult({ abi: LOUPE, functionName: view, result: facet ?? ZERO });
@@ -97,7 +98,7 @@ type FacetEntries = readonly (readonly [`0x${string}`, readonly Selector[]])[];
 /** A loupe answering `facets()` with the complete map in one call. */
 function facetsCall(entries: FacetEntries): EthCall {
   return async ({ data }) => {
-    if (!data.startsWith(FACETS_SELECTOR)) throw new Error("function does not exist");
+    if (!data.startsWith(FACETS_SELECTOR)) throw new EthCallRevert("function does not exist");
     return encodeFunctionResult({
       abi: LOUPE,
       functionName: "facets",
@@ -121,19 +122,19 @@ function facetAddressesCall(entries: FacetEntries): EthCall {
     }
     if (data.startsWith(FACET_FUNCTION_SELECTORS_SELECTOR)) {
       const entry = entries.find(([facet]) => facet === argAddress(data));
-      if (entry === undefined) throw new Error("unknown facet");
+      if (entry === undefined) throw new EthCallRevert("unknown facet");
       return encodeFunctionResult({
         abi: LOUPE,
         functionName: "facetFunctionSelectors",
         result: [...entry[1]],
       });
     }
-    throw new Error("function does not exist");
+    throw new EthCallRevert("function does not exist");
   };
 }
 
 const revertingCall: EthCall = async () => {
-  throw new Error("execution reverted");
+  throw new EthCallRevert("execution reverted");
 };
 
 describe("resolveSelectorProxy", () => {
@@ -269,6 +270,80 @@ describe("resolveSelectorProxy", () => {
       resolveSelectorProxy({ proxy: PROXY, call, selectors: ["0xa9059c"] }),
     ).rejects.toThrow(/not a 4-byte hex selector/);
   });
+
+  it("propagates a transport failure instead of reading it as an unavailable view", async () => {
+    const call: EthCall = async () => {
+      throw new Error("ECONNRESET");
+    };
+    await expect(resolveSelectorProxy({ proxy: PROXY, call })).rejects.toThrow("ECONNRESET");
+  });
+
+  it("propagates a transport failure on one probe instead of reporting it unmapped", async () => {
+    // The registry genuinely dispatches TRANSFER, but that one call dies on
+    // the socket. The failure must surface as the failure it is, not as
+    // "returned no facet".
+    const registry = pointLookupCall("selectorToFacet", {
+      [SELECTOR_TO_FACET_SELECTOR]: REGISTRY_FACET,
+      [TRANSFER]: FACET_A,
+    });
+    const call: EthCall = async (request) => {
+      if (argSelector(request.data) === TRANSFER) throw new Error("socket hang up");
+      return registry(request);
+    };
+    await expect(
+      resolveSelectorProxy({ proxy: PROXY, call, selectors: [TRANSFER] }),
+    ).rejects.toThrow("socket hang up");
+  });
+
+  it("accepts a self-implemented point-lookup view through the facet code check", async () => {
+    // A dispatcher implementing selectorToFacet in its own bytecode answers
+    // the zero address for the view's own selector, so the self-probe fails;
+    // a probed selector resolving to deployed code accepts the view anyway.
+    const call = pointLookupCall("selectorToFacet", { [TRANSFER]: FACET_A });
+    const resolution = await resolveSelectorProxy({
+      proxy: PROXY,
+      call,
+      selectors: [TRANSFER],
+      getCode: async (address) => (address === FACET_A ? "0x6080" : "0x"),
+    });
+    expect(resolution).toMatchObject({ source: "selectorToFacet", complete: false });
+    expect([...resolution.selectorFacets]).toEqual([[TRANSFER, FACET_A]]);
+  });
+
+  it("still resolves to none when the code-check fallback finds no deployed code", async () => {
+    // A catch-all fallback can return decodable garbage addresses; without
+    // code behind any of them the view stays untrusted.
+    const call = pointLookupCall("selectorToFacet", { [TRANSFER]: FACET_A });
+    const resolution = await resolveSelectorProxy({
+      proxy: PROXY,
+      call,
+      selectors: [TRANSFER],
+      getCode: async () => "0x",
+    });
+    expect(resolution).toMatchObject({ source: "none", complete: false });
+  });
+
+  it("fails loud on a complete map over the facet or selector bounds", async () => {
+    const manyFacets: FacetEntries = Array.from({ length: 257 }, (_, index) => [
+      `0x${(index + 1).toString(16).padStart(40, "0")}` as `0x${string}`,
+      [`0x${index.toString(16).padStart(8, "0")}` as Selector],
+    ]);
+    await expect(
+      resolveSelectorProxy({ proxy: PROXY, call: facetsCall(manyFacets) }),
+    ).rejects.toThrow(/257 facets, over 256/);
+    const manySelectors: FacetEntries = [
+      [
+        FACET_A,
+        Array.from(
+          { length: 8193 },
+          (_, index) => `0x${index.toString(16).padStart(8, "0")}` as Selector,
+        ),
+      ],
+    ];
+    await expect(
+      resolveSelectorProxy({ proxy: PROXY, call: facetsCall(manySelectors) }),
+    ).rejects.toThrow(/maps over 8192 selectors/);
+  });
 });
 
 describe("unionFacetAbis", () => {
@@ -394,6 +469,88 @@ describe("crossCheckSelectorProxyAbi", () => {
     expect(result).toMatchObject({ source: "facets", complete: true });
     expect(result.rows[1]).toMatchObject({ selector: BALANCE_OF, status: "unmapped" });
     expect(result.rows[1]?.detail).toMatch(/complete facet map does not dispatch/);
+  });
+
+  it("covers a vendored event carried by a facet no vendored function routes to", async () => {
+    // Ordinary diamond layout: the event lives on facet B, whose functions
+    // are all outside the vendored surface. With a complete map every facet
+    // is known, so B must enter the union and the event must not read as
+    // missing from the deployment.
+    const { fetched, fetchFacetAbi } = fetcher({
+      [FACET_A]: [transfer],
+      [FACET_B]: [transferEvent],
+    });
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer, transferEvent],
+      proxy: PROXY,
+      call: facetsCall([
+        [FACET_A, [TRANSFER]],
+        [FACET_B, [UNKNOWN]],
+      ]),
+      getCode: hasCode,
+      fetchFacetAbi,
+    });
+    expect(result).toMatchObject({ source: "facets", complete: true });
+    expect(result.rows).toMatchObject([{ selector: TRANSFER, status: "matched" }]);
+    expect(fetched).toEqual([FACET_A, FACET_B]);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("still reports a missing event as missing when the complete map cannot explain it", async () => {
+    const { fetchFacetAbi } = fetcher({ [FACET_A]: [transfer] });
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer, transferEvent],
+      proxy: PROXY,
+      call: facetsCall([[FACET_A, [TRANSFER]]]),
+      getCode: hasCode,
+      fetchFacetAbi,
+    });
+    expect(result.issues).toEqual([
+      { kind: "missing", signature: "event Transfer(address,address,uint256)" },
+    ]);
+  });
+
+  it("keeps event coverage best-effort under a point-lookup source", async () => {
+    // The registry cannot enumerate facets, so an event absent from the
+    // routed union may live on an unreachable facet: no missing verdict.
+    // A missing vendored function still surfaces; its evidence is complete
+    // because the registry was asked about that exact selector.
+    const { fetchFacetAbi } = fetcher({ [FACET_A]: [transfer] });
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer, balanceOf, transferEvent],
+      proxy: PROXY,
+      call: pointLookupCall("selectorToFacet", {
+        [SELECTOR_TO_FACET_SELECTOR]: REGISTRY_FACET,
+        [TRANSFER]: FACET_A,
+      }),
+      getCode: hasCode,
+      fetchFacetAbi,
+    });
+    expect(result).toMatchObject({ source: "selectorToFacet", complete: false });
+    expect(result.rows[1]).toMatchObject({ selector: BALANCE_OF, status: "unmapped" });
+    expect(result.issues).toEqual([{ kind: "missing", signature: "function balanceOf(address)" }]);
+  });
+
+  it("propagates a transport failure out of the cross-check", async () => {
+    const registry = pointLookupCall("selectorToFacet", {
+      [SELECTOR_TO_FACET_SELECTOR]: REGISTRY_FACET,
+      [TRANSFER]: FACET_A,
+    });
+    const call: EthCall = async (request) => {
+      if (argSelector(request.data) === TRANSFER) throw new Error("HTTP 429");
+      return registry(request);
+    };
+    await expect(
+      crossCheckSelectorProxyAbi({
+        vendored: [transfer],
+        proxy: PROXY,
+        call,
+        getCode: hasCode,
+        fetchFacetAbi: async () => {
+          throw new Error("must not fetch");
+        },
+      }),
+    ).rejects.toThrow("HTTP 429");
   });
 
   it.each([
