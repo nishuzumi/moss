@@ -8,6 +8,12 @@ export {
   CLOBER_BOOK_VIEWER_ADDRESS,
   CLOBER_CONTROLLER_ADDRESS,
   Clober,
+  type CloberQuoteParams,
   type CloberSwapParams,
 } from "./clober.js";
-export type { CloberFill, CloberQuote, CloberSwapOutcome } from "./types.js";
+export type {
+  CloberFill,
+  CloberQuote,
+  CloberSwapOutcome,
+  CloberTransferSettlement,
+} from "./types.js";

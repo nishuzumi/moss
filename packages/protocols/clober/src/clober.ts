@@ -31,7 +31,12 @@ import {
   zeroHash,
 } from "viem";
 import { CloberBookManagerAbi, CloberBookViewerAbi, CloberControllerAbi } from "./abis/clober.js";
-import type { CloberFill, CloberQuote, CloberSwapOutcome } from "./types.js";
+import type {
+  CloberFill,
+  CloberQuote,
+  CloberSwapOutcome,
+  CloberTransferSettlement,
+} from "./types.js";
 
 // Official Monad mainnet deployments:
 // https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/constants/chain-configs/addresses.ts
@@ -46,8 +51,9 @@ const MAX_SLIPPAGE_BPS = 5_000;
 // Source: https://github.com/clober-dex/v2-sdk/blob/affcd7661ed6df93c4a0f7617efe066fcb965959/src/constants/chain-configs/fee.ts
 const MAKER_POLICY = 8_888_608;
 const TAKER_POLICY = 8_888_708;
-// Moss fails closed below 99.9%; this relative policy is not terminal-cause-aware.
-const MIN_INPUT_UTILIZATION_BPS = 9_990;
+// Construction fails closed below 99.9%. This is quote admission, not an
+// execution guarantee: Controller.spend treats amountIn as a maximum.
+const MIN_QUOTE_INPUT_UTILIZATION_BPS = 9_990;
 const NATIVE_UNIT_SIZE = 1_000_000_000_000n;
 const UINT64_MAX = (1n << 64n) - 1n;
 const UINT192_MASK = (1n << 192n) - 1n;
@@ -59,23 +65,56 @@ const CloberSlippage = BasisPoints.max(MAX_SLIPPAGE_BPS).describe(
   "An integer basis-point count from 0 through 5000; 1 bps equals 0.01%.",
 );
 
-const swapParams = {
-  tokenIn: { type: TokenReference, description: "Asset offered to the Clober market." },
-  tokenOut: { type: TokenReference, description: "Asset requested from the Clober market." },
+const HumanTokenAmount = PositiveDecimalString.describe(
+  'A positive base-10 decimal amount in a token reference\'s display units, such as "1" or "1.5". The Protocol resolves that token\'s decimals and converts the value to chain base units.',
+);
+
+const quoteParams = {
+  tokenIn: { type: TokenReference, description: "Asset offered when calculating the quote." },
+  tokenOut: { type: TokenReference, description: "Asset requested by the quote." },
   amountIn: {
-    type: PositiveDecimalString,
-    description: "Fixed input quantity to spend in tokenIn display units.",
+    type: HumanTokenAmount,
+    description:
+      "Maximum tokenIn quantity made available to the Viewer quote; estimated spend may be lower.",
   },
   slippage: {
     type: CloberSlippage.default(DEFAULT_SLIPPAGE_BPS),
-    description: "Maximum adverse movement allowed between quoting and execution.",
+    description:
+      "Margin applied to expected output when calculating the returned minimumAmountOut.",
   },
 } satisfies ParamsSpec;
+
+const swapParams = {
+  tokenIn: { type: TokenReference, description: "Asset Controller.spend may debit." },
+  tokenOut: { type: TokenReference, description: "Asset Controller.spend must deliver." },
+  amountIn: {
+    type: HumanTokenAmount,
+    description:
+      "Maximum tokenIn quantity Controller.spend may debit; unspent ERC-20 stays with the user and unspent native MON is refunded.",
+  },
+  slippage: {
+    type: CloberSlippage.default(DEFAULT_SLIPPAGE_BPS),
+    description:
+      "Margin applied to a fresh Viewer quote when setting Controller.spend's minimum output.",
+  },
+} satisfies ParamsSpec;
+
+type InferredQuoteParams = InferParams<typeof quoteParams>;
+type QuoteParams = Omit<InferredQuoteParams, "slippage"> &
+  Partial<Pick<InferredQuoteParams, "slippage">>;
+export type CloberQuoteParams = QuoteParams;
 
 type InferredSwapParams = InferParams<typeof swapParams>;
 type SwapParams = Omit<InferredSwapParams, "slippage"> &
   Partial<Pick<InferredSwapParams, "slippage">>;
 export type CloberSwapParams = SwapParams;
+
+type PrepareSwapParams = {
+  tokenIn: TokenRef;
+  tokenOut: TokenRef;
+  amountIn: string;
+  slippage?: number;
+};
 
 type BookKey = {
   base: `0x${string}`;
@@ -101,8 +140,8 @@ const SUPPORTED_MARKETS: readonly SupportedMarket[] = [
 ];
 
 type PreparedSwap = {
-  amountIn: bigint;
-  spentAmountIn: bigint;
+  maximumAmountIn: bigint;
+  estimatedAmountSpent: bigint;
   amountOut: bigint;
   minimumAmountOut: bigint;
   inputDecimals: number;
@@ -117,15 +156,11 @@ type PreparedSwap = {
   };
 };
 
-type TransferSettlement = Extract<
-  CloberSwapOutcome["settlements"][number],
-  { operation: "transfer" }
->;
-
 @Protocol({
   name: "clober",
   category: "dex",
-  description: "Clober V2 exact-input swaps over curated canonical Monad order books.",
+  description:
+    "Clober V2 single-book swaps up to a caller-supplied input cap on curated canonical Monad order books.",
   contracts: {
     controller: { abi: CloberControllerAbi, addr: CLOBER_CONTROLLER_ADDRESS },
     bookManager: { abi: CloberBookManagerAbi, addr: CLOBER_BOOK_MANAGER_ADDRESS },
@@ -139,17 +174,17 @@ export class Clober {
   declare bookViewer: Handle<typeof CloberBookViewerAbi>;
   declare erc20: ProtocolRef<ERC20>;
 
-  quote(params: CloberSwapParams, ctx: ActionCtx): Promise<CloberQuote>;
+  quote(params: CloberQuoteParams, ctx: ActionCtx): Promise<CloberQuote>;
   @Query({
-    intent: "Quote a curated Clober exact-input swap",
-    params: swapParams,
+    intent: "Quote a curated Clober swap up to a caller-supplied input cap",
+    params: quoteParams,
     tags: ["clob"],
   })
-  async quote(params: SwapParams, _ctx: ActionCtx): Promise<CloberQuote> {
+  async quote(params: QuoteParams, _ctx: ActionCtx): Promise<CloberQuote> {
     const prepared = await this.#prepareSwap(params);
     return {
-      amountIn: formatUnits(prepared.amountIn, prepared.inputDecimals),
-      estimatedAmountSpent: formatUnits(prepared.spentAmountIn, prepared.inputDecimals),
+      maximumAmountIn: formatUnits(prepared.maximumAmountIn, prepared.inputDecimals),
+      estimatedAmountSpent: formatUnits(prepared.estimatedAmountSpent, prepared.inputDecimals),
       estimatedAmountOut: formatUnits(prepared.amountOut, prepared.outputDecimals),
       minimumAmountOut: formatUnits(prepared.minimumAmountOut, prepared.outputDecimals),
     };
@@ -157,7 +192,7 @@ export class Clober {
 
   swap(params: CloberSwapParams, ctx: ActionCtx): Promise<CapabilityResult>;
   @Capability<Clober, typeof swapParams>({
-    intent: "Swap a fixed input through a curated Clober order book",
+    intent: "Swap up to {amountIn} of {tokenIn} through a curated Clober order book",
     verb: "swap",
     params: swapParams,
     receipt: "swapReceipt",
@@ -174,7 +209,7 @@ export class Clober {
         spender: this.controller.address,
       });
       const currentAllowance = BigInt(allowance);
-      if (currentAllowance < prepared.amountIn) {
+      if (currentAllowance < prepared.maximumAmountIn) {
         // Reset a non-zero insufficient allowance first for USDT-style ERC-20s.
         if (currentAllowance > 0n) {
           children.push(
@@ -189,7 +224,7 @@ export class Clober {
           await this.erc20.approve({
             token: params.tokenIn,
             spender: this.controller.address,
-            amount: prepared.amountIn.toString(),
+            amount: prepared.maximumAmountIn.toString(),
           }),
         );
       }
@@ -205,7 +240,7 @@ export class Clober {
           [],
           deadline,
         ],
-        { value: params.tokenIn === NATIVE ? prepared.amountIn : 0n },
+        { value: params.tokenIn === NATIVE ? prepared.maximumAmountIn : 0n },
       ),
     );
     return children;
@@ -214,7 +249,7 @@ export class Clober {
   @Receipt()
   swapReceipt(changes: readonly Change[]): ReceiptResult<CloberSwapOutcome> {
     const fills: CloberFill[] = [];
-    const settlements: CloberSwapOutcome["settlements"][number][] = [];
+    const settlements: CloberTransferSettlement[] = [];
     let fillBookId: bigint | undefined;
     const parsed = changes.map((change) => {
       if (change.kind === "event" && sameAddress(change.address, CLOBER_BOOK_MANAGER_ADDRESS)) {
@@ -235,7 +270,7 @@ export class Clober {
         const fill: CloberFill = {
           event: "Take",
           bookId: event.args.bookId.toString(),
-          user: event.args.user,
+          controller: event.args.user,
           tick: event.args.tick.toString(),
           unit: event.args.unit.toString(),
         };
@@ -244,29 +279,35 @@ export class Clober {
           kind: "change" as const,
           change,
           data: fill,
-          text: `Clober Take: ${fill.unit} units at tick ${fill.tick} from book ${fill.bookId} by ${fill.user}`,
+          text: `Clober Take: ${fill.unit} units at tick ${fill.tick} from book ${fill.bookId} by Controller ${fill.controller}`,
         };
       }
 
       const settlement = this.erc20.changesReceipt([change]);
-      settlements.push(...settlement.outcome);
+      for (const outcome of settlement.outcome) {
+        if (outcome.operation !== "transfer") {
+          throw new Error("Clober swap Receipt accepts only transfer settlements");
+        }
+        settlements.push(outcome);
+      }
       return settlement;
     });
 
     if (fills.length === 0 || fillBookId === undefined) {
       throw new Error("Clober swap Receipt requires at least one Take");
     }
-    validateSwapSettlements(fillBookId, settlements);
+    const verified = validateSwapSettlements(fillBookId, settlements);
     const outcome: CloberSwapOutcome = {
       operation: "swap",
       protocol: "clober",
+      ...verified,
       fills,
       settlements,
     };
     return {
       kind: "receipt",
       outcome,
-      text: `Clober Swap: ${fills.length} fill${fills.length === 1 ? "" : "s"} and ${settlements.length} settlement${settlements.length === 1 ? "" : "s"}`,
+      text: `Clober Swap: ${verified.user} spent ${verified.actualAmountIn} ${verified.tokenIn}, received ${verified.actualAmountOut} ${verified.tokenOut}, and received ${verified.refundedAmountIn} ${verified.tokenIn} as refund across ${fills.length} fill${fills.length === 1 ? "" : "s"}`,
       changes: parsed,
     };
   }
@@ -279,13 +320,13 @@ export class Clober {
    * Sources: v2-sdk calls/market/market.ts and v2-periphery's
    * test/unit/controller/ControllerSpendOrder.t.sol at the pinned README revisions.
    */
-  async #prepareSwap(params: SwapParams): Promise<PreparedSwap> {
+  async #prepareSwap(params: PrepareSwapParams): Promise<PreparedSwap> {
     if (sameToken(params.tokenIn, params.tokenOut)) {
       throw new ParameterError("tokenIn and tokenOut must differ");
     }
     const market = supportedMarket(params.tokenIn, params.tokenOut);
     const { inputDecimals, outputDecimals } = market;
-    const amountIn = parseExactUnits(params.amountIn, inputDecimals);
+    const maximumAmountIn = parseExactUnits(params.amountIn, inputDecimals);
     const key = marketBookKey(market);
     const bookId = encodeBookId(key);
     const onchainKey = await this.bookManager.read.getBookKey([bookId]);
@@ -296,18 +337,19 @@ export class Clober {
     const order = {
       id: bookId,
       limitPrice: 0n,
-      baseAmount: amountIn,
+      baseAmount: maximumAmountIn,
       minQuoteAmount: 0n,
       hookData: zeroHash,
     };
-    const [amountOut, spentAmountIn] = await this.bookViewer.read.getExpectedOutput([order]);
+    const [amountOut, estimatedAmountSpent] = await this.bookViewer.read.getExpectedOutput([order]);
     if (amountOut <= 0n) throw new Error("Clober book has no output for this input amount");
-    if (spentAmountIn > amountIn) {
-      throw new Error("Clober quote exceeds the requested input amount");
+    if (estimatedAmountSpent > maximumAmountIn) {
+      throw new Error("Clober quote exceeds the maximum input amount");
     }
-    const minimumSpentAmount = (amountIn * BigInt(MIN_INPUT_UTILIZATION_BPS) + 9_999n) / 10_000n;
-    if (spentAmountIn < minimumSpentAmount) {
-      throw new Error("Clober book cannot spend at least 99.9% of the input amount");
+    const minimumSpentAmount =
+      (maximumAmountIn * BigInt(MIN_QUOTE_INPUT_UTILIZATION_BPS) + 9_999n) / 10_000n;
+    if (estimatedAmountSpent < minimumSpentAmount) {
+      throw new Error("Clober quote cannot spend at least 99.9% of the maximum input");
     }
     const slippage = BigInt(params.slippage ?? DEFAULT_SLIPPAGE_BPS);
     const minimumAmountOut = (amountOut * (10_000n - slippage)) / 10_000n;
@@ -315,8 +357,8 @@ export class Clober {
       throw new Error("Clober quote is too small to enforce a non-zero minimum output");
     }
     return {
-      amountIn,
-      spentAmountIn,
+      maximumAmountIn,
+      estimatedAmountSpent,
       amountOut,
       minimumAmountOut,
       inputDecimals,
@@ -360,18 +402,18 @@ function marketForBookId(bookId: bigint): SupportedMarket | undefined {
  */
 function validateSwapSettlements(
   bookId: bigint,
-  settlements: readonly CloberSwapOutcome["settlements"][number][],
-): void {
+  settlements: readonly CloberTransferSettlement[],
+): Pick<
+  CloberSwapOutcome,
+  "user" | "tokenIn" | "tokenOut" | "actualAmountIn" | "actualAmountOut" | "refundedAmountIn"
+> {
   const market = marketForBookId(bookId);
   if (!market) {
     throw new Error("Clober swap Receipt book ID is not in the curated market catalog");
   }
 
-  const transfers: TransferSettlement[] = [];
+  const transfers: CloberTransferSettlement[] = [];
   for (const settlement of settlements) {
-    if (settlement.operation !== "transfer") {
-      throw new Error("Clober swap Receipt accepts only transfer settlements");
-    }
     let amount: bigint;
     try {
       amount = BigInt(settlement.amount);
@@ -407,7 +449,9 @@ function validateSwapSettlements(
           "Clober swap Receipt requires one input-token transfer to the BookManager",
         );
   const user = inputDebit.from;
-  const matched = new Set<TransferSettlement>([inputDebit]);
+  const matched = new Set<CloberTransferSettlement>([inputDebit]);
+  let actualAmountIn = inputDebit.amount;
+  let refundedAmountIn = "0";
 
   if (market.tokenIn === NATIVE) {
     const settledInput = requireSingleTransfer(
@@ -419,6 +463,7 @@ function validateSwapSettlements(
       "Clober swap Receipt requires native input settlement from Controller to BookManager",
     );
     matched.add(settledInput);
+    actualAmountIn = settledInput.amount;
 
     const refunds = transfers.filter(
       (transfer) =>
@@ -430,7 +475,10 @@ function validateSwapSettlements(
       throw new Error("Clober swap Receipt contains multiple native input refunds");
     }
     const refund = refunds[0];
-    if (refund) matched.add(refund);
+    if (refund) {
+      matched.add(refund);
+      refundedAmountIn = refund.amount;
+    }
     if (
       BigInt(inputDebit.amount) !==
       BigInt(settledInput.amount) + (refund ? BigInt(refund.amount) : 0n)
@@ -439,27 +487,34 @@ function validateSwapSettlements(
     }
   }
 
-  matched.add(
-    requireSingleTransfer(
-      transfers,
-      (transfer) =>
-        sameToken(transfer.token, market.tokenOut) &&
-        sameAddress(transfer.from, CLOBER_BOOK_MANAGER_ADDRESS) &&
-        sameAddress(transfer.to, user),
-      "Clober swap Receipt requires output-token settlement from BookManager to the input sender",
-    ),
+  const output = requireSingleTransfer(
+    transfers,
+    (transfer) =>
+      sameToken(transfer.token, market.tokenOut) &&
+      sameAddress(transfer.from, CLOBER_BOOK_MANAGER_ADDRESS) &&
+      sameAddress(transfer.to, user),
+    "Clober swap Receipt requires output-token settlement from BookManager to the input sender",
   );
+  matched.add(output);
 
   if (matched.size !== transfers.length) {
     throw new Error("Clober swap Receipt contains an unexpected token or participant");
   }
+  return {
+    user,
+    tokenIn: market.tokenIn,
+    tokenOut: market.tokenOut,
+    actualAmountIn,
+    actualAmountOut: output.amount,
+    refundedAmountIn,
+  };
 }
 
 function requireSingleTransfer(
-  transfers: readonly TransferSettlement[],
-  predicate: (transfer: TransferSettlement) => boolean,
+  transfers: readonly CloberTransferSettlement[],
+  predicate: (transfer: CloberTransferSettlement) => boolean,
   message: string,
-): TransferSettlement {
+): CloberTransferSettlement {
   const matches = transfers.filter(predicate);
   if (matches.length !== 1 || !matches[0]) throw new Error(message);
   return matches[0];
