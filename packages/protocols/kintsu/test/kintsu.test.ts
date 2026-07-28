@@ -8,12 +8,15 @@ import {
   Registry,
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
+import { createTraceSimulator } from "@themoss/simulator";
+import { monadRuntime } from "@themoss/system";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import { StakedMonadAbi } from "../src/abis/staked-monad.js";
 import { KINTSU_STAKED_MONAD_ADDRESS, Kintsu } from "../src/index.js";
 
-const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+const RAW_ACCOUNT = "0xcccccccccccccccccccccccccccccccccccccccc" as const;
+const ACCOUNT = getAddress(RAW_ACCOUNT);
 const RECEIVER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
 const OTHER = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
 const ZERO = getAddress("0x0000000000000000000000000000000000000000");
@@ -164,6 +167,22 @@ describe("Kintsu", () => {
     expect(receipt.outcome).toMatchObject({ sender: OTHER, receiver: RECEIVER });
   });
 
+  it("normalizes trace and decoded Outcome addresses to the same checksum form", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await depositCapability(registry);
+    const receipt = registry.parseReceipt(capability, [
+      nativeDeposit(RAW_ACCOUNT, 1000n),
+      kintsuVirtualSharesSnapshot(0n),
+      erc20Transfer(ZERO, RAW_ACCOUNT, 950n),
+      kintsuDeposit(RAW_ACCOUNT, 950n, 1000n),
+    ]);
+
+    expect(receipt.outcome).toMatchObject({
+      sender: ACCOUNT,
+      receiver: ACCOUNT,
+    });
+  });
+
   it("rejects missing required deposit evidence", async () => {
     const { registry } = offlineRegistry();
     const capability = await depositCapability(registry);
@@ -294,6 +313,61 @@ describe("Kintsu", () => {
         slippage,
       }),
     ).rejects.toThrow("kintsu.deposit quote produced zero protected shares");
+  });
+});
+
+describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kintsu Monad mainnet", () => {
+  it("has deployed StakedMonad proxy bytecode and returns a protected quote", {
+    timeout: 60_000,
+  }, async () => {
+    const runtime = await monadRuntime();
+    expect(
+      (await runtime.client.getCode({ address: KINTSU_STAKED_MONAD_ADDRESS }))?.length,
+    ).toBeGreaterThan(2);
+
+    const quote = await new Registry(runtime)
+      .use(Kintsu)
+      .action("kintsu", "quoteDeposit", ACCOUNT, { amount: "1", slippage: 50 });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect(quote.data).toMatchObject({
+      amount: "1000000000000000000",
+      slippage: 50,
+    });
+    const data = quote.data as {
+      quotedShares: string;
+      minimumShares: string;
+    };
+    const quotedShares = BigInt(data.quotedShares);
+    expect(quotedShares).toBeGreaterThan(0n);
+    expect(data.minimumShares).toBe(((quotedShares * 9_950n) / 10_000n).toString());
+  });
+
+  it("simulates a native deposit into an exhaustive typed Receipt", {
+    timeout: 180_000,
+  }, async () => {
+    const runtime = await monadRuntime();
+    const registry = new Registry(runtime).use(Kintsu);
+    const capability = await registry.action("kintsu", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: RAW_ACCOUNT,
+      slippage: 50,
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+
+    const outcome = await createTraceSimulator(runtime, {
+      receipt: (node, changes) => registry.parseReceipt(node, changes),
+    }).simulate(capability);
+
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.results[0]?.warnings).toEqual([]);
+    expect(outcome.results[0]?.receipt?.outcome).toMatchObject({
+      operation: "deposit",
+      sender: ACCOUNT,
+      receiver: ACCOUNT,
+      assets: "1000000000000000000",
+    });
+    const receiptOutcome = outcome.results[0]?.receipt?.outcome as { shares?: string } | undefined;
+    expect(BigInt(receiptOutcome?.shares ?? "0")).toBeGreaterThan(0n);
   });
 });
 

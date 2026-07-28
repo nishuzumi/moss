@@ -19,7 +19,7 @@ import {
   UnsignedIntegerString,
 } from "@themoss/core";
 import { ERC20, type ERC20Outcome } from "@themoss/erc";
-import { decodeEventLog, isAddressEqual, parseUnits, zeroAddress } from "viem";
+import { decodeEventLog, getAddress, isAddressEqual, parseUnits, zeroAddress } from "viem";
 import { StakedMonadAbi } from "./abis/staked-monad.js";
 
 export const KINTSU_STAKED_MONAD_ADDRESS = "0xA3227C5969757783154C60bF0bC1944180ed81B9" as const;
@@ -260,8 +260,8 @@ export class Kintsu {
 
     const outcome: KintsuDepositOutcome = {
       operation: "deposit",
-      sender: native.from,
-      receiver: deposit.receiver,
+      sender: getAddress(native.from),
+      receiver: getAddress(deposit.receiver),
       assets: deposit.assets,
       shares: deposit.shares,
     };
