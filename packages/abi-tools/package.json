@@ -24,7 +24,8 @@
     "fetch-abi": "tsx src/bin.ts"
   },
   "dependencies": {
-    "abitype": "^1.2.3"
+    "abitype": "^1.2.3",
+    "viem": "^2.54.3"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
