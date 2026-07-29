@@ -73,7 +73,7 @@ The wallet refuses trees for a different sender. It also requires the local RPC 
 
 ### Foundry setup
 
-Check that the Monad Anvil binary is available:
+Check that the Monad Anvil binary is installed. The output should identify the Monad build:
 
 ```bash
 anvil --version
@@ -85,17 +85,6 @@ If the fork command fails, confirm that Foundry was installed with:
 foundryup --network monad
 ```
 
-### Before signing
-
-Never sign immediately after generation. Review:
-
-- sender
-- requested assets
-- amount and slippage
-- ordered Receipts
-- warnings
-
-The wallet step should only happen after the Capability tree has been verified.
 
 ## Reset the fork
 
