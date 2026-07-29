@@ -10,6 +10,10 @@ export {
   Receipt,
 } from "./decorators.js";
 export {
+  CAPABILITY_TREE_LIMITS,
+  CapabilityTreeError,
+  type CapabilityTreeErrorCode,
+  type CapabilityTreeLimits,
   type ExecutableCapability,
   flattenCapabilityTree,
   ReceiptCoverageError,

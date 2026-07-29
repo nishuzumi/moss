@@ -27,7 +27,7 @@ An ABI-typed gateway to one contract that can encode an unsigned transaction, re
 _Avoid_: contract instance, client
 
 **Capability tree**:
-The sole executable structure for a write: an ordered tree of CapabilityNode composition nodes and TransactionNode leaves. There is no independent transaction list.
+The sole executable structure for a write: an ordered tree of CapabilityNode composition nodes and TransactionNode leaves. There is no independent transaction list. Core validates it against one fail-closed complexity contract before execution and rejects cycles and shared nodes; the structure must remain a bounded tree.
 _Avoid_: Plan, transaction bundle
 
 **CapabilityNode**:
