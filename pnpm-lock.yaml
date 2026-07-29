@@ -163,6 +163,9 @@ importers:
       '@themoss/protocol-pancakeswap':
         specifier: workspace:*
         version: link:../protocols/pancakeswap
+      '@themoss/protocol-pyth':
+        specifier: workspace:*
+        version: link:../protocols/pyth
       '@themoss/simulator':
         specifier: workspace:*
         version: link:../simulator
