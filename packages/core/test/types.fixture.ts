@@ -21,6 +21,23 @@ class LabeledFixture {}
 })
 class InvalidLabeledFixture {}
 
+@Protocol({
+  name: "oracle-fixture",
+  category: "oracle",
+  description: "Compile-time oracle category fixture.",
+  contracts: {},
+})
+class OracleFixture {}
+
+@Protocol({
+  name: "invalid-category-fixture",
+  // @ts-expect-error Protocol categories are a closed set.
+  category: "analytics",
+  description: "Compile-time invalid category fixture.",
+  contracts: {},
+})
+class InvalidCategoryFixture {}
+
 const runtime = null as unknown as MossRuntime;
 new Registry(runtime, { trustedTokens: [{ address: ADDRESS, label: "Token" }] });
 new Registry(runtime, {
@@ -43,5 +60,7 @@ tokenMetadata("metadata", { address: ADDRESS });
 
 void LabeledFixture;
 void InvalidLabeledFixture;
+void OracleFixture;
+void InvalidCategoryFixture;
 void metadataKind;
 void metadataDecimals;

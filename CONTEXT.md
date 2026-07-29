@@ -105,7 +105,7 @@ The user-perspective write semantic of a Capability, from a small closed set (`s
 _Avoid_: action type, operation
 
 **Category**:
-The coarse protocol domain a Protocol belongs to, from a closed set (`dex`, `lending`, `staking`, `rewards`, `token`, `nft`).
+The coarse protocol domain a Protocol belongs to, from a closed set (`dex`, `lending`, `staking`, `rewards`, `token`, `nft`, `oracle`).
 
 **Tag**:
 Free-form descriptive label on a Capability for long-tail semantics (`clob`, `limit-order`, `lst`). The open-ended complement to the closed verb/category sets.
