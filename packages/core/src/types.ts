@@ -95,16 +95,39 @@ export type ProtocolRef<T> = {
 };
 
 /**
- * A Protocol's reference to a chosen subset of its OWN methods, injected as
- * `self` by `@Protocol`. Calling a Capability through it nests that Capability
- * through Registry's builder, so the nested node gets the same Zod parameter
- * validation and the same protocol and method stamping as any dependency call.
+ * Names of a Protocol's own Capability methods, the only methods `self`
+ * exposes. A Query reads state and a Receipt parser stays pure, so neither is
+ * nestable and naming one is a compile-time error.
+ *
+ * Core's injected keys are excluded by name rather than by shape: `self` holds
+ * a `SelfRef` over the same class, so resolving its type here would make this
+ * constraint circular.
+ */
+export type CapabilityNames<T> = {
+  [K in Exclude<keyof T, "self" | "runtime">]: T[K] extends (
+    params: never,
+    ...rest: never[]
+  ) => infer Result
+    ? Awaited<Result> extends CapabilityResult
+      ? K
+      : never
+    : never;
+}[Exclude<keyof T, "self" | "runtime">] &
+  string;
+
+/**
+ * A Protocol's reference to a named subset of its OWN Capabilities, injected as
+ * `self` by `@Protocol`. Calling one nests that Capability through Registry's
+ * builder, so the nested node gets the same Zod parameter validation and the
+ * same protocol and method stamping as any dependency call.
  *
  * The methods are named explicitly rather than taken wholesale: `ProtocolRef<T>`
  * over the whole class would map the `self` property back through itself, which
  * TypeScript rejects as an infinitely deep instantiation.
  */
-export type SelfRef<T, Methods extends keyof T> = ProtocolRef<Pick<T, Methods>>;
+export type SelfRef<T, Methods extends CapabilityNames<T> & keyof T> = ProtocolRef<
+  Pick<T, Methods>
+>;
 
 export type Change =
   | {

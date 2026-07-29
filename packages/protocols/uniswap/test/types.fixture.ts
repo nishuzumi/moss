@@ -1,4 +1,4 @@
-import { type ActionCtx, type Handle, NATIVE, type ProtocolRef } from "@themoss/core";
+import { type ActionCtx, type Handle, NATIVE, type ProtocolRef, type SelfRef } from "@themoss/core";
 import { USDC_ADDRESS } from "@themoss/system";
 import type { UniversalRouterAbi } from "../src/abis/uniswap.js";
 import type { Uniswap } from "../src/index.js";
@@ -31,6 +31,17 @@ dependency.swapReceipt([]).protocol satisfies string;
 dependency.permit2ApproveReceipt([]).protocol satisfies string;
 // @ts-expect-error injected Protocol references expose methods, not Handles
 void dependency.router;
+
+const nested = null as unknown as SelfRef<Uniswap, "permit2Approve">;
+void nested.permit2Approve({ token: USDC_ADDRESS, amount: "1000000", expiration: "0" });
+// @ts-expect-error self nests Capabilities; the quote Query is not nestable
+type QuoteSelfRef = SelfRef<Uniswap, "quote">;
+// @ts-expect-error a Receipt parser is pure and is not nestable either
+type ReceiptSelfRef = SelfRef<Uniswap, "swapReceipt">;
+declare const quoteSelfRef: QuoteSelfRef;
+void quoteSelfRef;
+declare const receiptSelfRef: ReceiptSelfRef;
+void receiptSelfRef;
 
 function handleFixture(handle: Handle<typeof UniversalRouterAbi>) {
   handle.execute(["0x10", ["0x"], 0n], { value: 1n });

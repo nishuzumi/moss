@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
 import {
   type AddressValue,
+  CAPABILITY_TREE_LIMITS,
   Capability,
   type CapabilityNode,
+  type CapabilityResult,
   type Change,
   flattenCapabilityTree,
   type Handle,
@@ -160,6 +162,7 @@ class SelfNestingProtocol {
     risk: ["fundOut"],
   })
   async swap(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    selfKeys = Object.keys(this.self);
     return [
       await this.self.approve({ token: "1", amount: "10" }),
       transaction(ctx.account, VAULT, { data: "0xabcd" }),
@@ -178,6 +181,11 @@ class SelfNestingProtocol {
     return [transaction(ctx.account, VAULT, { data: "0x1234" })];
   }
 
+  @Query({ intent: "Read fixture approval data", params: approvalParams })
+  async inspect(params: InferParams<typeof approvalParams>) {
+    return { amount: params.amount };
+  }
+
   @Receipt()
   swapReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
     return receiptFor("swap", changes);
@@ -186,6 +194,140 @@ class SelfNestingProtocol {
   @Receipt()
   approvalReceipt(changes: readonly Change[]): MossReceipt<{ operation: "approve" }> {
     return receiptFor("approve", changes);
+  }
+}
+
+/** Capability method names `self` exposed on the last SelfNestingProtocol build. */
+let selfKeys: string[] = [];
+let descendCalls = 0;
+let leafCalls = 0;
+
+const roundParams = {
+  remaining: { type: UnsignedIntegerString, description: "Remaining nesting rounds." },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "selfrecursion",
+  category: "token",
+  description: "Fixture Protocol whose Capabilities nest through self without bound.",
+  contracts: {},
+})
+class SelfRecursiveProtocol {
+  declare self: SelfRef<SelfRecursiveProtocol, "descend" | "leaf">;
+
+  @Capability<SelfRecursiveProtocol, typeof roundParams>({
+    intent: "Nest one more copy of itself",
+    verb: "swap",
+    params: roundParams,
+    receipt: "runReceipt",
+    risk: ["fundOut"],
+  })
+  async descend(
+    params: InferParams<typeof roundParams>,
+    ctx: { account: AddressValue },
+  ): Promise<CapabilityResult> {
+    descendCalls += 1;
+    const own = transaction(ctx.account, VAULT, { data: "0x01" });
+    const remaining = Number(params.remaining);
+    if (remaining <= 0) return [own];
+    return [await this.self.descend({ remaining: String(remaining - 1) }), own];
+  }
+
+  @Capability<SelfRecursiveProtocol, typeof roundParams>({
+    intent: "Nest a flat run of leaf Capabilities",
+    verb: "swap",
+    params: roundParams,
+    receipt: "runReceipt",
+    risk: ["fundOut"],
+  })
+  async spread(
+    params: InferParams<typeof roundParams>,
+    ctx: { account: AddressValue },
+  ): Promise<CapabilityResult> {
+    const children: (CapabilityNode | TransactionNode)[] = [];
+    for (let round = 0; round < Number(params.remaining); round += 1) {
+      children.push(await this.self.leaf({ remaining: "0" }));
+    }
+    children.push(transaction(ctx.account, VAULT, { data: "0x02" }));
+    return children;
+  }
+
+  @Capability<SelfRecursiveProtocol, typeof roundParams>({
+    intent: "Own one leaf transaction",
+    verb: "swap",
+    params: roundParams,
+    receipt: "runReceipt",
+    risk: ["fundOut"],
+  })
+  async leaf(
+    _: InferParams<typeof roundParams>,
+    ctx: { account: AddressValue },
+  ): Promise<CapabilityResult> {
+    leafCalls += 1;
+    return [transaction(ctx.account, VAULT, { data: "0x03" })];
+  }
+
+  @Receipt()
+  runReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    return receiptFor("swap", changes);
+  }
+}
+
+@Protocol({
+  name: "selfsurface",
+  category: "token",
+  description: "Fixture Protocol reaching for self outside a Capability.",
+  contracts: {},
+})
+class SelfSurfaceProtocol {
+  declare self: SelfRef<SelfSurfaceProtocol, "noop">;
+
+  @Capability<SelfSurfaceProtocol, typeof noParams>({
+    intent: "Own one transaction",
+    verb: "swap",
+    params: noParams,
+    receipt: "noopReceipt",
+    risk: ["fundOut"],
+  })
+  async noop(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT, { data: "0x04" })];
+  }
+
+  @Query({ intent: "Reach for self from a Query", params: noParams })
+  async peek() {
+    return { nested: typeof this.self.noop };
+  }
+
+  @Receipt()
+  noopReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    if (typeof this.self.noop === "function") throw new Error("unreachable");
+    return receiptFor("swap", changes);
+  }
+}
+
+@Protocol({
+  name: "selffield",
+  category: "token",
+  description: "Fixture Protocol that initializes self itself.",
+  contracts: {},
+})
+class SelfFieldProtocol {
+  self = { claimed: true };
+
+  @Capability<SelfFieldProtocol, typeof noParams>({
+    intent: "Own one transaction",
+    verb: "swap",
+    params: noParams,
+    receipt: "fieldReceipt",
+    risk: ["fundOut"],
+  })
+  async run(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT, { data: "0x05" })];
+  }
+
+  @Receipt()
+  fieldReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    return receiptFor("swap", changes);
   }
 }
 
@@ -454,6 +596,68 @@ describe("framework core seam", () => {
     expect(registry.parseReceipt(result, [changes[1] as Change]).outcome).toEqual({
       operation: "swap",
     });
+  });
+
+  it("bounds self nesting during construction, before the over-limit method runs", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfRecursiveProtocol);
+
+    descendCalls = 0;
+    await expect(
+      registry.action("selfrecursion", "descend", ACCOUNT, { remaining: "100" }),
+    ).rejects.toMatchObject({ name: "CapabilityTreeError", code: "CAPABILITY_DEPTH" });
+    // The depth budget is spent, never exceeded: the call past the limit is
+    // rejected instead of parsing params and running the Protocol method.
+    expect(descendCalls).toBe(CAPABILITY_TREE_LIMITS.maxCapabilityDepth);
+
+    leafCalls = 0;
+    await expect(
+      registry.action("selfrecursion", "spread", ACCOUNT, { remaining: "100" }),
+    ).rejects.toMatchObject({ name: "CapabilityTreeError", code: "CAPABILITY_COUNT" });
+    expect(leafCalls).toBe(CAPABILITY_TREE_LIMITS.maxCapabilities - 1);
+  });
+
+  it("injects self as a Capability-only surface and rejects it anywhere else", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfNestingProtocol, SelfSurfaceProtocol, SelfFieldProtocol);
+
+    selfKeys = [];
+    await registry.action("selfnesting", "swap", ACCOUNT, {});
+    // Queries read state and Receipt parsers stay pure, so neither is nestable.
+    expect([...selfKeys].sort()).toEqual(["approve", "swap"]);
+
+    await expect(registry.action("selfsurface", "peek", ACCOUNT, {})).rejects.toThrow(
+      'cannot reach "self.noop" from a Query',
+    );
+    const node = await registry.action("selfsurface", "noop", ACCOUNT, {});
+    if (node.kind !== "capability") throw new Error("expected capability");
+    expect(() => registry.parseReceipt(node, [])).toThrow(
+      'cannot reach "self.noop" from a Receipt',
+    );
+
+    await expect(registry.action("selffield", "run", ACCOUNT, {})).rejects.toThrow(
+      'must leave "self" to core',
+    );
+  });
+
+  it("reserves self against contract and dependency injection keys", () => {
+    expect(() =>
+      Protocol({
+        name: "reserved-contract",
+        category: "token",
+        description: "Fixture claiming self as a contract.",
+        contracts: { self: { abi: VaultAbi, addr: VAULT } },
+      }),
+    ).toThrow('cannot declare a contract named "self"');
+    expect(() =>
+      Protocol({
+        name: "reserved-dependency",
+        category: "token",
+        description: "Fixture claiming self as a dependency.",
+        contracts: {},
+        protocols: { self: ApprovalProtocol },
+      }),
+    ).toThrow('cannot declare a dependency named "self"');
   });
 
   it("rejects inherited markers, undecorated dependencies, and invalid Capability metadata", () => {

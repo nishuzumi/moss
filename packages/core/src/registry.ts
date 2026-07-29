@@ -8,8 +8,16 @@ import {
   type ProtocolCtor,
   type ProtocolDependencies,
   RECEIPT_META,
+  requireUnclaimedSelf,
+  SELF_KEY,
 } from "./decorators.js";
-import { flattenCapabilityTree, toJsonSafe, verifyReceiptCoverage } from "./framework.js";
+import {
+  CAPABILITY_TREE_LIMITS,
+  CapabilityTreeError,
+  flattenCapabilityTree,
+  toJsonSafe,
+  verifyReceiptCoverage,
+} from "./framework.js";
 import { queryObservationOf, type TokenMetadataObservation } from "./observations.js";
 import type { MossRuntime } from "./runtime.js";
 import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
@@ -32,6 +40,39 @@ import { CATEGORIES, RISK_LABELS, VERBS } from "./types.js";
 
 export interface ActionCtx {
   account: Address;
+}
+
+/**
+ * One in-flight Capability construction. Registry threads it through every
+ * nested `self` and dependency call, so the depth and Capability count budgets
+ * are checked before the next Protocol method runs. Without it a self-recursive
+ * Capability would parse parameters, instantiate and execute all the way down
+ * and only meet `flattenCapabilityTree` as the recursion unwinds.
+ */
+interface BuildContext {
+  /** `protocol.method` chain from the root build down to the current call. */
+  readonly chain: readonly string[];
+  /** Capability count shared by the whole in-flight tree. */
+  readonly counter: { count: number };
+}
+
+function rootBuild(): BuildContext {
+  return { chain: [], counter: { count: 0 } };
+}
+
+/**
+ * Stands in for `self` where nesting a Capability is not part of the contract.
+ * A Query returns data and a Receipt parser must stay pure, so reaching for
+ * `self` there fails with a named framework error instead of `undefined`.
+ */
+function unavailableSelf(protocol: string, surface: "Query" | "Receipt"): object {
+  return new Proxy(Object.freeze({}), {
+    get(_target, key) {
+      throw new Error(
+        `protocol "${protocol}" cannot reach "${SELF_KEY}.${String(key)}" from a ${surface}; core injects "${SELF_KEY}" only while a Capability is built`,
+      );
+    },
+  });
 }
 
 export interface Coordinate {
@@ -393,14 +434,16 @@ export class Registry {
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    parent?: BuildContext,
   ): Promise<CapabilityNode> {
+    const ctx = this.#enterBuild(protocol, method, parent);
     const registered = this.#get(protocol);
     const meta = registered.methods[method];
     if (meta?.kind !== "capability") {
       throw new Error(`"${protocol}.${method}" is not a Capability`);
     }
     const params = await parseParams(meta.spec.params, rawParams);
-    const instance = this.#instantiate(protocol, account);
+    const instance = this.#instantiate(protocol, account, ctx, "capability");
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
     const result = (await (instance as any)[method](params, { account } satisfies ActionCtx)) as
       | CapabilityResult
@@ -417,17 +460,48 @@ export class Registry {
     return node;
   }
 
+  /**
+   * Admits one more Capability into an in-flight construction. The depth and
+   * count budgets are the same `CAPABILITY_TREE_LIMITS` bounds that
+   * `flattenCapabilityTree` enforces on the finished tree, checked here before
+   * any parameter parsing, instantiation or Protocol method call.
+   */
+  #enterBuild(protocol: string, method: string, parent?: BuildContext): BuildContext {
+    const chain = [...(parent?.chain ?? []), `${protocol}.${method}`];
+    const counter = parent?.counter ?? rootBuild().counter;
+    const path = `Capability(${chain.join(" -> ")})`;
+    if (chain.length > CAPABILITY_TREE_LIMITS.maxCapabilityDepth) {
+      throw new CapabilityTreeError(
+        "CAPABILITY_DEPTH",
+        path,
+        `nested Capability construction exceeds depth ${CAPABILITY_TREE_LIMITS.maxCapabilityDepth}`,
+      );
+    }
+    counter.count += 1;
+    if (counter.count > CAPABILITY_TREE_LIMITS.maxCapabilities) {
+      throw new CapabilityTreeError(
+        "CAPABILITY_COUNT",
+        path,
+        `nested Capability construction exceeds ${CAPABILITY_TREE_LIMITS.maxCapabilities} Capabilities`,
+      );
+    }
+    return { chain, counter };
+  }
+
   async #runQuery(
     protocol: string,
     method: string,
     account: Address,
     rawParams: Record<string, unknown>,
+    parent?: BuildContext,
   ): Promise<JsonSafeValue> {
     const registered = this.#get(protocol);
     const meta = registered.methods[method];
     if (meta?.kind !== "query") throw new Error(`"${protocol}.${method}" is not a Query`);
     const params = await parseParams(meta.spec.params, rawParams);
-    const instance = this.#instantiate(protocol, account);
+    // A Query nests nothing itself, so it carries the caller's budget when one
+    // exists and otherwise starts a fresh one for its own dependency calls.
+    const instance = this.#instantiate(protocol, account, parent ?? rootBuild(), "query");
     // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
     const result = await (instance as any)[method](params, { account } satisfies ActionCtx);
     this.#processQueryObservation(result);
@@ -525,6 +599,11 @@ export class Registry {
     const registered = this.#get(protocol);
     const ReceiptCtor = registered.receiptCtor as unknown as new () => object;
     const instance = new ReceiptCtor();
+    requireUnclaimedSelf(instance, protocol);
+    Object.defineProperty(instance, SELF_KEY, {
+      value: unavailableSelf(protocol, "Receipt"),
+      writable: false,
+    });
     for (const [key, dependency] of Object.entries(registered.config.protocols ?? {})) {
       const name = configOf(dependency)?.name;
       if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
@@ -536,13 +615,18 @@ export class Registry {
     return instance;
   }
 
-  #instantiate(protocol: string, account: Address): object {
+  #instantiate(
+    protocol: string,
+    account: Address,
+    ctx: BuildContext,
+    surface: "capability" | "query",
+  ): object {
     const registered = this.#get(protocol);
     const dependencies = Object.fromEntries(
       Object.entries(registered.config.protocols ?? {}).map(([key, dependency]) => {
         const name = configOf(dependency)?.name;
         if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
-        return [key, this.#dependency(name, account)];
+        return [key, this.#dependency(name, account, ctx)];
       }),
     );
     const Ctor = registered.ctor as unknown as new (
@@ -552,20 +636,39 @@ export class Registry {
       self: object,
     ) => object;
     // `self` routes a Protocol's own nested Capabilities through the same
-    // builder as a dependency call, so they are parameter-validated and
-    // stamped by core instead of hand-assembled in the Protocol package.
-    return new Ctor(this.runtime, account, dependencies, this.#dependency(protocol, account));
+    // builder as a dependency call, so they are parameter-validated, stamped and
+    // budgeted by core instead of hand-assembled in the Protocol package.
+    return new Ctor(
+      this.runtime,
+      account,
+      dependencies,
+      surface === "capability"
+        ? this.#selfRef(protocol, account, ctx)
+        : unavailableSelf(protocol, "Query"),
+    );
   }
 
-  #dependency(protocol: string, account: Address): object {
+  /** The Capability-only surface injected as `self`. */
+  #selfRef(protocol: string, account: Address, ctx: BuildContext): object {
+    const self: Record<string, unknown> = {};
+    for (const [method, meta] of Object.entries(this.#get(protocol).methods)) {
+      if (meta.kind !== "capability") continue;
+      self[method] = (params: Record<string, unknown>) =>
+        this.#buildCapability(protocol, method, account, params, ctx);
+    }
+    return Object.freeze(self);
+  }
+
+  #dependency(protocol: string, account: Address, ctx: BuildContext): object {
     const registered = this.#get(protocol);
     const dependency: Record<string, unknown> = {};
     for (const [method, meta] of Object.entries(registered.methods)) {
       dependency[method] =
         meta.kind === "capability"
           ? (params: Record<string, unknown>) =>
-              this.#buildCapability(protocol, method, account, params)
-          : (params: Record<string, unknown>) => this.#runQuery(protocol, method, account, params);
+              this.#buildCapability(protocol, method, account, params, ctx)
+          : (params: Record<string, unknown>) =>
+              this.#runQuery(protocol, method, account, params, ctx);
     }
     for (const receipt of registered.receipts) {
       dependency[receipt] = (changes: readonly Change[]) =>

@@ -1,6 +1,8 @@
 import {
+  type Change,
   type MossRuntime,
   Protocol,
+  type ReceiptResult,
   Registry,
   type SelfRef,
   type TransactionNode,
@@ -63,6 +65,14 @@ class SelfRefFixture {
   async transfer(_params: { to: string }): Promise<TransactionNode[]> {
     return [];
   }
+
+  async quote(_params: { amount: string }): Promise<{ price: string }> {
+    return { price: "1" };
+  }
+
+  approvalReceipt(_changes: readonly Change[]): ReceiptResult<{ operation: "approve" }> {
+    return { kind: "receipt", outcome: { operation: "approve" }, text: "approve", changes: [] };
+  }
 }
 
 declare const selfRef: SelfRefFixture["self"];
@@ -74,7 +84,15 @@ void selfRef.approve({ amount: 1 });
 void selfRef.transfer;
 // @ts-expect-error SelfRef rejects method names the class does not have.
 type BadSelfRef = SelfRef<SelfRefFixture, "burn">;
+// @ts-expect-error a Query reads state and is not nestable, so self cannot name one.
+type QuerySelfRef = SelfRef<SelfRefFixture, "quote">;
+// @ts-expect-error a Receipt parser is pure and is not nestable either.
+type ReceiptSelfRef = SelfRef<SelfRefFixture, "approvalReceipt">;
 
 void SelfRefFixture;
 declare const badSelfRef: BadSelfRef;
 void badSelfRef;
+declare const querySelfRef: QuerySelfRef;
+void querySelfRef;
+declare const receiptSelfRef: ReceiptSelfRef;
+void receiptSelfRef;

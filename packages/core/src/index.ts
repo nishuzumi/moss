@@ -49,6 +49,7 @@ export {
 export {
   type Address as AddressValue,
   CATEGORIES,
+  type CapabilityNames,
   type CapabilityNode,
   type CapabilityResult,
   type Category,
