@@ -1,0 +1,36 @@
+{
+  "name": "@themoss/protocol-pyth",
+  "version": "0.0.0",
+  "description": "Moss Protocol adapter for Pyth price feeds on Monad mainnet",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:online": "vitest run test-online/live-mainnet.test.ts",
+    "gen:sources": "tsx scripts/gen-sources.ts",
+    "update:sources": "tsx scripts/update-sources.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "jsonc-parser": "^3.3.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "viem": "^2.54.3",
+    "vitest": "^3.2.6"
+  }
+}
