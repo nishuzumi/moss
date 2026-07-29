@@ -19,7 +19,15 @@ export const VERBS = [
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
-export const CATEGORIES = ["dex", "lending", "staking", "rewards", "token", "nft"] as const;
+export const CATEGORIES = [
+  "dex",
+  "lending",
+  "staking",
+  "rewards",
+  "token",
+  "nft",
+  "oracle",
+] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const RISK_LABELS = ["fundOut", "approval", "priceImpact"] as const;
