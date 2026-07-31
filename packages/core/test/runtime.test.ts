@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRuntime, PUBLIC_RPC_URL } from "../src/runtime.js";
+import { createRuntime, DEFAULT_RPC_URL, PUBLIC_RPC_URL } from "../src/runtime.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -46,9 +46,11 @@ describe("createRuntime", () => {
     );
   });
 
-  it("falls back to the public endpoint when no argument is given", async () => {
+  // Asserted against DEFAULT_RPC_URL rather than the public endpoint, because CI
+  // sets MOSS_RPC_URL and the point here is only that the default is applied.
+  it("falls back to the resolved default when no argument is given", async () => {
     mockChainId(143);
-    await expect(createRuntime()).resolves.toMatchObject({ rpcUrl: PUBLIC_RPC_URL });
+    await expect(createRuntime()).resolves.toMatchObject({ rpcUrl: DEFAULT_RPC_URL });
   });
 });
 
