@@ -26,6 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Audit only, same first step as CI. This job additionally reaches the
+      # Etherscan V2 API and holds MONADSCAN_API_KEY, so its real destination
+      # list is worth recording before any block-mode policy is written.
+      - name: Audit runner egress
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4

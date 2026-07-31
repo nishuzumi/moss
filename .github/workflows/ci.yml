@@ -9,10 +9,31 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Fork pull requests execute contributor-authored test code on this runner.
+# Nothing here needs write access, so the token is read-only.
+permissions:
+  contents: read
+
 jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
+      # Step 1 of adopting egress control: audit only. It blocks nothing and
+      # instead records every outbound destination this job actually reaches,
+      # which is how the eventual block-mode allowlist gets derived rather than
+      # guessed. An over-broad allowlist is worse than none: each extra host is
+      # a channel a malicious contributor test could exfiltrate through.
+      #
+      # Linux-only (eBPF), so the windows-offline job below cannot use it.
+      #
+      # Deliberately no private RPC host here: audit mode reports observations
+      # to the StepSecurity API and telemetry can only be disabled in block
+      # mode, so this phase must see public endpoints only.
+      - name: Audit runner egress
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       # Foundry-in-monorepo invariant (ADR 0007): no git submodules, ever.
