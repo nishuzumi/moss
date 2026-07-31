@@ -99,6 +99,24 @@ describe("moss MCP server", () => {
       type: { default: 50, description: expect.stringContaining("1 bps equals 0.01%") },
       description: expect.stringContaining("adverse movement"),
     });
+
+    const monadCards = parseText(
+      await client.callTool({ name: "discover", arguments: { protocol: "monad-cards" } }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(monadCards).toEqual([
+      expect.objectContaining({
+        protocol: "monad-cards",
+        method: "totalMinted",
+        kind: "query",
+      }),
+    ]);
+    const loadedMonadCards = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "monad-cards", method: "totalMinted" }] },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(loadedMonadCards[0]?.params).toEqual({});
   });
 
   it("round-trips a Capability tree through action JSON", async () => {
