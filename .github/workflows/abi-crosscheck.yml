@@ -26,13 +26,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Audit only, same first step as CI. This job additionally reaches the
-      # Etherscan V2 API and holds MONADSCAN_API_KEY, so its real destination
-      # list is worth recording before any block-mode policy is written.
-      - name: Audit runner egress
+      # Same policy as CI. This workflow has no pull_request trigger, so it
+      # always runs the base branch's definition and a contributor cannot edit
+      # this step away — which is why it, not CI, is the one that actually
+      # guards a credential.
+      - name: Restrict runner egress
         uses: step-security/harden-runner@v2
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            api.etherscan.io:443
+            rpc.monad.xyz:443
+            ${{ secrets.MOSS_RPC_URL }}
 
       - uses: actions/checkout@v4
 
@@ -51,4 +69,5 @@ jobs:
       - name: Explorer cross-check
         env:
           MONADSCAN_API_KEY: ${{ secrets.MONADSCAN_API_KEY }}
+          MOSS_RPC_URL: ${{ secrets.MOSS_RPC_ENDPOINT }}
         run: pnpm test:abi:online

@@ -18,21 +18,40 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      # Step 1 of adopting egress control: audit only. It blocks nothing and
-      # instead records every outbound destination this job actually reaches,
-      # which is how the eventual block-mode allowlist gets derived rather than
-      # guessed. An over-broad allowlist is worse than none: each extra host is
-      # a channel a malicious contributor test could exfiltrate through.
+      # Egress is restricted rather than audited, because this job receives a
+      # private RPC endpoint and audit mode cannot disable telemetry — only
+      # block mode can, and reporting that endpoint to a third party would
+      # defeat keeping it secret.
+      #
+      # Two secrets hold the same endpoint in two spellings, because log masking
+      # is exact-string: MOSS_RPC_ENDPOINT is the full URL the tests connect to,
+      # MOSS_RPC_URL is the `host:443` form this allowlist needs. Deriving one
+      # from the other in a run step would produce an unmasked copy.
+      #
+      # Fork pull requests receive no secrets, so both lines are empty there and
+      # the tests fall back to the public endpoint in the list below.
       #
       # Linux-only (eBPF), so the windows-offline job below cannot use it.
-      #
-      # Deliberately no private RPC host here: audit mode reports observations
-      # to the StepSecurity API and telemetry can only be disabled in block
-      # mode, so this phase must see public endpoints only.
-      - name: Audit runner egress
+      - name: Restrict runner egress
         uses: step-security/harden-runner@v2
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            rpc.monad.xyz:443
+            ${{ secrets.MOSS_RPC_URL }}
 
       - uses: actions/checkout@v4
 
@@ -66,8 +85,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # The live suites read MOSS_RPC_URL (packages/test-support). The secret is
+      # named MOSS_RPC_ENDPOINT; the variable keeps the name the MCP CLI and the
+      # examples already use. Empty on fork pull requests, which then fall back
+      # to the public endpoint.
       - name: Test
         run: pnpm test
+        env:
+          MOSS_RPC_URL: ${{ secrets.MOSS_RPC_ENDPOINT }}
 
   windows-offline:
     runs-on: windows-latest
