@@ -50,6 +50,7 @@ jobs:
             *.blob.core.windows.net:443
             nodejs.org:443
             registry.npmjs.org:443
+            api.kuru.io:443
             rpc.monad.xyz:443
             ${{ secrets.MOSS_RPC_URL }}
 
