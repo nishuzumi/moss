@@ -13,6 +13,8 @@ import {
   type InferParams,
   type ReceiptResult as MossReceipt,
   type MossRuntime,
+  type Nestable,
+  nestable,
   type ParamsSpec,
   PositiveDecimalString,
   Protocol,
@@ -145,6 +147,13 @@ class ComposedProtocol {
 
 class UndecoratedDependency {}
 
+const forgeParams = {
+  method: {
+    type: z.string().min(1).describe("A method name of the Protocol, as a non-empty string."),
+    description: "Method the Capability reaches for through self.",
+  },
+} satisfies ParamsSpec;
+
 @Protocol({
   name: "selfnesting",
   category: "token",
@@ -176,9 +185,36 @@ class SelfNestingProtocol {
     receipt: "approvalReceipt",
     risk: ["approval"],
   })
-  async approve(params: InferParams<typeof approvalParams>, ctx: { account: AddressValue }) {
+  async approve(
+    params: InferParams<typeof approvalParams>,
+    ctx: { account: AddressValue },
+  ): Promise<Nestable<TransactionNode[]>> {
     if (typeof params.amount !== "string") throw new Error("self call skipped parameter parsing");
-    return [transaction(ctx.account, VAULT, { data: "0x1234" })];
+    return nestable([transaction(ctx.account, VAULT, { data: "0x1234" })]);
+  }
+
+  @Capability<SelfNestingProtocol, typeof forgeParams>({
+    intent: "Reach for {method} through self",
+    verb: "swap",
+    params: forgeParams,
+    receipt: "swapReceipt",
+    risk: ["fundOut"],
+  })
+  async forge(params: InferParams<typeof forgeParams>): Promise<CapabilityResult> {
+    // NestableNames rejects both names this is called with, so only a cast gets
+    // here. Core still has to refuse instead of answering with undefined.
+    const forged = this.self as unknown as Record<
+      string,
+      (input: unknown) => Promise<CapabilityNode>
+    >;
+    const nested = forged[params.method];
+    if (!nested) throw new Error("self exposed the method as undefined");
+    return [await nested({ token: "1", amount: "10" })];
+  }
+
+  /** Capability-shaped and never decorated, so no surface carries it. */
+  async undecoratedHelper(_params: { amount: string }): Promise<TransactionNode[]> {
+    return [];
   }
 
   @Query({ intent: "Read fixture approval data", params: approvalParams })
@@ -225,12 +261,12 @@ class SelfRecursiveProtocol {
   async descend(
     params: InferParams<typeof roundParams>,
     ctx: { account: AddressValue },
-  ): Promise<CapabilityResult> {
+  ): Promise<Nestable<CapabilityResult>> {
     descendCalls += 1;
     const own = transaction(ctx.account, VAULT, { data: "0x01" });
     const remaining = Number(params.remaining);
-    if (remaining <= 0) return [own];
-    return [await this.self.descend({ remaining: String(remaining - 1) }), own];
+    if (remaining <= 0) return nestable([own]);
+    return nestable([await this.self.descend({ remaining: String(remaining - 1) }), own]);
   }
 
   @Capability<SelfRecursiveProtocol, typeof roundParams>({
@@ -262,9 +298,9 @@ class SelfRecursiveProtocol {
   async leaf(
     _: InferParams<typeof roundParams>,
     ctx: { account: AddressValue },
-  ): Promise<CapabilityResult> {
+  ): Promise<Nestable<CapabilityResult>> {
     leafCalls += 1;
-    return [transaction(ctx.account, VAULT, { data: "0x03" })];
+    return nestable([transaction(ctx.account, VAULT, { data: "0x03" })]);
   }
 
   @Receipt()
@@ -289,8 +325,11 @@ class SelfSurfaceProtocol {
     receipt: "noopReceipt",
     risk: ["fundOut"],
   })
-  async noop(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
-    return [transaction(ctx.account, VAULT, { data: "0x04" })];
+  async noop(
+    _: InferParams<typeof noParams>,
+    ctx: { account: AddressValue },
+  ): Promise<Nestable<TransactionNode[]>> {
+    return nestable([transaction(ctx.account, VAULT, { data: "0x04" })]);
   }
 
   @Query({ intent: "Reach for self from a Query", params: noParams })
@@ -623,8 +662,9 @@ describe("framework core seam", () => {
 
     selfKeys = [];
     await registry.action("selfnesting", "swap", ACCOUNT, {});
-    // Queries read state and Receipt parsers stay pure, so neither is nestable.
-    expect([...selfKeys].sort()).toEqual(["approve", "swap"]);
+    // Queries read state and Receipt parsers stay pure, so neither is nestable,
+    // and a method with no @Capability is on no surface at all.
+    expect([...selfKeys].sort()).toEqual(["approve", "forge", "swap"]);
 
     await expect(registry.action("selfsurface", "peek", ACCOUNT, {})).rejects.toThrow(
       'cannot reach "self.noop" from a Query',
@@ -638,6 +678,25 @@ describe("framework core seam", () => {
     await expect(registry.action("selffield", "run", ACCOUNT, {})).rejects.toThrow(
       'must leave "self" to core',
     );
+  });
+
+  it("refuses a method that is not a Capability when self is reached past a cast", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfNestingProtocol);
+
+    // `NestableNames` rejects all three names at compile time (types.fixture.ts).
+    // A cast is the only way to reach them, and core refuses by name rather than
+    // handing back undefined: an undecorated helper, a Query and a Receipt parser
+    // are on no `self` surface.
+    await expect(
+      registry.action("selfnesting", "forge", ACCOUNT, { method: "undecoratedHelper" }),
+    ).rejects.toThrow('cannot nest "self.undecoratedHelper", which is not a @Capability');
+    await expect(
+      registry.action("selfnesting", "forge", ACCOUNT, { method: "inspect" }),
+    ).rejects.toThrow('cannot nest "self.inspect", which is not a @Capability');
+    await expect(
+      registry.action("selfnesting", "forge", ACCOUNT, { method: "approvalReceipt" }),
+    ).rejects.toThrow('cannot nest "self.approvalReceipt", which is not a @Capability');
   });
 
   it("reserves self against contract and dependency injection keys", () => {

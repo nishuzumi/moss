@@ -81,6 +81,25 @@ export type CapabilityResult =
   | TransactionNode
   | readonly (CapabilityNode | TransactionNode)[];
 
+declare const NESTABLE: unique symbol;
+
+/**
+ * Compile-time marker carried by a Capability result declared nestable.
+ * `nestable()` is the only way to produce it.
+ */
+export interface NestableResult {
+  readonly [NESTABLE]: undefined;
+}
+
+/**
+ * A Capability result its own Protocol may nest through `self`. Returning
+ * `nestable(...)` is the declaration: a Capability whose result is shaped like a
+ * `CapabilityResult` but never declared stays outside `self`, because a
+ * decorator is invisible to the type system and shape alone is not a statement
+ * of intent.
+ */
+export type Nestable<R extends CapabilityResult = CapabilityResult> = R & NestableResult;
+
 export type ProtocolRef<T> = {
   [K in keyof T as T[K] extends (...args: infer _Args) => infer _Result ? K : never]: T[K] extends (
     params: infer Params,
@@ -95,20 +114,22 @@ export type ProtocolRef<T> = {
 };
 
 /**
- * Names of a Protocol's own Capability methods, the only methods `self`
- * exposes. A Query reads state and a Receipt parser stays pure, so neither is
- * nestable and naming one is a compile-time error.
+ * Names of the Capabilities a Protocol declared nestable, the only names `self`
+ * accepts. A Capability declares itself by returning `nestable(...)`, so a
+ * Query, a Receipt parser, a Capability that never declared itself, and an
+ * undecorated helper that happens to return a `CapabilityResult` are all
+ * rejected here instead of at the call site.
  *
  * Core's injected keys are excluded by name rather than by shape: `self` holds
  * a `SelfRef` over the same class, so resolving its type here would make this
  * constraint circular.
  */
-export type CapabilityNames<T> = {
+export type NestableNames<T> = {
   [K in Exclude<keyof T, "self" | "runtime">]: T[K] extends (
     params: never,
     ...rest: never[]
   ) => infer Result
-    ? Awaited<Result> extends CapabilityResult
+    ? Awaited<Result> extends NestableResult
       ? K
       : never
     : never;
@@ -125,9 +146,7 @@ export type CapabilityNames<T> = {
  * over the whole class would map the `self` property back through itself, which
  * TypeScript rejects as an infinitely deep instantiation.
  */
-export type SelfRef<T, Methods extends CapabilityNames<T> & keyof T> = ProtocolRef<
-  Pick<T, Methods>
->;
+export type SelfRef<T, Methods extends NestableNames<T> & keyof T> = ProtocolRef<Pick<T, Methods>>;
 
 export type Change =
   | {

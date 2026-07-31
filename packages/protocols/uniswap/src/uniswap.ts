@@ -44,6 +44,8 @@ import {
   type InferParams,
   type MossRuntime,
   NATIVE,
+  type Nestable,
+  nestable,
   ParameterError,
   type ParamsSpec,
   PositiveDecimalString,
@@ -334,16 +336,18 @@ export class Uniswap {
     risk: ["approval"],
     tags: ["permit2", "allowance"],
   })
-  permit2Approve(params: Permit2ApproveParams): TransactionNode[] {
-    // Both bounds are enforced by the declared parameter types.
-    return [
+  permit2Approve(params: Permit2ApproveParams): Nestable<TransactionNode[]> {
+    // Both bounds are enforced by the declared parameter types. `nestable`
+    // declares this Capability nestable through `self`, which is how `swap`
+    // reaches it for ERC-20 input.
+    return nestable([
       this.permit2.approve([
         params.token,
         UNISWAP_V4_ROUTER_ADDRESS,
         BigInt(params.amount),
         Number(params.expiration),
       ]),
-    ];
+    ]);
   }
 
   @Receipt()

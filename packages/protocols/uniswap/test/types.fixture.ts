@@ -34,10 +34,14 @@ void dependency.router;
 
 const nested = null as unknown as SelfRef<Uniswap, "permit2Approve">;
 void nested.permit2Approve({ token: USDC_ADDRESS, amount: "1000000", expiration: "0" });
+// @ts-expect-error swap never returns nestable(), so the adapter does not nest it
+type SwapSelfRef = SelfRef<Uniswap, "swap">;
 // @ts-expect-error self nests Capabilities; the quote Query is not nestable
 type QuoteSelfRef = SelfRef<Uniswap, "quote">;
 // @ts-expect-error a Receipt parser is pure and is not nestable either
 type ReceiptSelfRef = SelfRef<Uniswap, "swapReceipt">;
+declare const swapSelfRef: SwapSelfRef;
+void swapSelfRef;
 declare const quoteSelfRef: QuoteSelfRef;
 void quoteSelfRef;
 declare const receiptSelfRef: ReceiptSelfRef;

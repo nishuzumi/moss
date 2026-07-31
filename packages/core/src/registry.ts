@@ -115,6 +115,8 @@ interface Registered {
   config: ProtocolConfig<ProtocolDependencies>;
   methods: Record<string, MethodMeta>;
   receipts: Set<string>;
+  /** Every method on the Protocol's prototype chain, decorated or not. */
+  methodNames: readonly string[];
   packageName: string;
   packageLabels: ReadonlyMap<string, string>;
 }
@@ -289,6 +291,7 @@ export class Registry {
 
     const methods: Record<string, MethodMeta> = {};
     const receipts = new Set<string>();
+    const methodNames: string[] = [];
     const seenNames = new Set<string>();
     for (
       let prototype = ctor.prototype;
@@ -301,6 +304,7 @@ export class Registry {
         seenNames.add(name);
         const method = Object.getOwnPropertyDescriptor(prototype, name)?.value;
         if (typeof method !== "function") continue;
+        methodNames.push(name);
         const markers = method as unknown as Record<symbol, unknown>;
         const meta = markers[METHOD_META] as MethodMeta | undefined;
         if (meta && !Object.hasOwn(methods, name)) methods[name] = meta;
@@ -352,6 +356,7 @@ export class Registry {
       config,
       methods,
       receipts,
+      methodNames,
       packageName,
       packageLabels,
     });
@@ -648,13 +653,33 @@ export class Registry {
     );
   }
 
-  /** The Capability-only surface injected as `self`. */
+  /**
+   * The Capability-only surface injected as `self`. `SelfRef` names Capabilities
+   * that declared themselves nestable, and TypeScript cannot see a decorator, so
+   * Registry keeps the last word at the call site: every other method of the
+   * Protocol answers with a named framework error rather than `undefined`, and
+   * only the Capabilities are enumerable.
+   */
   #selfRef(protocol: string, account: Address, ctx: BuildContext): object {
+    const registered = this.#get(protocol);
     const self: Record<string, unknown> = {};
-    for (const [method, meta] of Object.entries(this.#get(protocol).methods)) {
+    const capabilities: string[] = [];
+    for (const [method, meta] of Object.entries(registered.methods)) {
       if (meta.kind !== "capability") continue;
+      capabilities.push(method);
       self[method] = (params: Record<string, unknown>) =>
         this.#buildCapability(protocol, method, account, params, ctx);
+    }
+    for (const method of registered.methodNames) {
+      if (Object.hasOwn(self, method)) continue;
+      Object.defineProperty(self, method, {
+        enumerable: false,
+        get() {
+          throw new Error(
+            `protocol "${protocol}" cannot nest "${SELF_KEY}.${method}", which is not a @Capability; "${SELF_KEY}" carries ${capabilities.join(", ")}`,
+          );
+        },
+      });
     }
     return Object.freeze(self);
   }
