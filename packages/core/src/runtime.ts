@@ -12,11 +12,16 @@ export const MONAD_CHAIN_ID = 143;
 export const PUBLIC_RPC_URL = "https://rpc.monad.xyz";
 
 /**
- * The endpoint callers get unless they pin their own: `MOSS_RPC_URL` when set,
- * otherwise the public one. Resolved here, once, so that no other module spells
- * an endpoint or reads the environment for one.
+ * The endpoint callers get unless they pin their own: `MOSS_RPC_URL` when set to
+ * something usable, otherwise the public one. Resolved here, once, so that no
+ * other module spells an endpoint or reads the environment for one.
+ *
+ * Blank is treated as unset because a workflow that forwards a secret produces an
+ * empty string wherever that secret is unavailable — every fork pull request, for
+ * instance, since those receive no secrets. `??` would forward the blank and viem
+ * would reject it as a missing transport URL.
  */
-export const DEFAULT_RPC_URL = process.env.MOSS_RPC_URL ?? PUBLIC_RPC_URL;
+export const DEFAULT_RPC_URL = process.env.MOSS_RPC_URL?.trim() || PUBLIC_RPC_URL;
 
 export interface MossRuntime {
   rpcUrl: string;
