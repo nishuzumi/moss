@@ -16,16 +16,19 @@ parameter and has verified chain 143 itself ever since, which left
 `monadRuntime()` as a wrapper whose only remaining job was a default endpoint,
 and left `143` declared in two packages.
 
-`core` now owns the whole Runtime: `MONAD_CHAIN_ID` and `DEFAULT_RPC_URL` (the
-`MOSS_RPC_URL` override, resolved once so no other module spells an endpoint or
-reads the environment). `createRuntime()` takes an optional `rpcUrl`,
-`monadRuntime()` is gone, and `system` is what its name claims: shared verified
-constants plus the WMON Protocol.
+`core` now owns the whole Runtime: `MONAD_CHAIN_ID` and `defaultRpcUrl()` (the
+`MOSS_RPC_URL` override, the only place that reads the environment for an
+endpoint). `createRuntime()` takes an optional `rpcUrl`, `monadRuntime()` is gone,
+and `system` is what its name claims: shared verified constants plus the WMON
+Protocol.
 
-A blank `MOSS_RPC_URL` counts as unset. A workflow forwarding the endpoint from a
-secret sets the variable to an empty string wherever that secret is unavailable —
-every fork pull request, which receive no secrets — so the fallback keys off a
-usable value rather than a defined one.
+The override resolves per call rather than at module load, so a consumer that sets
+the variable after importing core still affects later Runtimes and a test needs no
+module-registry reset. A blank value counts as unset, because a workflow forwarding
+the endpoint from a secret sets the variable to an empty string wherever that secret
+is unavailable — every fork pull request, which receive no secrets. A non-blank
+value that is not an http(s) URL is a misconfiguration and is rejected by name,
+rather than falling back and surfacing later as a transport error.
 
 This also removes a package-boundary problem rather than working around it.
 `system` imports `ERC20` and `WETH9Abi` from `erc`, so an `erc` test that wanted

@@ -13,14 +13,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_RPC_URL, MONAD_CHAIN_ID } from "@themoss/core";
+import { defaultRpcUrl, MONAD_CHAIN_ID } from "@themoss/core";
 
 import { formatEther } from "viem";
 import { devAccount, FORK_RPC_URL, rpc } from "./dev-wallet.js";
 
 // The node anvil forks from, so it inherits the MOSS_RPC_URL override too:
 // forking replays real calls upstream and meets the same limits.
-const UPSTREAM = DEFAULT_RPC_URL;
+const UPSTREAM = defaultRpcUrl();
 const FUND_WEI = 1_000_000n * 10n ** 18n; // 1,000,000 MON
 
 async function chainIdAt(url: string): Promise<number | null> {

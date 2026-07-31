@@ -31,7 +31,7 @@ jobs:
       # this step away — which is why it, not CI, is the one that actually
       # guards a credential.
       - name: Restrict runner egress
-        uses: step-security/harden-runner@v2
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: block
           disable-telemetry: true
