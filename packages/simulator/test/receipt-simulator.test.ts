@@ -66,6 +66,37 @@ function runtimeWithFrames(
 }
 
 describe("Capability simulation", () => {
+  it("applies caller-provided initial state overrides without mutating them", async () => {
+    const slot = `0x${"01".repeat(32)}` as `0x${string}`;
+    const value = `0x${"02".repeat(32)}` as `0x${string}`;
+    const initial: StateOverrides = { [B]: { stateDiff: { [slot]: value } } };
+    const requests: { method: string; params: unknown[] }[] = [];
+    const runtime = runtimeWithFrames([{ type: "CALL", from: A, to: B, logs: [] }], undefined);
+    runtime.client.request = (async ({
+      method,
+      params,
+    }: {
+      method: string;
+      params?: unknown[];
+    }) => {
+      requests.push({ method, params: params ?? [] });
+      if (method === "eth_blockNumber") return PINNED_BLOCK;
+      if (method === "eth_estimateGas") return "0x5208";
+      return { type: "CALL", from: A, to: B, logs: [] };
+      // biome-ignore lint/suspicious/noExplicitAny: minimal debug RPC fixture
+    }) as any;
+
+    const outcome = await createTraceSimulator(runtime, {
+      stateOverrides: initial,
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    }).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeUndefined();
+    const traceOptions = requests[1]?.params[2] as { stateOverrides?: StateOverrides };
+    expect(traceOptions.stateOverrides?.[B]?.stateDiff).toEqual({ [slot]: value });
+    expect(initial).toEqual({ [B]: { stateDiff: { [slot]: value } } });
+  });
+
   it("executes nested Capabilities in order and returns one verified Receipt per transaction", async () => {
     const root = capability("parent", C, [capability("child", B)]);
     const simulator = createTraceSimulator(
@@ -215,6 +246,70 @@ describe("Capability simulation", () => {
     expect(outcome.results[0]?.receipt).toBeUndefined();
     expect(outcome.results[0]?.warnings[0]?.code).toBe("REVERTED");
     expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "execution reverted" });
+  });
+
+  it("maps an injected revert selector to an explicit reason", async () => {
+    const selector = "0x880ccd2c" as const;
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          output: selector,
+        },
+      ]),
+      {
+        revertSelectors: {
+          [B]: {
+            [selector]: "swap amount too small: this market's LP fee rounds to zero",
+          },
+        },
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe(
+      "swap amount too small: this market's LP fee rounds to zero",
+    );
+    expect(outcome.results[0]?.warnings).toEqual([
+      {
+        code: "REVERTED",
+        message: "transaction reverted: swap amount too small: this market's LP fee rounds to zero",
+      },
+    ]);
+  });
+
+  it("does not attribute the same selector to an unrelated transaction target", async () => {
+    const selector = "0x880ccd2c" as const;
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: C,
+          error: "execution reverted",
+          output: selector,
+        },
+      ]),
+      {
+        revertSelectors: {
+          [B]: {
+            [selector]: "swap amount too small: this market's LP fee rounds to zero",
+          },
+        },
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", C));
+
+    expect(outcome.results[0]?.revertReason).toBe("execution reverted");
+    expect(outcome.results[0]?.warnings).toEqual([
+      {
+        code: "REVERTED",
+        message: "transaction reverted: execution reverted",
+      },
+    ]);
   });
 
   it("turns unavailable trace evidence into a terminal Warning", async () => {

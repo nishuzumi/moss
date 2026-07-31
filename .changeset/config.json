@@ -13,6 +13,7 @@
       "@themoss/protocol-kuru",
       "@themoss/protocol-monad-cards",
       "@themoss/protocol-pancakeswap",
+      "@themoss/protocol-pendle",
       "@themoss/mcp-server"
     ]
   ],

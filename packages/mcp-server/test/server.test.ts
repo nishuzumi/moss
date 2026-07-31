@@ -14,7 +14,7 @@ import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { defaultProtocolModules } from "../src/composition.js";
+import { defaultProtocolModules, defaultRevertSelectors } from "../src/composition.js";
 import { createMossServer, toAgentSimulation } from "../src/server.js";
 
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
@@ -27,6 +27,7 @@ async function connectedHarness(simulateOutcome?: SimulateOutcome) {
   const { server, simulator } = createMossServer({
     runtime,
     protocols: defaultProtocolModules,
+    revertSelectors: defaultRevertSelectors,
   });
   if (simulateOutcome) {
     simulator.simulate = async () => simulateOutcome;
@@ -87,6 +88,11 @@ describe("moss MCP server", () => {
           method: "swap",
           kind: "capability",
         }),
+        expect.objectContaining({
+          protocol: "pendle",
+          method: "swap",
+          kind: "capability",
+        }),
       ]),
     );
     const stakes = parseText(
@@ -107,7 +113,6 @@ describe("moss MCP server", () => {
       type: { default: 50, description: expect.stringContaining("1 bps equals 0.01%") },
       description: expect.stringContaining("adverse movement"),
     });
-
     const monadCards = parseText(
       await client.callTool({ name: "discover", arguments: { protocol: "monad-cards" } }),
     ) as { protocol: string; method: string; kind: string }[];
@@ -135,6 +140,20 @@ describe("moss MCP server", () => {
     expect(unstakeLoaded[0]?.params.controller).toMatchObject({
       description: expect.stringContaining("controller"),
     });
+    const pendleLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "pendle", method: "swap" },
+            { protocol: "pendle", method: "quote" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: Record<string, unknown>; description: string }> }[];
+    expect(pendleLoaded[0]?.params.slippageBps?.type).toMatchObject({ default: 50 });
+    expect(pendleLoaded[0]?.params.amountIn?.description).toContain("may spend");
+    expect(pendleLoaded[1]?.params.amountIn?.description).toContain("price");
   });
 
   it("round-trips a Capability tree through action JSON", async () => {

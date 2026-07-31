@@ -33,6 +33,14 @@ Monad retains logs inside a failed child frame even though the frame reports `er
   `debug_traceCallMany`, `trace_callMany`, and `eth_callMany` all remain
   unavailable (`-32601`) on `rpc.monad.xyz` and `rpc-mainnet.monadinfra.com`.
 - Monad's `debug_traceCall` **enforces sender balance** (discovered 2026-07-07: a 2-MON transfer from an underfunded address is rejected with `insufficient balance`, unlike geth's default). The simulator therefore pre-funds the transaction sender via a balance override — matching `eth_simulateV1`'s validation-off semantics. Simulation answers "what would this transaction do", not "can the account afford it"; affordability is the wallet's question at signing time.
+- Library callers may also provide `SimulatorOptions.stateOverrides` for deterministic read-only
+  protocol tests. Those overrides are a synthetic prestate used only by `debug_traceCall`; a
+  successful result proves execution and Receipt behavior under that supplied state, not the live
+  account's current token balance, allowance, or affordability. The simulator clones the supplied
+  overrides before state chaining and never mutates the caller's object.
+- Protocol-specific custom-error descriptions are keyed by transaction target and four-byte
+  selector. A selector match from another deployment remains a generic revert rather than being
+  attributed to the wrong Protocol.
 - When `debug_traceCall` is unavailable or cannot supply provably ordered Change evidence, simulate fails loudly — it never silently skips evidence or falls back to an approximate ordering.
 - Exact ordering is reconstructed in one recursive pass over call-frame `position` data; protocol ABI semantics enter only in the Receipt parser.
 - All simulation requests set an explicit, modest `gas` value; provider free tiers reject calls that fall back to the node's block-gas-limit default.

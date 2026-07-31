@@ -29,6 +29,7 @@
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
+    "@themoss/protocol-pendle": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",
     "zod": "^3.25.0"

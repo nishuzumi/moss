@@ -1,4 +1,5 @@
 import {
+  type Address,
   type CapabilityNode,
   type Change,
   flattenCapabilityTree,
@@ -24,6 +25,7 @@ import {
 } from "./trace.js";
 
 export { ChangeOrderError, extractChanges } from "./changes.js";
+export type { StateOverride, StateOverrides } from "./trace.js";
 export { SimulatorUnavailableError };
 
 export type WarningCode =
@@ -60,9 +62,21 @@ export interface Simulator {
   simulate(root: CapabilityNode): Promise<SimulateOutcome>;
 }
 
+export type RevertSelectors = Readonly<
+  Partial<Record<Address, Readonly<Partial<Record<Hex, string>>>>>
+>;
+
 export interface SimulatorOptions {
   gasPerTx?: bigint;
   prefundWei?: bigint;
+  /**
+   * Synthetic prestate supplied only to debug_traceCall. A successful simulation proves behavior
+   * and Receipt parsing under this supplied state; it does not prove the live account's current
+   * balance, allowance, or affordability.
+   */
+  stateOverrides?: StateOverrides;
+  /** Custom revert descriptions scoped by transaction target address, then four-byte selector. */
+  revertSelectors?: RevertSelectors;
   receipt: (capability: CapabilityNode, changes: readonly Change[]) => Receipt;
 }
 
@@ -71,11 +85,25 @@ const DEFAULT_PREFUND_WEI = 10n ** 24n;
 export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOptions): Simulator {
   const gasBudget = options.gasPerTx ?? DEFAULT_SIMULATION_GAS;
   const prefund: `0x${string}` = `0x${(options.prefundWei ?? DEFAULT_PREFUND_WEI).toString(16)}`;
+  const revertSelectors = new Map(
+    Object.entries(options.revertSelectors ?? {}).map(([target, selectors]) => [
+      target.toLowerCase(),
+      selectors,
+    ]),
+  );
 
   return {
     async simulate(root): Promise<SimulateOutcome> {
       const executable = flattenCapabilityTree(root);
-      const overrides: StateOverrides = {};
+      const overrides: StateOverrides = Object.fromEntries(
+        Object.entries(options.stateOverrides ?? {}).map(([address, override]) => [
+          address.toLowerCase(),
+          {
+            ...override,
+            ...(override.stateDiff ? { stateDiff: { ...override.stateDiff } } : {}),
+          },
+        ]),
+      ) as StateOverrides;
       const results: TransactionSimulation[] = [];
 
       // Pin one base block for the whole run so per-transaction evidence and
@@ -127,7 +155,16 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
         }
 
         if (frame.error) {
-          const reason = frame.revertReason ?? frame.error;
+          const selector =
+            frame.output && frame.output.length >= 10
+              ? (frame.output.slice(0, 10) as Hex)
+              : undefined;
+          const reason =
+            frame.revertReason ??
+            (selector
+              ? revertSelectors.get(transaction.to.toLowerCase())?.[selector]
+              : undefined) ??
+            frame.error;
           results.push({
             protocol: capability.protocol,
             method: capability.method,
