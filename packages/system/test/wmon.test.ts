@@ -1,6 +1,7 @@
 import {
   type CapabilityNode,
   type Change,
+  createRuntime,
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
@@ -8,7 +9,6 @@ import {
 } from "@themoss/core";
 import { ERC20Abi, WETH9Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { TEST_RPC_URL } from "@themoss/test-support";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -17,7 +17,7 @@ import {
   getAddress,
 } from "viem";
 import { describe, expect, it } from "vitest";
-import { AUSD_ADDRESS, monadRuntime, USDC_ADDRESS, WMON, WMON_ADDRESS } from "../src/index.js";
+import { AUSD_ADDRESS, USDC_ADDRESS, WMON, WMON_ADDRESS } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const RECEIVER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
@@ -85,7 +85,7 @@ describe("WMON", () => {
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad official token constants", () => {
   it("have deployed bytecode and the documented metadata", { timeout: 60_000 }, async () => {
-    const { client } = await monadRuntime({ rpcUrl: TEST_RPC_URL });
+    const { client } = await createRuntime();
     const tokens = [
       { address: WMON_ADDRESS, symbol: "WMON", decimals: 18 },
       { address: USDC_ADDRESS, symbol: "USDC", decimals: 6 },
@@ -106,7 +106,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad official token constants", (
   it("simulates a wrap with exhaustive ordered Receipt coverage", {
     timeout: 120_000,
   }, async () => {
-    const runtime = await monadRuntime({ rpcUrl: TEST_RPC_URL });
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(WMON);
     const capability = await registry.action("wmon", "wrap", ACCOUNT, { amount: "0.25" });
     if (capability.kind !== "capability") throw new Error("expected Capability");
@@ -123,7 +123,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad official token constants", (
   });
 
   it("chains a live WMON wrap into a transfer", { timeout: 180_000 }, async () => {
-    const runtime = await monadRuntime({ rpcUrl: TEST_RPC_URL });
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(WMON);
     const wrapAmount = 1_000_000_000_000n;
     const initialBalance = await runtime.client.readContract({

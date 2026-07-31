@@ -13,9 +13,6 @@ export default defineConfig({
     // Tests run against workspace sources, not dists, so a stale build can
     // never produce phantom failures.
     alias: {
-      "@themoss/test-support": fileURLToPath(
-        new URL("../../test-support/src/index.ts", import.meta.url),
-      ),
       "@themoss/core": src("../../core/src/index.ts"),
       "@themoss/simulator": src("../../simulator/src/index.ts"),
       "@themoss/erc": src("../../erc/src/index.ts"),

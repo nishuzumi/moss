@@ -1,8 +1,9 @@
 /** Local-fork signer. It accepts only a validated Capability tree from the Agent example. */
+
 import { readFileSync } from "node:fs";
-import { type CapabilityNode, flattenCapabilityTree, NATIVE } from "@themoss/core";
+import { type CapabilityNode, flattenCapabilityTree, MONAD_CHAIN_ID, NATIVE } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
-import { AUSD_ADDRESS, MONAD_CHAIN_ID, USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
+import { AUSD_ADDRESS, USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
 import { createPublicClient, createWalletClient, defineChain, formatUnits, http } from "viem";
 import { devAccount, FORK_RPC_URL, rpc } from "./dev-wallet.js";
 

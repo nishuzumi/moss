@@ -20,9 +20,8 @@
   "updateInternalDependencies": "patch",
   "ignore": [
     "@themoss/abi-tools",
-    "@themoss/example-agent-swap",
     "@themoss/example-simple-flow",
-    "@themoss/protocol-template",
-    "@themoss/test-support"
+    "@themoss/example-agent-swap",
+    "@themoss/protocol-template"
   ]
 }

@@ -53,7 +53,8 @@
 
 - Enforce package ownership: `core` owns framework contracts; `simulator` owns
   trace mechanics and ordered Change extraction; `erc` owns address-free
-  standards; `system` owns the Monad Runtime and shared verified constants;
+  standards; `core` owns the Monad Runtime, including chain 143 verification
+  and the default endpoint; `system` owns shared verified constants;
   `protocols/*` own protocol semantics and deployments; `mcp-server` owns only
   transport and composition; `abi-tools` owns build-time ABI retrieval,
   semantic ABI comparison, and rendering tooling, never runtime behavior.
@@ -105,7 +106,8 @@
 
 - pnpm monorepo. `core` owns framework contracts; `simulator` owns trace and
   ordered Change extraction; `erc` owns address-free standard semantics;
-  `system` owns Monad Runtime and verified official constants;
+  `core` owns the Monad Runtime (chain 143 check, `DEFAULT_RPC_URL`,
+  `MOSS_RPC_URL` override); `system` owns verified official constants;
   `protocols/*` own protocol ABIs, Capabilities, Queries, dependencies, and
   Receipts; `mcp-server` owns transport and application composition only;
   `abi-tools` is a private build-time package owning explorer ABI fetching

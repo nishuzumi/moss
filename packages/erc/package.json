@@ -24,12 +24,11 @@
     "viem": "^2.54.3"
   },
   "devDependencies": {
-    "@themoss/simulator": "workspace:*",
-    "@themoss/test-support": "workspace:*",
     "@wagmi/cli": "^2.10.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "~5.9.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "@themoss/simulator": "workspace:*"
   }
 }

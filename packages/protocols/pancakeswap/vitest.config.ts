@@ -5,9 +5,6 @@ export default defineConfig({
   esbuild: { target: "es2022" },
   resolve: {
     alias: {
-      "@themoss/test-support": fileURLToPath(
-        new URL("../../test-support/src/index.ts", import.meta.url),
-      ),
       "@themoss/core": fileURLToPath(new URL("../../core/src/index.ts", import.meta.url)),
       "@themoss/erc": fileURLToPath(new URL("../../erc/src/index.ts", import.meta.url)),
       "@themoss/simulator": fileURLToPath(new URL("../../simulator/src/index.ts", import.meta.url)),
