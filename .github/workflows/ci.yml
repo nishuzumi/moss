@@ -86,10 +86,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # The live suites read MOSS_RPC_URL (packages/test-support). The secret is
-      # named MOSS_RPC_ENDPOINT; the variable keeps the name the MCP CLI and the
-      # examples already use. Empty on fork pull requests, which then fall back
-      # to the public endpoint.
+      # The live suites reach the chain through core's DEFAULT_RPC_URL, which reads
+      # MOSS_RPC_URL. The secret is named MOSS_RPC_ENDPOINT; the variable keeps the
+      # name the MCP CLI and the examples already use. Fork pull requests receive no
+      # secrets, so this arrives blank there and core falls back to the public
+      # endpoint — use the `Live verification` workflow to re-run one of those
+      # against the private endpoint.
       - name: Test
         run: pnpm test
         env:

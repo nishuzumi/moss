@@ -1,0 +1,96 @@
+name: Live verification
+
+# Runs one pull request's suites against the unthrottled private RPC, so a live
+# failure can be attributed: `ci` gives every pull request the public endpoint,
+# which answers `429 request limit reached` after roughly thirty sequential
+# `debug_traceCall`s and therefore fails a full run for reasons that have nothing
+# to do with the change under review. Re-running it here separates the two.
+#
+# Manual by design. This checks out contributor code and hands it the private
+# endpoint, so the gate is that dispatching requires write access — read the diff
+# before running it, and treat the endpoint as rotatable rather than as a secret
+# this workflow can keep from code it executes.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to run against the unthrottled RPC
+        required: true
+
+# Nothing here writes to the repository, and the checked-out code is untrusted.
+permissions: {}
+
+# One run at a time: concurrent runs would share the endpoint's request budget
+# and reintroduce the throttling this workflow exists to rule out. Queued rather
+# than cancelled, because a cancelled run answers nothing.
+concurrency:
+  group: live-verify
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    # Records each run as a deployment, and carries whatever reviewer or branch
+    # rules the environment has. The secrets themselves stay repository-level.
+    environment: live-rpc
+    steps:
+      # Same policy as `ci`, for the same reason: audit mode cannot disable
+      # telemetry, and reporting this endpoint to a third party would defeat
+      # keeping it private. MOSS_RPC_URL holds its `host:443` spelling.
+      - name: Restrict runner egress
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            api.kuru.io:443
+            rpc.monad.xyz:443
+            ${{ secrets.MOSS_RPC_URL }}
+
+      # The merge ref, matching what `ci` tests, so a difference between the two
+      # runs is the endpoint and not the tree.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr }}/merge
+
+      - name: Record what is being verified
+        run: |
+          {
+            echo "Verifying PR #${{ inputs.pr }} against the private RPC."
+            echo
+            echo "Merge ref commit: \`$(git rev-parse HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build precedes the suites: workspace packages resolve each other's types
+      # and entry points through their built dist output.
+      - name: Build
+        run: pnpm build
+
+      # Lint and typecheck are `ci`'s job. This workflow exists only to answer
+      # whether the live suites pass when the endpoint is not throttling.
+      - name: Test
+        run: pnpm test
+        env:
+          MOSS_RPC_URL: ${{ secrets.MOSS_RPC_ENDPOINT }}
