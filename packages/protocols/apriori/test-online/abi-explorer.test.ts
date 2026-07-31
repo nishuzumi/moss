@@ -21,9 +21,10 @@
  * If aPriori verifies the implementation, replace this with the keyed
  * fetchAbi + compareDeployedAbi cross-check used by protocol-kuru.
  */
+
 import { readFileSync } from "node:fs";
 import { ERC1967_IMPLEMENTATION_SLOT, erc1967ImplementationAddress } from "@themoss/abi-tools";
-import { monadRuntime } from "@themoss/system";
+import { createRuntime } from "@themoss/core";
 import { type Address, getAddress, toEventSelector, toFunctionSelector } from "viem";
 import { describe, expect, it } from "vitest";
 import { AprMonAbi } from "../src/abis/apriori.js";
@@ -43,14 +44,14 @@ describe("aPriori ABI on-chain derivation", () => {
   });
 
   it("has deployed bytecode at the aprMON proxy address", { timeout: 60_000 }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     expect(
       (await runtime.client.getCode({ address: manifest.aprMon.proxy }))?.length,
     ).toBeGreaterThan(2);
   });
 
   it("aprMON proxy still points at the recorded implementation", { timeout: 60_000 }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const slot = await runtime.client.getStorageAt({
       address: manifest.aprMon.proxy,
       slot: ERC1967_IMPLEMENTATION_SLOT,
@@ -63,7 +64,7 @@ describe("aPriori ABI on-chain derivation", () => {
   it("every vendored selector and topic hash appears in the implementation bytecode", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const code = await runtime.client.getCode({ address: manifest.aprMon.implementation });
     expect(code?.length ?? 0).toBeGreaterThan(2);
     const haystack = (code ?? "0x").toLowerCase();
@@ -81,7 +82,7 @@ describe("aPriori ABI on-chain derivation", () => {
   it("matches on-chain token metadata against the exported constants", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const [name, symbol, decimals] = await Promise.all([
       runtime.client.readContract({
         address: manifest.aprMon.proxy,
@@ -107,7 +108,7 @@ describe("aPriori ABI on-chain derivation", () => {
   it("convertToShares/convertToAssets round-trip at a sane exchange rate", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const one = 10n ** 18n;
     const shares = (await runtime.client.readContract({
       address: manifest.aprMon.proxy,

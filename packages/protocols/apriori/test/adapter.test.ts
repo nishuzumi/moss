@@ -1,6 +1,7 @@
 import {
   type CapabilityNode,
   type Change,
+  createRuntime,
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
@@ -9,7 +10,6 @@ import {
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime } from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import {
@@ -403,14 +403,14 @@ describe("claimReceipt", () => {
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("aPriori mainnet", () => {
   it("has deployed bytecode at the aprMON proxy address", { timeout: 60_000 }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     expect((await runtime.client.getCode({ address: APRMON_ADDRESS }))?.length).toBeGreaterThan(2);
   });
 
   it("matches on-chain name/symbol/decimals against the exported APRMON_* constants", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const [name, symbol, decimals] = await Promise.all([
       runtime.client.readContract({
         address: APRMON_ADDRESS,
@@ -436,7 +436,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("aPriori mainnet", () => {
   it("simulates a stake with zero Warnings and full evidence correlation", {
     timeout: 180_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(AprioriProtocol);
     const capability = await registry.action("apriori", "stake", ACCOUNT, {
       amount: "0.01",
@@ -462,7 +462,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("aPriori mainnet", () => {
   it("simulates unstake (requestRedeem) after stake via state chaining", {
     timeout: 240_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(AprioriProtocol);
 
     const stakeCap = await registry.action("apriori", "stake", ACCOUNT, {

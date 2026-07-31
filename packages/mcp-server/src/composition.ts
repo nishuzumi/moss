@@ -6,4 +6,11 @@ import * as pancakeswap from "@themoss/protocol-pancakeswap";
 import * as system from "@themoss/system";
 
 /** Protocol modules selected by the default MCP CLI application. */
-export const defaultProtocolModules = [system, erc, apriori, kuru, monadCards, pancakeswap] as const;
+export const defaultProtocolModules = [
+  system,
+  erc,
+  apriori,
+  kuru,
+  monadCards,
+  pancakeswap,
+] as const;
