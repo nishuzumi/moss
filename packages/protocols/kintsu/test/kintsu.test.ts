@@ -1,6 +1,7 @@
 import {
   type AddressValue,
   type Change,
+  createRuntime,
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
@@ -9,7 +10,6 @@ import {
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime } from "@themoss/system";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import { StakedMonadAbi } from "../src/abis/staked-monad.js";
@@ -320,7 +320,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kintsu Monad mainnet", () => {
   it("has deployed StakedMonad proxy bytecode and returns a protected quote", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     expect(
       (await runtime.client.getCode({ address: KINTSU_STAKED_MONAD_ADDRESS }))?.length,
     ).toBeGreaterThan(2);
@@ -345,7 +345,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kintsu Monad mainnet", () => {
   it("simulates a native deposit into an exhaustive typed Receipt", {
     timeout: 180_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Kintsu);
     const capability = await registry.action("kintsu", "deposit", ACCOUNT, {
       amount: "1",
