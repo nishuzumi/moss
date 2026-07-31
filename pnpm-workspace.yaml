@@ -9,3 +9,5 @@ allowBuilds:
 # Blocks the hottest window for compromised releases without the default
 # 7-day window's constant friction on a fast-moving dependency set.
 minimumReleaseAge: 1440
+overrides:
+  postcss: 8.5.18
