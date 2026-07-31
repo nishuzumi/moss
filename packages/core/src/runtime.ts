@@ -4,10 +4,12 @@ import { createPublicClient, http, type PublicClient } from "viem";
 export const MONAD_CHAIN_ID = 143;
 
 /**
- * Monad's public mainnet endpoint. It answers `429` with JSON-RPC `-32011
- * request limit reached` after roughly thirty sequential `debug_traceCall`s,
- * which a full live test run exceeds, so CI points `MOSS_RPC_URL` at a private
- * endpoint instead.
+ * Monad's public mainnet endpoint. It answers `429` with JSON-RPC `-32011 request
+ * limit reached` after roughly thirty sequential `debug_traceCall`s, which a full
+ * live test run exceeds, so CI points `MOSS_RPC_URL` at a private endpoint.
+ *
+ * Not re-exported from the package: `DEFAULT_RPC_URL` is the value callers want,
+ * and a runtime already reports the endpoint it settled on.
  */
 export const PUBLIC_RPC_URL = "https://rpc.monad.xyz";
 
@@ -28,14 +30,7 @@ export interface MossRuntime {
   client: PublicClient;
 }
 
-/**
- * Creates a Monad mainnet runtime and rejects an RPC reporting any other chain.
- *
- * An earlier revision kept chain identity out of core entirely and let
- * `@themoss/system` supply the Monad defaults, but that separation is gone: core
- * has verified chain 143 itself since the `chainId` parameter was removed, so
- * the matching endpoint default belongs beside it rather than one package away.
- */
+/** Creates a Monad mainnet runtime and rejects an RPC reporting any other chain. */
 export async function createRuntime(opts: { rpcUrl?: string } = {}): Promise<MossRuntime> {
   const rpcUrl = opts.rpcUrl ?? DEFAULT_RPC_URL;
   const client = createPublicClient({ transport: http(rpcUrl) });

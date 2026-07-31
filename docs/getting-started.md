@@ -50,17 +50,15 @@ It requests a MON/USDC quote, builds one swap Capability, and simulates it again
 Create `examples/simple-flow/src/play.ts`:
 
 ```ts
-import { NATIVE, Registry } from "@themoss/core";
+import { createRuntime, NATIVE, Registry } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
 import * as system from "@themoss/system";
-import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS } from "@themoss/system";
 
 const ACCOUNT = "0xcccccccccccccccccccccccccccccccccccccccc";
-const runtime = await monadRuntime({
-  ...(process.env.MOSS_RPC_URL ? { rpcUrl: process.env.MOSS_RPC_URL } : {}),
-});
+const runtime = await createRuntime();
 
 const registry = new Registry(runtime).use(system, erc, kuru);
 const simulator = createTraceSimulator(runtime, {
