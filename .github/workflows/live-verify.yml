@@ -6,10 +6,8 @@ name: Live verification
 # `debug_traceCall`s and therefore fails a full run for reasons that have nothing
 # to do with the change under review. Re-running it here separates the two.
 #
-# Manual by design. This checks out contributor code and hands it the private
-# endpoint, so the gate is that dispatching requires write access — read the diff
-# before running it, and treat the endpoint as rotatable rather than as a secret
-# this workflow can keep from code it executes.
+# Manual by design: dispatching requires write access, and it runs the pull
+# request's own test code, so review the diff before starting a run.
 on:
   workflow_dispatch:
     inputs:
@@ -17,7 +15,7 @@ on:
         description: Pull request number to run against the unthrottled RPC
         required: true
 
-# Nothing here writes to the repository, and the checked-out code is untrusted.
+# Nothing here writes to the repository.
 permissions: {}
 
 # One run at a time: concurrent runs would share the endpoint's request budget
@@ -30,13 +28,14 @@ concurrency:
 jobs:
   live:
     runs-on: ubuntu-latest
-    # Records each run as a deployment, and carries whatever reviewer or branch
-    # rules the environment has. The secrets themselves stay repository-level.
+    # Required reviewers on this environment hold the job before it can mint, and
+    # each run is recorded as a deployment. The secret itself stays
+    # repository-level, since `ci` needs it too.
     environment: live-rpc
     steps:
-      # Same policy as `ci`, for the same reason: audit mode cannot disable
-      # telemetry, and reporting this endpoint to a third party would defeat
-      # keeping it private. MOSS_RPC_URL holds its `host:443` spelling.
+      # Same policy and list as `ci`. It cannot be shared through a local composite
+      # action, because that would require checking out this repository first and
+      # hardening has to precede any checkout.
       - name: Restrict runner egress
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
@@ -57,10 +56,28 @@ jobs:
             registry.npmjs.org:443
             api.kuru.io:443
             rpc.monad.xyz:443
-            ${{ secrets.MOSS_RPC_URL }}
+            moss-rpc.0xmon.dev:443
 
       # The merge ref, matching what `ci` tests, so a difference between the two
       # runs is the endpoint and not the tree.
+      # Exchanges the mint token for a short-lived, read-only RPC URL. Runs before
+      # any checkout so the token stays out of later steps.
+      #
+      # Fork pull requests receive no secrets, so this is empty there and the suites
+      # fall back to the public endpoint in the allowlist above.
+      - name: Mint a short-lived RPC URL
+        env:
+          MOSS_RPC_MINT_TOKEN: ${{ secrets.MOSS_RPC_MINT_TOKEN }}
+        run: |
+          if [ -z "$MOSS_RPC_MINT_TOKEN" ]; then
+            echo "No mint token available; the live suites will use the public endpoint."
+            exit 0
+          fi
+          url=$(curl -sSf -m 30 -X POST https://moss-rpc.0xmon.dev/mint \
+                  -H "authorization: Bearer $MOSS_RPC_MINT_TOKEN")
+          echo "::add-mask::$url"
+          echo "MOSS_RPC_URL=$url" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr }}/merge
@@ -93,4 +110,3 @@ jobs:
       - name: Test
         run: pnpm test
         env:
-          MOSS_RPC_URL: ${{ secrets.MOSS_RPC_ENDPOINT }}

@@ -50,7 +50,25 @@ jobs:
             registry.npmjs.org:443
             api.etherscan.io:443
             rpc.monad.xyz:443
-            ${{ secrets.MOSS_RPC_URL }}
+            moss-rpc.0xmon.dev:443
+
+      # Exchanges the mint token for a short-lived, read-only RPC URL. Runs before
+      # any checkout so the token stays out of later steps.
+      #
+      # Fork pull requests receive no secrets, so this is empty there and the suites
+      # fall back to the public endpoint in the allowlist above.
+      - name: Mint a short-lived RPC URL
+        env:
+          MOSS_RPC_MINT_TOKEN: ${{ secrets.MOSS_RPC_MINT_TOKEN }}
+        run: |
+          if [ -z "$MOSS_RPC_MINT_TOKEN" ]; then
+            echo "No mint token available; the live suites will use the public endpoint."
+            exit 0
+          fi
+          url=$(curl -sSf -m 30 -X POST https://moss-rpc.0xmon.dev/mint \
+                  -H "authorization: Bearer $MOSS_RPC_MINT_TOKEN")
+          echo "::add-mask::$url"
+          echo "MOSS_RPC_URL=$url" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
 
@@ -69,5 +87,4 @@ jobs:
       - name: Explorer cross-check
         env:
           MONADSCAN_API_KEY: ${{ secrets.MONADSCAN_API_KEY }}
-          MOSS_RPC_URL: ${{ secrets.MOSS_RPC_ENDPOINT }}
         run: pnpm test:abi:online

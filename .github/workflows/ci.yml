@@ -18,18 +18,9 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      # Egress is restricted rather than audited, because this job receives a
-      # private RPC endpoint and audit mode cannot disable telemetry — only
-      # block mode can, and reporting that endpoint to a third party would
-      # defeat keeping it secret.
-      #
-      # Two secrets hold the same endpoint in two spellings, because log masking
-      # is exact-string: MOSS_RPC_ENDPOINT is the full URL the tests connect to,
-      # MOSS_RPC_URL is the `host:443` form this allowlist needs. Deriving one
-      # from the other in a run step would produce an unmasked copy.
-      #
-      # Fork pull requests receive no secrets, so both lines are empty there and
-      # the tests fall back to the public endpoint in the list below.
+      # Blocked rather than audited, because audit mode cannot disable telemetry.
+      # The list is derived from real runs — `api.kuru.io` was found by a failure,
+      # not by guessing — and stays as short as the jobs allow.
       #
       # Linux-only (eBPF), so the windows-offline job below cannot use it.
       - name: Restrict runner egress
@@ -52,7 +43,25 @@ jobs:
             registry.npmjs.org:443
             api.kuru.io:443
             rpc.monad.xyz:443
-            ${{ secrets.MOSS_RPC_URL }}
+            moss-rpc.0xmon.dev:443
+
+      # Exchanges the mint token for a short-lived, read-only RPC URL. Runs before
+      # any checkout so the token stays out of later steps.
+      #
+      # Fork pull requests receive no secrets, so this is empty there and the suites
+      # fall back to the public endpoint in the allowlist above.
+      - name: Mint a short-lived RPC URL
+        env:
+          MOSS_RPC_MINT_TOKEN: ${{ secrets.MOSS_RPC_MINT_TOKEN }}
+        run: |
+          if [ -z "$MOSS_RPC_MINT_TOKEN" ]; then
+            echo "No mint token available; the live suites will use the public endpoint."
+            exit 0
+          fi
+          url=$(curl -sSf -m 30 -X POST https://moss-rpc.0xmon.dev/mint \
+                  -H "authorization: Bearer $MOSS_RPC_MINT_TOKEN")
+          echo "::add-mask::$url"
+          echo "MOSS_RPC_URL=$url" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
 
@@ -87,15 +96,10 @@ jobs:
         run: pnpm typecheck
 
       # The live suites reach the chain through core's DEFAULT_RPC_URL, which reads
-      # MOSS_RPC_URL. The secret is named MOSS_RPC_ENDPOINT; the variable keeps the
-      # name the MCP CLI and the examples already use. Fork pull requests receive no
-      # secrets, so this arrives blank there and core falls back to the public
-      # endpoint — use the `Live verification` workflow to re-run one of those
-      # against the private endpoint.
+      # the MOSS_RPC_URL set by the mint step above, or falls back to the public
+      # endpoint when that step had no token.
       - name: Test
         run: pnpm test
-        env:
-          MOSS_RPC_URL: ${{ secrets.MOSS_RPC_ENDPOINT }}
 
   windows-offline:
     runs-on: windows-latest
