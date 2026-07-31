@@ -58,8 +58,6 @@ jobs:
             rpc.monad.xyz:443
             moss-rpc.0xmon.dev:443
 
-      # The merge ref, matching what `ci` tests, so a difference between the two
-      # runs is the endpoint and not the tree.
       # Exchanges the mint token for a short-lived, read-only RPC URL. Runs before
       # any checkout so the token stays out of later steps.
       #
@@ -78,6 +76,8 @@ jobs:
           echo "::add-mask::$url"
           echo "MOSS_RPC_URL=$url" >> "$GITHUB_ENV"
 
+      # The merge ref, matching what `ci` tests, so a difference between the two
+      # runs is the endpoint and not the tree.
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr }}/merge
@@ -107,6 +107,6 @@ jobs:
 
       # Lint and typecheck are `ci`'s job. This workflow exists only to answer
       # whether the live suites pass when the endpoint is not throttling.
+      # MOSS_RPC_URL arrives from the mint step through $GITHUB_ENV.
       - name: Test
         run: pnpm test
-        env:
