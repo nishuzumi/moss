@@ -10,6 +10,7 @@ import {
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
 import { AUSD_ADDRESS, monadRuntime, USDC_ADDRESS } from "@themoss/system";
+import { TEST_RPC_URL } from "@themoss/test-support";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -410,7 +411,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
   it("has deployed Router bytecode and dynamically quotes a market", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await monadRuntime({ rpcUrl: TEST_RPC_URL });
     expect(
       (await runtime.client.getCode({ address: KURU_ROUTER_ADDRESS }))?.length,
     ).toBeGreaterThan(2);
@@ -424,7 +425,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
   });
 
   it("simulates a native swap into an exhaustive typed Receipt", { timeout: 180_000 }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await monadRuntime({ rpcUrl: TEST_RPC_URL });
     const registry = new Registry(runtime).use(Kuru);
     const capability = await registry.action("kuru", "swap", ACCOUNT, {
       tokenIn: NATIVE,

@@ -56,6 +56,7 @@ import {
   fetchAbi,
 } from "@themoss/abi-tools";
 import { monadRuntime } from "@themoss/system";
+import { TEST_RPC_URL } from "@themoss/test-support";
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { KuruRouterAbi } from "../src/abis/kuru.js";
@@ -82,7 +83,7 @@ describe("Kuru ABI explorer cross-check", () => {
   });
 
   it("Router proxy still points at the recorded implementation", { timeout: 60_000 }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await monadRuntime({ rpcUrl: TEST_RPC_URL });
     const slot = await runtime.client.getStorageAt({
       address: manifest.router.proxy,
       slot: ERC1967_IMPLEMENTATION_SLOT,
@@ -95,7 +96,7 @@ describe("Kuru ABI explorer cross-check", () => {
   it("orderBookImplementation() still equals the recorded market template", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await monadRuntime({ rpcUrl: TEST_RPC_URL });
     const template = await runtime.client.readContract({
       address: manifest.router.proxy,
       abi: KuruRouterAbi,

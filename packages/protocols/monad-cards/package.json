@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@themoss/abi-tools": "workspace:*",
+    "@themoss/test-support": "workspace:*",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "~5.9.0",

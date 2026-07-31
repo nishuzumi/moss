@@ -24,9 +24,10 @@
     "viem": "^2.54.3"
   },
   "devDependencies": {
+    "@themoss/simulator": "workspace:*",
+    "@themoss/test-support": "workspace:*",
     "tsup": "^8.5.1",
     "typescript": "~5.9.0",
-    "vitest": "^3.2.6",
-    "@themoss/simulator": "workspace:*"
+    "vitest": "^3.2.6"
   }
 }
