@@ -10,11 +10,12 @@ import {
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
+import * as pendle from "@themoss/protocol-pendle";
 import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { defaultProtocolModules, defaultRevertSelectors } from "../src/composition.js";
+import { defaultProtocolModules } from "../src/composition.js";
 import { createMossServer, toAgentSimulation } from "../src/server.js";
 
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
@@ -27,7 +28,6 @@ async function connectedHarness(simulateOutcome?: SimulateOutcome) {
   const { server, simulator } = createMossServer({
     runtime,
     protocols: defaultProtocolModules,
-    revertSelectors: defaultRevertSelectors,
   });
   if (simulateOutcome) {
     simulator.simulate = async () => simulateOutcome;
@@ -68,6 +68,16 @@ describe("moss MCP server", () => {
     ]);
 
     expect(receipt.text).toContain("Trusted(USDC)");
+  });
+
+  it("resolves Pendle Router errors from Protocol metadata without an MCP selector table", () => {
+    const { registry } = createMossServer({ runtime, protocols: defaultProtocolModules });
+    const contract = registry.resolveContract("pendle", pendle.PENDLE_ROUTER_ADDRESS);
+
+    expect(contract?.abi).toContainEqual(
+      expect.objectContaining({ type: "error", name: "MarketZeroNetLPFee" }),
+    );
+    expect(contract?.errorMessages.MarketZeroNetLPFee).toContain("LP fee rounds to zero");
   });
 
   it("discovers and loads the Protocols selected by the default CLI composition", async () => {

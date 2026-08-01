@@ -7,9 +7,11 @@ import {
   type MossRuntime,
   type Receipt,
   ReceiptCoverageError,
+  type ResolvedProtocolContract,
   type UnsignedTx,
   verifyReceiptCoverage,
 } from "@themoss/core";
+import { decodeErrorResult } from "viem";
 import { ChangeOrderError, extractChanges } from "./changes.js";
 import { mergeDiff } from "./overrides.js";
 import {
@@ -69,10 +71,6 @@ export interface Simulator {
   simulate(root: CapabilityNode): Promise<SimulateOutcome>;
 }
 
-export type RevertSelectors = Readonly<
-  Partial<Record<Address, Readonly<Partial<Record<Hex, string>>>>>
->;
-
 export interface SimulatorOptions {
   gasPerTx?: bigint;
   prefundWei?: bigint;
@@ -82,22 +80,41 @@ export interface SimulatorOptions {
    * balance, allowance, or affordability.
    */
   stateOverrides?: StateOverrides;
-  /** Custom revert descriptions scoped by transaction target address, then four-byte selector. */
-  revertSelectors?: RevertSelectors;
+  /** Resolves the ABI and optional error explanations declared by this Capability's Protocol. */
+  resolveContract?: (protocol: string, target: Address) => ResolvedProtocolContract | undefined;
   receipt: (capability: CapabilityNode, changes: readonly Change[]) => Receipt;
 }
 
 const DEFAULT_PREFUND_WEI = 10n ** 24n;
 
+function printableRevertValue(value: unknown): string {
+  if (typeof value === "bigint") return value.toString();
+  const encoded = JSON.stringify(value, (_, nested) =>
+    typeof nested === "bigint" ? nested.toString() : nested,
+  );
+  return encoded ?? String(value);
+}
+
+function decodeRevertReason(contract: ResolvedProtocolContract, data: Hex): string | undefined {
+  try {
+    const decoded = decodeErrorResult({ abi: contract.abi, data });
+    const args = (decoded.args ?? []) as readonly unknown[];
+    const renderedArgs = args.map((value, index) => {
+      const name = "inputs" in decoded.abiItem ? decoded.abiItem.inputs[index]?.name : undefined;
+      const rendered = printableRevertValue(value);
+      return name ? `${name}=${rendered}` : rendered;
+    });
+    const identity = `${decoded.errorName}(${renderedArgs.join(", ")})`;
+    const explanation = contract.errorMessages[decoded.errorName];
+    return explanation ? `${identity}: ${explanation}` : identity;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOptions): Simulator {
   const gasBudget = options.gasPerTx ?? DEFAULT_SIMULATION_GAS;
   const prefund: `0x${string}` = `0x${(options.prefundWei ?? DEFAULT_PREFUND_WEI).toString(16)}`;
-  const revertSelectors = new Map(
-    Object.entries(options.revertSelectors ?? {}).map(([target, selectors]) => [
-      target.toLowerCase(),
-      selectors,
-    ]),
-  );
 
   // Only what the caller supplied counts as synthetic. The sender prefund below is applied to
   // every run and predates this option, so reporting it would make the field meaningless.
@@ -168,16 +185,16 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
         }
 
         if (frame.error) {
-          const selector =
-            frame.output && frame.output.length >= 10
-              ? (frame.output.slice(0, 10) as Hex)
-              : undefined;
-          const reason =
-            frame.revertReason ??
-            (selector
-              ? revertSelectors.get(transaction.to.toLowerCase())?.[selector]
-              : undefined) ??
-            frame.error;
+          let decodedReason: string | undefined;
+          if (frame.output && options.resolveContract) {
+            try {
+              const contract = options.resolveContract(capability.protocol, transaction.to);
+              if (contract) decodedReason = decodeRevertReason(contract, frame.output);
+            } catch {
+              // Registry metadata must not hide the original trace failure.
+            }
+          }
+          const reason = decodedReason ?? frame.revertReason ?? frame.error;
           results.push({
             protocol: capability.protocol,
             method: capability.method,

@@ -31,6 +31,8 @@ export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Reco
   category: Category;
   description: string;
   contracts: Record<string, ContractConfig>;
+  /** Human explanations for selected ABI-declared custom errors, keyed by error name. */
+  errorMessages?: Readonly<Record<string, string>>;
   labels?: Record<string, Address>;
   protocols?: Dependencies;
 }

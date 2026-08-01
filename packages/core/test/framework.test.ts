@@ -24,7 +24,10 @@ import {
   verifyReceiptCoverage,
 } from "../src/index.js";
 
-const VaultAbi = parseAbi(["function deposit() payable"]);
+const VaultAbi = parseAbi([
+  "function deposit() payable",
+  "error VaultLimit(address account, uint256 amount)",
+]);
 const VAULT = "0x1111111111111111111111111111111111111111" as const;
 const ACCOUNT = "0x2222222222222222222222222222222222222222" as const;
 
@@ -40,6 +43,7 @@ const wrapParams = {
   category: "token",
   description: "Test-only vault.",
   contracts: { vault: { abi: VaultAbi, addr: VAULT } },
+  errorMessages: { VaultLimit: "vault limit exceeded" },
 })
 class TestVault {
   declare vault: Handle<typeof VaultAbi>;
@@ -131,6 +135,20 @@ class DebtProtocol {
   @Receipt()
   borrowReceipt(changes: readonly Change[]): MossReceipt<{ operation: "borrow" }> {
     return receiptFor("borrow", changes);
+  }
+}
+
+@Protocol({
+  name: "bad-error-message",
+  category: "token",
+  description: "Fixture with an error explanation absent from its ABI.",
+  contracts: { vault: { abi: VaultAbi, addr: VAULT } },
+  errorMessages: { MissingError: "this name is not ABI-derived" },
+})
+class BadErrorMessageProtocol {
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
   }
 }
 
@@ -383,6 +401,14 @@ describe("framework core seam", () => {
       ],
     });
     expect(registry.parseReceipt(capability, []).outcome).toEqual({ operation: "wrap" });
+    expect(registry.resolveContract("testvault", VAULT)).toEqual({
+      abi: VaultAbi,
+      errorMessages: { VaultLimit: "vault limit exceeded" },
+    });
+    expect(
+      registry.resolveContract("testvault", "0x3333333333333333333333333333333333333333"),
+    ).toBeUndefined();
+    expect(registry.resolveContract("unregistered", VAULT)).toBeUndefined();
   });
 
   it("auto-registers injected dependencies and preserves nested execution order", async () => {
@@ -418,6 +444,9 @@ describe("framework core seam", () => {
     );
     expect(() => new Registry(runtime).use(BadReceiptProtocol)).toThrow("not an @Receipt method");
     expect(() => new Registry(runtime).use(MissingRiskProtocol)).toThrow("risk label");
+    expect(() => new Registry(runtime).use(BadErrorMessageProtocol)).toThrow(
+      'error "MissingError" is not declared by a contract ABI',
+    );
     expect(() => new Registry(runtime).use(OverriddenProtocol)).toThrow("declares no");
     expect(() => new Registry(runtime).use(DecoratedProtocolChild)).toThrow(
       "cannot extend another decorated Protocol",

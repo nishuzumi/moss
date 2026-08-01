@@ -2,6 +2,7 @@ import { createHandle } from "@themoss/core";
 import { decodeFunctionData, getAddress, hexToBigInt, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { PendleRouterAbi } from "../src/abis/pendle.js";
+import { PendleRouterContractAbi } from "../src/abis/router.js";
 import { PENDLE_ROUTER_ADDRESS } from "../src/addresses.js";
 import { buildPendleSwapPlan } from "../src/swap-builder.js";
 import type { PendleBuyPtQuote, PendleSellPtQuote } from "../src/types.js";
@@ -11,7 +12,7 @@ const PT = getAddress("0x3333333333333333333333333333333333333333");
 const UNDERLYING = getAddress("0x5555555555555555555555555555555555555555");
 const RECEIVER = getAddress("0x7777777777777777777777777777777777777777");
 const ROUTER = getAddress(PENDLE_ROUTER_ADDRESS);
-const router = createHandle(PendleRouterAbi, ROUTER, {} as never, RECEIVER);
+const router = createHandle(PendleRouterContractAbi, ROUTER, {} as never, RECEIVER);
 
 const APPROX = Object.freeze({
   guessMin: 1_004_036n,

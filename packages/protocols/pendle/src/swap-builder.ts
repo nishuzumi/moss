@@ -1,6 +1,6 @@
 import type { AddressValue, Handle, Hex } from "@themoss/core";
 import { zeroAddress } from "viem";
-import type { PendleRouterAbi } from "./abis/pendle.js";
+import type { PendleRouterContractAbi } from "./abis/router.js";
 import type { PendleApprovalRequirement, PendleQuote, PendleSwapPlan } from "./types.js";
 
 // Pendle SwapType.NONE: no external aggregator swap, so SY is minted/redeemed directly from the token.
@@ -30,7 +30,7 @@ const EMPTY_LIMIT = {
 export function buildPendleSwapPlan(
   quote: PendleQuote,
   receiver: AddressValue,
-  router: Handle<typeof PendleRouterAbi>,
+  router: Handle<typeof PendleRouterContractAbi>,
 ): PendleSwapPlan {
   const approval: PendleApprovalRequirement = Object.freeze({
     token: quote.tokenIn,

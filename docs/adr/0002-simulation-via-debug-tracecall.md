@@ -38,10 +38,16 @@ Monad retains logs inside a failed child frame even though the frame reports `er
   successful result proves execution and Receipt behavior under that supplied state, not the live
   account's current token balance, allowance, or affordability. The simulator clones the supplied
   overrides before state chaining and never mutates the caller's object.
-- Protocol-specific custom-error descriptions are keyed by transaction target and four-byte
-  selector. A selector match from another deployment remains a generic revert rather than being
-  attributed to the wrong Protocol.
+- Custom reverts are decoded from the transaction target's ABI as declared by the Capability's
+  registered Protocol. Protocol metadata may attach a human explanation to an ABI-declared error
+  name; Registry rejects explanations with no corresponding declared error. Scoping lookup by both
+  Capability Protocol and target deployment prevents the same four-byte selector from another
+  contract or Protocol being misattributed. Unknown targets, selectors, and malformed data retain
+  the raw trace reason.
 - When `debug_traceCall` is unavailable or cannot supply provably ordered Change evidence, simulate fails loudly — it never silently skips evidence or falls back to an approximate ordering.
-- Exact ordering is reconstructed in one recursive pass over call-frame `position` data; protocol ABI semantics enter only in the Receipt parser.
+- Exact ordering is reconstructed in one recursive pass over call-frame `position` data. Protocol
+  ABI semantics affect diagnostic custom-error decoding as described above, but ordered `Change`
+  extraction remains protocol-agnostic; Protocol-specific Receipt semantics enter only in the
+  Receipt parser.
 - All simulation requests set an explicit, modest `gas` value; provider free tiers reject calls that fall back to the node's block-gas-limit default.
 - Trace `gasUsed` appears to report the gas limit rather than actual consumption; gas estimates go through `eth_estimateGas` separately.

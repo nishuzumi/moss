@@ -1,4 +1,4 @@
-import { isAddress } from "viem";
+import { type Abi, isAddress } from "viem";
 import {
   METHOD_META,
   type MethodMeta,
@@ -66,6 +66,11 @@ export interface QueryResult {
   protocol: string;
   method: string;
   data: JsonSafeValue;
+}
+
+export interface ResolvedProtocolContract {
+  abi: Abi;
+  errorMessages: Readonly<Record<string, string>>;
 }
 
 interface Registered {
@@ -229,6 +234,19 @@ export class Registry {
     if (!CATEGORIES.includes(config.category)) {
       throw new Error(`protocol "${config.name}" has an invalid category`);
     }
+    for (const [errorName, message] of Object.entries(config.errorMessages ?? {})) {
+      requireMetadataText(errorName, `protocol "${config.name}" error name`);
+      requireMetadataText(message, `protocol "${config.name}" error "${errorName}" message`);
+      if (
+        !Object.values(config.contracts).some(({ abi }) =>
+          abi.some((item) => item.type === "error" && item.name === errorName),
+        )
+      ) {
+        throw new Error(
+          `protocol "${config.name}" error "${errorName}" is not declared by a contract ABI`,
+        );
+      }
+    }
     const existing = this.#protocols.get(config.name);
     if (existing?.ctor === ctor) return;
     if (existing) throw new Error(`protocol "${config.name}" is already registered`);
@@ -336,6 +354,23 @@ export class Registry {
       }
     }
     return found;
+  }
+
+  /**
+   * Resolves only contracts declared by the Capability's own Protocol. Target scoping prevents an
+   * ABI or explanation from being attributed to the same selector emitted by another deployment.
+   */
+  resolveContract(protocol: string, target: Address): ResolvedProtocolContract | undefined {
+    const registered = this.#protocols.get(protocol);
+    if (!registered) return undefined;
+    const matches = Object.values(registered.config.contracts).filter(
+      ({ addr }) => addr.toLowerCase() === target.toLowerCase(),
+    );
+    if (matches.length === 0) return undefined;
+    return {
+      abi: matches.flatMap(({ abi }) => abi) as Abi,
+      errorMessages: registered.config.errorMessages ?? {},
+    };
   }
 
   load(coords: readonly { protocol: string; method: string }[]): Stub[] {

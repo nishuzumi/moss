@@ -1,4 +1,5 @@
 import type { Address, CapabilityNode, Change, MossRuntime, Receipt } from "@themoss/core";
+import { encodeErrorResult, parseAbi } from "viem";
 import { describe, expect, it } from "vitest";
 import { createTraceSimulator } from "../src/index.js";
 import type { CallFrame, PrestateDiff, StateOverrides } from "../src/trace.js";
@@ -7,6 +8,10 @@ const A = "0x1111111111111111111111111111111111111111" as Address;
 const B = "0x2222222222222222222222222222222222222222" as Address;
 const C = "0x3333333333333333333333333333333333333333" as Address;
 const PINNED_BLOCK = "0x100";
+const RevertAbi = parseAbi([
+  "error MarketZeroNetLPFee()",
+  "error AmountTooLarge(address account, uint256 amount)",
+]);
 
 function capability(
   protocol: string,
@@ -248,8 +253,8 @@ describe("Capability simulation", () => {
     expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "execution reverted" });
   });
 
-  it("maps an injected revert selector to an explicit reason", async () => {
-    const selector = "0x880ccd2c" as const;
+  it("decodes a declared target ABI and applies its Protocol explanation", async () => {
+    const output = encodeErrorResult({ abi: RevertAbi, errorName: "MarketZeroNetLPFee" });
     const outcome = await createTraceSimulator(
       runtimeWithFrames([
         {
@@ -257,32 +262,54 @@ describe("Capability simulation", () => {
           from: A,
           to: B,
           error: "execution reverted",
-          output: selector,
+          output,
         },
       ]),
       {
-        revertSelectors: {
-          [B]: {
-            [selector]: "swap amount too small: this market's LP fee rounds to zero",
-          },
-        },
+        resolveContract: (protocol, target) =>
+          protocol === "fixture" && target === B
+            ? {
+                abi: RevertAbi,
+                errorMessages: {
+                  MarketZeroNetLPFee: "swap amount too small: this market's LP fee rounds to zero",
+                },
+              }
+            : undefined,
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
       },
     ).simulate(capability("fixture", B));
 
     expect(outcome.results[0]?.revertReason).toBe(
-      "swap amount too small: this market's LP fee rounds to zero",
+      "MarketZeroNetLPFee(): swap amount too small: this market's LP fee rounds to zero",
     );
     expect(outcome.results[0]?.warnings).toEqual([
       {
         code: "REVERTED",
-        message: "transaction reverted: swap amount too small: this market's LP fee rounds to zero",
+        message:
+          "transaction reverted: MarketZeroNetLPFee(): swap amount too small: this market's LP fee rounds to zero",
       },
     ]);
   });
 
-  it("does not attribute the same selector to an unrelated transaction target", async () => {
-    const selector = "0x880ccd2c" as const;
+  it("includes decoded custom-error arguments without a hand-written explanation", async () => {
+    const output = encodeErrorResult({
+      abi: RevertAbi,
+      errorName: "AmountTooLarge",
+      args: [A, 42n],
+    });
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, error: "execution reverted", output }]),
+      {
+        resolveContract: () => ({ abi: RevertAbi, errorMessages: {} }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe(`AmountTooLarge(account="${A}", amount=42)`);
+  });
+
+  it("does not decode the same revert data for an unrelated transaction target", async () => {
+    const output = encodeErrorResult({ abi: RevertAbi, errorName: "MarketZeroNetLPFee" });
     const outcome = await createTraceSimulator(
       runtimeWithFrames([
         {
@@ -290,15 +317,12 @@ describe("Capability simulation", () => {
           from: A,
           to: C,
           error: "execution reverted",
-          output: selector,
+          output,
         },
       ]),
       {
-        revertSelectors: {
-          [B]: {
-            [selector]: "swap amount too small: this market's LP fee rounds to zero",
-          },
-        },
+        resolveContract: (_, target) =>
+          target === B ? { abi: RevertAbi, errorMessages: {} } : undefined,
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
       },
     ).simulate(capability("fixture", C));
@@ -310,6 +334,48 @@ describe("Capability simulation", () => {
         message: "transaction reverted: execution reverted",
       },
     ]);
+  });
+
+  it("falls back to the trace reason when declared ABI data is malformed", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          revertReason: "raw trace reason",
+          output: "0x1234",
+        },
+      ]),
+      {
+        resolveContract: () => ({ abi: RevertAbi, errorMessages: {} }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe("raw trace reason");
+  });
+
+  it("falls back to the trace reason for an unknown selector at a declared target", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          revertReason: "unknown custom error",
+          output: "0xdeadbeef",
+        },
+      ]),
+      {
+        resolveContract: () => ({ abi: RevertAbi, errorMessages: {} }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe("unknown custom error");
   });
 
   it("turns unavailable trace evidence into a terminal Warning", async () => {

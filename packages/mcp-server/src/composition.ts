@@ -16,10 +16,3 @@ export const defaultProtocolModules = [
   pancakeswap,
   pendle,
 ] as const;
-
-/** Protocol-specific execution errors decoded by the default MCP simulator. */
-export const defaultRevertSelectors = {
-  [pendle.PENDLE_ROUTER_ADDRESS]: {
-    [pendle.MARKET_ZERO_NET_LP_FEE_SELECTOR]: pendle.MARKET_ZERO_NET_LP_FEE_MESSAGE,
-  },
-} as const;

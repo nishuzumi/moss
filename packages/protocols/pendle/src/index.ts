@@ -1,4 +1,5 @@
 export {
+  PendleErrorsAbi,
   PendleMarketAbi,
   PendleMarketFactoryAbi,
   PendleRouterAbi,
@@ -7,8 +8,6 @@ export {
   PendleYieldTokenAbi,
 } from "./abis/pendle.js";
 export {
-  MARKET_ZERO_NET_LP_FEE_MESSAGE,
-  MARKET_ZERO_NET_LP_FEE_SELECTOR,
   PENDLE_MARKET_FACTORY_ADDRESS,
   PENDLE_ROUTER_ADDRESS,
   PENDLE_ROUTER_STATIC_ADDRESS,

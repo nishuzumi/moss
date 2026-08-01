@@ -5,7 +5,7 @@
   "publishedAt": "2026-07-15T08:06:53.618Z",
   "tarball": "https://registry.npmjs.org/@pendle/core-v2/-/core-v2-6.8.1.tgz",
   "tarballSha256": "733aaf24d5bb6dde1f257c7e8c03798a5443c8e6709a658273decd3108396cda",
-  "vendoredAt": "2026-07-27",
+  "vendoredAt": "2026-08-01",
   "releaseAgeGuardDays": 7,
   "skippedReleases": [],
   "deploymentSource": {
@@ -57,6 +57,13 @@
       "exportName": "PendleYieldTokenAbi",
       "contractName": "IPYieldToken",
       "role": "dynamically discovered YT swap-trace event evidence"
+    },
+    {
+      "file": "Errors.json",
+      "sourcePath": "build/artifacts/contracts/core/libraries/Errors.sol/Errors.json",
+      "exportName": "PendleErrorsAbi",
+      "contractName": "Errors",
+      "role": "Pendle Router custom-error decoding"
     }
   ]
 }

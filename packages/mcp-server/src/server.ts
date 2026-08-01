@@ -12,19 +12,13 @@ import {
   type TrustedToken,
   VERBS,
 } from "@themoss/core";
-import {
-  createTraceSimulator,
-  type SimulateOutcome,
-  type Simulator,
-  type SimulatorOptions,
-} from "@themoss/simulator";
+import { createTraceSimulator, type SimulateOutcome, type Simulator } from "@themoss/simulator";
 import { z } from "zod";
 
 export interface MossServerOptions {
   runtime: MossRuntime;
   protocols: readonly ProtocolSource[];
   trustedTokens?: readonly TrustedToken[];
-  revertSelectors?: SimulatorOptions["revertSelectors"];
 }
 
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte 0x address");
@@ -122,7 +116,7 @@ export function createMossServer(opts: MossServerOptions): {
     ...opts.protocols,
   );
   const simulator = createTraceSimulator(runtime, {
-    revertSelectors: opts.revertSelectors,
+    resolveContract: (protocol, target) => registry.resolveContract(protocol, target),
     receipt: (capability, changes) => registry.parseReceipt(capability, changes),
   });
   const { version } = createRequire(import.meta.url)("../package.json") as { version: string };

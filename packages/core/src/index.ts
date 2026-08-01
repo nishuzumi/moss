@@ -29,6 +29,7 @@ export {
   type ProtocolSource,
   type QueryResult,
   Registry,
+  type ResolvedProtocolContract,
   type Stub,
 } from "./registry.js";
 export { createRuntime, defaultRpcUrl, MONAD_CHAIN_ID, type MossRuntime } from "./runtime.js";

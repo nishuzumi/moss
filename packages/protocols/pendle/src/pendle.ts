@@ -19,7 +19,8 @@ import {
 } from "@themoss/core";
 import { ERC20 } from "@themoss/erc";
 import { formatUnits, getAddress, parseUnits } from "viem";
-import { PendleMarketFactoryAbi, PendleRouterAbi, PendleRouterStaticAbi } from "./abis/pendle.js";
+import { PendleMarketFactoryAbi, PendleRouterStaticAbi } from "./abis/pendle.js";
+import { PendleRouterContractAbi } from "./abis/router.js";
 import {
   PENDLE_MARKET_FACTORY_ADDRESS,
   PENDLE_ROUTER_ADDRESS,
@@ -43,6 +44,7 @@ import type {
 
 const MAX_DIAGNOSTIC_LENGTH = 320;
 const DEFAULT_SLIPPAGE_BPS = 50;
+const MARKET_ZERO_NET_LP_FEE_MESSAGE = "swap amount too small: this market's LP fee rounds to zero";
 
 const PendleSlippage = BasisPoints.default(DEFAULT_SLIPPAGE_BPS);
 
@@ -146,8 +148,11 @@ type PendleQuoteParams = Omit<ResolvedPendleQuoteParams, "slippageBps"> & {
     "Pendle PT swaps against a market underlying over dynamically verified Monad markets.",
   contracts: {
     factory: { abi: PendleMarketFactoryAbi, addr: PENDLE_MARKET_FACTORY_ADDRESS },
-    router: { abi: PendleRouterAbi, addr: PENDLE_ROUTER_ADDRESS },
+    router: { abi: PendleRouterContractAbi, addr: PENDLE_ROUTER_ADDRESS },
     routerStatic: { abi: PendleRouterStaticAbi, addr: PENDLE_ROUTER_STATIC_ADDRESS },
+  },
+  errorMessages: {
+    MarketZeroNetLPFee: MARKET_ZERO_NET_LP_FEE_MESSAGE,
   },
   labels: {
     MarketFactory: PENDLE_MARKET_FACTORY_ADDRESS,
@@ -159,7 +164,7 @@ type PendleQuoteParams = Omit<ResolvedPendleQuoteParams, "slippageBps"> & {
 export class Pendle {
   declare runtime: MossRuntime;
   declare factory: Handle<typeof PendleMarketFactoryAbi>;
-  declare router: Handle<typeof PendleRouterAbi>;
+  declare router: Handle<typeof PendleRouterContractAbi>;
   declare routerStatic: Handle<typeof PendleRouterStaticAbi>;
   declare erc20: ProtocolRef<ERC20>;
 

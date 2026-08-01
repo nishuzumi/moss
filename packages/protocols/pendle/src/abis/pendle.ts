@@ -4,7 +4,7 @@
 // ABI origin: vendored (ADR 0007)
 //   source: @pendle/core-v2@6.8.1 (npm, dist-tags.latest)
 //   tarball: sha256 733aaf24d5bb6dde1f257c7e8c03798a5443c8e6709a658273decd3108396cda
-//   vendored: 2026-07-27 (release-age guard: 7d)
+//   vendored: 2026-08-01 (release-age guard: 7d)
 //   deployment: https://github.com/pendle-finance/pendle-core-v2-public/blob/6cd4773218e57dbda8925d10dfb672a0f594a9db/deployments/143-core.json
 //   verification: the immutable manifest identifies chain 143,
 //   marketFactoryV6, Router V4, and RouterStatic; live tests verify fixed-address bytecode.
@@ -14196,5 +14196,1487 @@ export const PendleYieldTokenAbi = [
     ],
     "stateMutability": "view",
     "type": "function"
+  }
+] as const;
+
+//   artifact: build/artifacts/contracts/core/libraries/Errors.sol/Errors.json
+//   role: Pendle Router custom-error decoding
+export const PendleErrorsAbi = [
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "approxGuessMin",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "approxGuessMax",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "minGuessMin",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxGuessMax",
+        "type": "uint256"
+      }
+    ],
+    "name": "ApproxBinarySearchInputInvalid",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ApproxDstExecutionGasNotSet",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ApproxFail",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "guessMin",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "guessMax",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "eps",
+        "type": "uint256"
+      }
+    ],
+    "name": "ApproxParamsInvalid",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ApxETHNotEnoughBuffer",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ArrayEmpty",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ArrayLengthMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ArrayOutOfBounds",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "epoch",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "startTime",
+        "type": "uint256"
+      }
+    ],
+    "name": "BDInvalidEpoch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "currentRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "eps",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkBadRateSyToToken",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "currentRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "eps",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkBadRateTokenToSy",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualSyOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredSyOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkInSufficientSyOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualTokenOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredTokenOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkInSufficientTokenOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "currentAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredAmount",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkInsufficientSyForTrade",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualBalance",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredBalance",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkInsufficientSyReceived",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "currentAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredAmount",
+        "type": "uint256"
+      }
+    ],
+    "name": "BulkInsufficientTokenForTrade",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BulkNotAdmin",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BulkNotMaintainer",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "SY",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "bulk",
+        "type": "address"
+      }
+    ],
+    "name": "BulkSellerAlreadyExisted",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "SY",
+        "type": "address"
+      }
+    ],
+    "name": "BulkSellerInvalidToken",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "chainId",
+        "type": "uint256"
+      }
+    ],
+    "name": "ChainNotSupported",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ExchangeRateCallFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "expiry",
+        "type": "uint256"
+      }
+    ],
+    "name": "ExpiryInThePast",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FDEpochLengthMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "lastFunded",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "currentWTime",
+        "type": "uint256"
+      }
+    ],
+    "name": "FDFutureFunding",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "oldFinishedEpoch",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newFinishedEpoch",
+        "type": "uint256"
+      }
+    ],
+    "name": "FDInvalidNewFinishedEpoch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      }
+    ],
+    "name": "FDInvalidPool",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "startEpoch",
+        "type": "uint256"
+      }
+    ],
+    "name": "FDInvalidStartEpoch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "lastFunded",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "wTime",
+        "type": "uint256"
+      }
+    ],
+    "name": "FDInvalidWTimeFund",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      }
+    ],
+    "name": "FDPoolAlreadyExists",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualTotalAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "expectedTotalAmount",
+        "type": "uint256"
+      }
+    ],
+    "name": "FDTotalAmountFundedNotMatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FailedToSendEther",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FeedNotInitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "GCNotPendleMarket",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "GCNotRewardDataUpdater",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "currentFee",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "InsufficientFeeToSendMsg",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidDestinationEid",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidMerkleProof",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidMsgType",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidRetryData",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "wTime",
+        "type": "uint256"
+      }
+    ],
+    "name": "InvalidWTime",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "addr",
+        "type": "address"
+      }
+    ],
+    "name": "MFNotPendleMarket",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "exchangeRate",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketExchangeRateBelowOne",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketFactoryExpiredPt",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "initialAnchor",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "minInitialAnchor",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketFactoryInitialAnchorTooLow",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketFactoryInvalidPt",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint80",
+        "name": "lnFeeRateRoot",
+        "type": "uint80"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxLnFeeRateRoot",
+        "type": "uint256"
+      }
+    ],
+    "name": "MarketFactoryLnFeeRateRootTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketFactoryMarketExists",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint80",
+        "name": "overriddenFee",
+        "type": "uint80"
+      },
+      {
+        "internalType": "uint256",
+        "name": "marketLnFeeRateRoot",
+        "type": "uint256"
+      }
+    ],
+    "name": "MarketFactoryOverriddenFeeTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "reserveFeePercent",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "maxReserveFeePercent",
+        "type": "uint8"
+      }
+    ],
+    "name": "MarketFactoryReserveFeePercentTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketFactoryZeroTreasury",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "currentAmount",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "requiredAmount",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketInsufficientPtForTrade",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualBalance",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredBalance",
+        "type": "uint256"
+      }
+    ],
+    "name": "MarketInsufficientPtReceived",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualBalance",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredBalance",
+        "type": "uint256"
+      }
+    ],
+    "name": "MarketInsufficientSyReceived",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketProportionMustNotEqualOne",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "proportion",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "maxProportion",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketProportionTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "rateScalar",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketRateScalarBelowZero",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "scalarRoot",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketScalarRootBelowZero",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketZeroAmountsInput",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketZeroAmountsOutput",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketZeroLnImpliedRate",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MarketZeroNetLPFee",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "totalPt",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "totalAsset",
+        "type": "int256"
+      }
+    ],
+    "name": "MarketZeroTotalPtOrTotalAsset",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "sender",
+        "type": "address"
+      }
+    ],
+    "name": "MsgNotFromReceiveEndpoint",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "srcChainId",
+        "type": "uint16"
+      },
+      {
+        "internalType": "bytes",
+        "name": "path",
+        "type": "bytes"
+      }
+    ],
+    "name": "MsgNotFromSendEndpoint",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "msgValue",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "NotEnoughNativeFee",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "srcChainId",
+        "type": "uint16"
+      },
+      {
+        "internalType": "bytes",
+        "name": "path",
+        "type": "bytes"
+      }
+    ],
+    "name": "NotFromTrustedRemote",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OnlyLayerZeroEndpoint",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OnlyWhitelisted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OnlyYCFactory",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OnlyYT",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "target",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint32",
+        "name": "oldest",
+        "type": "uint32"
+      }
+    ],
+    "name": "OracleTargetTooOld",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OracleUninitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OracleZeroCardinality",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "RouterCallbackNotPendleMarket",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualLpOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredLpOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientLpOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualPYOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredPYOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientPYOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualPtOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredPtOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientPtOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualPtRepay",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredPtRepay",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientPtRepay",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualSyOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredSyOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientSyOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualSyRepay",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredSyRepay",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientSyRepay",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualTokenOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredTokenOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientTokenOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualYtOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredYtOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterInsufficientYtOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes4",
+        "name": "selector",
+        "type": "bytes4"
+      }
+    ],
+    "name": "RouterInvalidAction",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "facet",
+        "type": "address"
+      }
+    ],
+    "name": "RouterInvalidFacet",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RouterKyberSwapDataZero",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "netSyDesired",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "netSyUsed",
+        "type": "uint256"
+      }
+    ],
+    "name": "RouterNotAllSyUsed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RouterTimeRangeZero",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenIn",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountExpected",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountActual",
+        "type": "uint256"
+      }
+    ],
+    "name": "SAInsufficientTokenIn",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "amountDeposited",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYApeDepositAmountTooSmall",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SYBalancerInvalidPid",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SYBalancerReentrancy",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SYCurve3crvPoolNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SYCurveInvalidPid",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualSharesOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredSharesOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYInsufficientSharesOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualTokenOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredTokenOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYInsufficientTokenOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "SYInvalidRewardToken",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "SYInvalidTokenIn",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "SYInvalidTokenOut",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "borrowRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "borrowRateMax",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYQiTokenBorrowRateTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "errCode",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYQiTokenMintFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "errCode",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYQiTokenRedeemFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "rewardAccruedType0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "rewardAccruedType1",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYQiTokenRedeemRewardsFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "amountLpDesired",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountLpRedeemable",
+        "type": "uint256"
+      }
+    ],
+    "name": "SYStargateRedeemCapExceeded",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SYZeroDeposit",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SYZeroRedeem",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bool",
+        "name": "success",
+        "type": "bool"
+      },
+      {
+        "internalType": "bytes",
+        "name": "res",
+        "type": "bytes"
+      }
+    ],
+    "name": "SimulationResults",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "aggregatorType",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes4",
+        "name": "selector",
+        "type": "bytes4"
+      }
+    ],
+    "name": "UnsupportedSelector",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "wTime",
+        "type": "uint256"
+      }
+    ],
+    "name": "VCEpochNotFinalized",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "totalWeight",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxWeight",
+        "type": "uint256"
+      }
+    ],
+    "name": "VCExceededMaxWeight",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      }
+    ],
+    "name": "VCInactivePool",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "cap",
+        "type": "uint256"
+      }
+    ],
+    "name": "VCInvalidCap",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      }
+    ],
+    "name": "VCPoolAlreadyActive",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      }
+    ],
+    "name": "VCPoolAlreadyAddAndRemoved",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      }
+    ],
+    "name": "VCZeroVePendle",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VEExceededMaxLockTime",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VEInsufficientLockTime",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newExpiry",
+        "type": "uint256"
+      }
+    ],
+    "name": "VEInvalidNewExpiry",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VENotAllowedReduceExpiry",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VEPositionNotExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "msgTime",
+        "type": "uint256"
+      }
+    ],
+    "name": "VEReceiveOldSupply",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VEZeroAmountLocked",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VEZeroPosition",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint128",
+        "name": "bias",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "slope",
+        "type": "uint128"
+      }
+    ],
+    "name": "VEZeroSlope",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "interestFeeRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxInterestFeeRate",
+        "type": "uint256"
+      }
+    ],
+    "name": "YCFactoryInterestFeeRateTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCFactoryInvalidExpiry",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newRewardFeeRate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxRewardFeeRate",
+        "type": "uint256"
+      }
+    ],
+    "name": "YCFactoryRewardFeeRateTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCFactoryYieldContractExisted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCFactoryZeroExpiryDivisor",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCFactoryZeroTreasury",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCNoFloatingSy",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCNotExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCNothingToRedeem",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "YCPostExpiryDataNotSet",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "actualSy",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "requiredSy",
+        "type": "uint256"
+      }
+    ],
+    "name": "YieldContractInsufficientSy",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAddress",
+    "type": "error"
   }
 ] as const;

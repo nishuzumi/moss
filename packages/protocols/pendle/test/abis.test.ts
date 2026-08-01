@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { encodeErrorResult } from "viem";
 import { describe, expect, it } from "vitest";
 import { generate, selectReleaseVersion } from "../scripts/abis.js";
 import {
+  PendleErrorsAbi,
   PendleMarketAbi,
   PendleMarketFactoryAbi,
   PendleRouterAbi,
@@ -83,6 +85,15 @@ describe("ABI coverage for the next Pendle stage", () => {
         }),
       ]),
     });
+  });
+
+  it("derives MarketZeroNetLPFee and its selector from the vendored Errors artifact", () => {
+    expect(PendleErrorsAbi).toContainEqual(
+      expect.objectContaining({ type: "error", name: "MarketZeroNetLPFee", inputs: [] }),
+    );
+    expect(
+      encodeErrorResult({ abi: PendleErrorsAbi, errorName: "MarketZeroNetLPFee" }).slice(0, 10),
+    ).toBe("0x880ccd2c");
   });
 
   it("covers both quote directions and canonical ApproxParams", () => {

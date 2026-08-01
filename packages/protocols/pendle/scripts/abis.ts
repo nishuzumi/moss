@@ -7,7 +7,7 @@ export interface SourceSpec {
   exportName: string;
   contractName: string;
   role: string;
-  requiredEntries: readonly { type: "function" | "event"; name: string }[];
+  requiredEntries: readonly { type: "function" | "event" | "error"; name: string }[];
 }
 
 export const SOURCES: readonly SourceSpec[] = [
@@ -80,6 +80,14 @@ export const SOURCES: readonly SourceSpec[] = [
     contractName: "IPYieldToken",
     role: "dynamically discovered YT swap-trace event evidence",
     requiredEntries: [{ type: "event", name: "NewInterestIndex" }],
+  },
+  {
+    file: "Errors.json",
+    sourcePath: "build/artifacts/contracts/core/libraries/Errors.sol/Errors.json",
+    exportName: "PendleErrorsAbi",
+    contractName: "Errors",
+    role: "Pendle Router custom-error decoding",
+    requiredEntries: [{ type: "error", name: "MarketZeroNetLPFee" }],
   },
 ] as const;
 

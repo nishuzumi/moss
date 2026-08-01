@@ -5,18 +5,9 @@ import {
   type MossRuntime,
   Registry,
 } from "@themoss/core";
-import {
-  createTraceSimulator,
-  type RevertSelectors,
-  type StateOverrides,
-} from "@themoss/simulator";
+import { createTraceSimulator, type StateOverrides } from "@themoss/simulator";
 import { encodeAbiParameters, formatUnits, getAddress, keccak256, parseUnits, toHex } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
-import {
-  MARKET_ZERO_NET_LP_FEE_MESSAGE,
-  MARKET_ZERO_NET_LP_FEE_SELECTOR,
-  PENDLE_ROUTER_ADDRESS,
-} from "../src/addresses.js";
 import { discoverPendleMarkets } from "../src/market-discovery.js";
 import { Pendle } from "../src/pendle.js";
 import type { PendleSwapOutcome, VerifiedMarket } from "../src/types.js";
@@ -28,15 +19,10 @@ const ERC20_BALANCES_MAPPING_SLOT = 0n;
 const USDAT_TEST_ACCOUNT_BALANCE_SLOT =
   "0x013b2304f519dd3bb551ca27c60cd907fb8619e5c0a5ef31cfdca85be2b9552c";
 // These are currently demonstrated fee-bearing amounts. Pendle's dust floor is market-state
-// dependent, so live simulations retain the Router-scoped diagnostic instead of hardcoding it.
+// dependent, so live simulations retain ABI-derived Router diagnostics instead of hardcoding it.
 const SWAP_AMOUNT = "0.1";
 const SELL_FUND_AMOUNT = "0.1";
 const SELL_AMOUNT = "0.05";
-const PENDLE_REVERT_SELECTORS = {
-  [PENDLE_ROUTER_ADDRESS]: {
-    [MARKET_ZERO_NET_LP_FEE_SELECTOR]: MARKET_ZERO_NET_LP_FEE_MESSAGE,
-  },
-} satisfies RevertSelectors;
 
 // Both swap directions use a fixed caller with an ERC-20 balance storage override. This keeps the
 // live gate deterministic while preserving real current market, quote, Router, and Receipt behavior.
@@ -71,7 +57,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Pendle protocol on Monad mainnet",
 
     const result = await createTraceSimulator(runtime, {
       receipt: (node, changes) => registry.parseReceipt(node, changes),
-      revertSelectors: PENDLE_REVERT_SELECTORS,
+      resolveContract: (protocol, target) => registry.resolveContract(protocol, target),
       stateOverrides: balanceOverride(
         market.underlying,
         TEST_ACCOUNT,
@@ -125,7 +111,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Pendle protocol on Monad mainnet",
 
     const result = await createTraceSimulator(runtime, {
       receipt: (node, changes) => registry.parseReceipt(node, changes),
-      revertSelectors: PENDLE_REVERT_SELECTORS,
+      resolveContract: (protocol, target) => registry.resolveContract(protocol, target),
       stateOverrides: balanceOverride(
         market.underlying,
         TEST_ACCOUNT,
@@ -165,13 +151,14 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Pendle protocol on Monad mainnet",
     const result = await createTraceSimulator(runtime, {
       receipt: (node, changes) => registry.parseReceipt(node, changes),
       stateOverrides: balanceOverride(market.pt, TEST_ACCOUNT, 5_000n),
-      revertSelectors: PENDLE_REVERT_SELECTORS,
+      resolveContract: (protocol, target) => registry.resolveContract(protocol, target),
     }).simulate(capability);
 
     expect(result.results.at(-1)?.warnings).toEqual([
       {
         code: "REVERTED",
-        message: `transaction reverted: ${MARKET_ZERO_NET_LP_FEE_MESSAGE}`,
+        message:
+          "transaction reverted: MarketZeroNetLPFee(): swap amount too small: this market's LP fee rounds to zero",
       },
     ]);
   });

@@ -9,6 +9,3 @@
 export const PENDLE_MARKET_FACTORY_ADDRESS = "0xA3cb62a49b66eB2536cf6F3C7AC82293784888A3" as const;
 export const PENDLE_ROUTER_ADDRESS = "0x888888888889758F76e7103c6CbF23ABbF58F946" as const;
 export const PENDLE_ROUTER_STATIC_ADDRESS = "0x6813d43782395A1F2AAb42f39aeEDE03ac655e09" as const;
-export const MARKET_ZERO_NET_LP_FEE_SELECTOR = "0x880ccd2c" as const;
-export const MARKET_ZERO_NET_LP_FEE_MESSAGE =
-  "swap amount too small: this market's LP fee rounds to zero";
