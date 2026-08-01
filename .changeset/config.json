@@ -11,6 +11,7 @@
       "@themoss/system",
       "@themoss/protocol-kuru",
       "@themoss/protocol-monad-cards",
+      "@themoss/protocol-morpho",
       "@themoss/protocol-pancakeswap",
       "@themoss/mcp-server"
     ]
