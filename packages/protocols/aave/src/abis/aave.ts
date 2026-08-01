@@ -2,7 +2,7 @@
 //   regenerate offline from abis-src/:  pnpm gen:abis
 //   re-vendor from upstream:            pnpm update:abis
 // ABI origin: vendored (ADR 0007)
-//   source:   @aave-dao/aave-address-book@4.61.2 (npm), dist/**.mjs — verbatim copies in ../../abis-src/
+//   source:   @aave-dao/aave-address-book@4.61.2 (npm), dist/**.mjs re-rooted verbatim into ../../abis-src/
 //   tarball:  sha256 c3947b04fef6f096faf881950462dadde17744481a7a1d80a858ba62e35b15be
 //   vendored: 2026-08-01 (release-age guard: 7d)
 //   verification: every selector and event topic the adapter uses was found in

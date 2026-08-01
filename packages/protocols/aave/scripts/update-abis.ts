@@ -88,21 +88,32 @@ execSync(`tar -xzf "${tarball}" -C "${work}"`);
 // the bytes rather than guessed, so what lands in abis-src/ is exactly the
 // published tree and nothing dangles.
 const REFERENCE = /^\s*(?:import\s+["'](\.[^"']+)["'];?|\/\/# sourceMappingURL=(\S+))\s*$/gm;
-const pending: string[] = [...VENDORED_FILES];
+
+/**
+ * Upstream publishes everything under `dist/`, which this repository ignores at
+ * any depth, so a vendored copy keeping that segment could never be committed.
+ * The walk therefore runs in upstream space and the tree is re-rooted one level
+ * up on the way out. Re-rooting the whole tree uniformly leaves every relative
+ * specifier resolving exactly as published.
+ */
+const UPSTREAM_ROOT = "dist";
+const stored = (upstream: string): string => relative(UPSTREAM_ROOT, upstream);
+
+const pending: string[] = VENDORED_FILES.map((file) => join(UPSTREAM_ROOT, file));
 const copied = new Set<string>();
 while (pending.length > 0) {
   const file = pending.shift();
   if (!file || copied.has(file)) continue;
   copied.add(file);
   const raw = readFileSync(join(work, "package", file), "utf8");
-  const target = join(packageRoot, "abis-src", file);
+  const target = join(packageRoot, "abis-src", stored(file));
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, raw); // verbatim
   for (const match of raw.matchAll(REFERENCE)) {
     const specifier = match[1] ?? match[2];
     if (!specifier) continue;
     const resolved = normalize(join(dirname(file), specifier));
-    if (relative(".", resolved).startsWith("..")) {
+    if (relative(UPSTREAM_ROOT, resolved).startsWith("..")) {
       throw new Error(`${file} references outside the published tree: ${specifier}`);
     }
     pending.push(resolved);
@@ -118,12 +129,15 @@ const vendor: VendorInfo = {
   // Per-file digests so the upstream bytes stay verifiable offline, not only
   // by whoever can re-download the tarball.
   files: Object.fromEntries(
-    [...copied].sort().map((file) => [
-      file,
-      createHash("sha256")
-        .update(readFileSync(join(packageRoot, "abis-src", file)))
-        .digest("hex"),
-    ]),
+    [...copied]
+      .map(stored)
+      .sort()
+      .map((file) => [
+        file,
+        createHash("sha256")
+          .update(readFileSync(join(packageRoot, "abis-src", file)))
+          .digest("hex"),
+      ]),
   ),
 };
 writeFileSync(join(packageRoot, "abis-src", "VENDOR.json"), `${JSON.stringify(vendor, null, 2)}\n`);
