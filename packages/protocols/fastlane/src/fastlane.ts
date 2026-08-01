@@ -44,6 +44,11 @@ export const SHMON_NAME = "ShMonad" as const;
 export const SHMON_SYMBOL = "shMON" as const;
 export const SHMON_DECIMALS = 18 as const;
 
+// Where the shares path sends the shMON it spends. boostYield burns the shares
+// instead of moving them to the yield originator, so the Transfer that settles
+// it lands here and not on the account being credited.
+const BURN_ADDRESS: AddressValue = "0x0000000000000000000000000000000000000000" as const;
+
 const depositParams = {
   amount: {
     type: PositiveDecimalString,
@@ -527,44 +532,106 @@ export class FastLane {
 
   @Receipt()
   boostYieldReceipt(changes: readonly Change[]): ReceiptResult<BoostYieldOutcome> {
-    let event: BoostYieldOutcome | undefined;
+    // The canonical evidence is the vault's own BoostYield event, not the shMON
+    // Transfer that settles it. A Transfer carries the shared ERC-20 signature,
+    // so it cannot say which move the Capability performed, and it names the
+    // burn address rather than the account whose yield was credited. On mainnet
+    // the shares path emits Transfer(sender -> burn) followed by
+    // BoostYield(sender, yieldOriginator, validatorId, amount, sharesBurned):
+    // one identifies the operation, the other proves what it cost.
+    const boosts: BoostYieldEvent[] = [];
+    const burns: BoostYieldBurn[] = [];
 
     const parsed = changes.map((change) => {
-      if (change.kind === "nativeTransfer") {
-        return this.erc20.changesReceipt([change]);
+      if (change.kind === "event") {
+        const decoded = tryDecodeFastLaneEvent(change);
+
+        if (decoded?.eventName === "BoostYield") {
+          const boost: BoostYieldEvent = {
+            operation: "boostYield",
+            sender: decoded.args.sender,
+            yieldOriginator: decoded.args.yieldOriginator,
+            validatorId: decoded.args.validatorId.toString(),
+            amount: decoded.args.amount.toString(),
+            sharesBurned: decoded.args.sharesBurned,
+          };
+          boosts.push(boost);
+
+          return {
+            kind: "change" as const,
+            change,
+            data: boost,
+            text: `FastLane Boost Yield: ${boost.amount} MON of yield for ${boost.yieldOriginator}`,
+          };
+        }
+
+        // The shMON leg is an ordinary ERC-20 burn, so the dependency Receipt
+        // describes it. Keeping it as a candidate here only lets the outcome
+        // bind the shares it spent to the BoostYield event that spent them.
+        if (decoded?.eventName === "Transfer") {
+          burns.push({
+            from: decoded.args.from,
+            to: decoded.args.to,
+            shares: decoded.args.value.toString(),
+          });
+        }
       }
 
-      const decoded = tryDecodeFastLaneEvent(change as Extract<Change, { kind: "event" }>);
-      if (decoded?.eventName !== "Transfer" || event) {
-        return this.erc20.changesReceipt([change]);
-      }
-
-      event = {
-        operation: "boostYield",
-        from: decoded.args.from,
-        shares: decoded.args.value.toString(),
-        yieldOriginator: decoded.args.to,
-      };
-
-      return {
-        kind: "change" as const,
-        change,
-        data: event,
-        text: `FastLane Boost Yield: ${event.shares} shMON from ${event.from} to ${event.yieldOriginator}`,
-      };
+      return this.erc20.changesReceipt([change]);
     });
 
-    if (!event) {
-      throw new Error("FastLane boostYield Receipt requires Transfer event");
+    // Fail closed on a second candidate of either kind. Nothing in a
+    // single-outcome model distinguishes two equally valid BoostYield events or
+    // two equally valid shMON Transfers, so keeping the first would name one of
+    // them canonical without evidence.
+    const boost = exactlyOne(boosts, "FastLane BoostYield event");
+    if (!boost.sharesBurned) {
+      throw new Error("FastLane boostYield Receipt requires the shares-burning boostYield path");
     }
+    const burn = exactlyOne(burns, "FastLane shMON Transfer");
+    if (!sameAddress(burn.from, boost.sender) || !sameAddress(burn.to, BURN_ADDRESS)) {
+      throw new Error(
+        "FastLane boostYield Receipt requires the boosted shMON to be burned from the BoostYield sender",
+      );
+    }
+
+    const outcome: BoostYieldOutcome = {
+      operation: "boostYield",
+      sender: boost.sender,
+      yieldOriginator: boost.yieldOriginator,
+      validatorId: boost.validatorId,
+      amount: boost.amount,
+      shares: burn.shares,
+    };
 
     return {
       kind: "receipt",
-      outcome: event,
-      text: `FastLane Boost Yield: ${event.shares} shMON from ${event.from} to ${event.yieldOriginator}`,
+      outcome,
+      text: `FastLane Boost Yield: ${outcome.shares} shMON from ${outcome.sender} -> ${outcome.amount} MON of yield for ${outcome.yieldOriginator}`,
       changes: parsed,
     };
   }
+}
+
+// boostYield candidates, kept local to the parser that binds them. The event
+// fields stay verbatim; the outcome composes them with the burn it authenticates.
+type BoostYieldEvent = {
+  operation: "boostYield";
+  sender: AddressValue;
+  yieldOriginator: AddressValue;
+  validatorId: string;
+  amount: string;
+  sharesBurned: boolean;
+};
+
+type BoostYieldBurn = { from: AddressValue; to: AddressValue; shares: string };
+
+function exactlyOne<T>(values: readonly T[], description: string): T {
+  const [value] = values;
+  if (!value || values.length !== 1) {
+    throw new Error(`FastLane boostYield Receipt requires exactly one ${description}`);
+  }
+  return value;
 }
 
 // The simulator reports trace addresses as the node returned them (lowercase)
@@ -576,10 +643,12 @@ function sameAddress(left: string, right: string): boolean {
 
 function tryDecodeFastLaneEvent(change: Extract<Change, { kind: "event" }>) {
   // Only the staking vault can produce FastLane evidence. Decoding by topics
-  // alone accepts a matching event from any contract, which matters most for
-  // boostYield: its canonical event is the shared ERC-20 Transfer signature, so
-  // every token on Monad emits something that decodes here. Anything from
-  // another address falls through to the ERC-20 dependency instead.
+  // alone accepts a matching event from any contract, so a validly encoded
+  // Deposit or BoostYield from an unrelated address would satisfy a Receipt.
+  // It matters most for the shMON Transfer that settles boostYield: that is the
+  // shared ERC-20 signature, so every token on Monad emits something that
+  // decodes here. Anything from another address falls through to the ERC-20
+  // dependency instead.
   if (!sameAddress(change.address, FASTLANE_STAKING_ADDRESS)) return undefined;
   try {
     return decodeEventLog({

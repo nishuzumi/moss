@@ -21,6 +21,8 @@ import {
 } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+// boostYield burns the shMON it spends, so the settling Transfer lands here.
+const BURN = getAddress("0x0000000000000000000000000000000000000000");
 
 // Mock client following Kuru's offlineRegistry() pattern. The mock returns
 // heterogeneous types per functionName, so we type the parameter structurally
@@ -48,12 +50,15 @@ function createMockClient(): MossRuntime["client"] {
   } as unknown as MossRuntime["client"];
 }
 
-// Extracts the original Change from a ReceiptChange entry. FastLane Receipts
-// are flat (no nested Receipts), so every entry has kind === "change".
+// Extracts the original Change from a ReceiptChange entry. FastLane describes
+// its own events inline and delegates the rest, so an entry is either a flat
+// ReceiptChange or a single-Change ERC-20 dependency Receipt.
 function changeOf(entry: ReceiptResult["changes"][number] | undefined): Change {
   if (!entry) throw new Error("expected a ReceiptChange entry");
   if (entry.kind === "change") return entry.change;
-  throw new Error("expected a flat ReceiptChange, not a nested Receipt");
+  const [nested] = entry.changes;
+  if (entry.changes.length === 1 && nested?.kind === "change") return nested.change;
+  throw new Error("expected a flat ReceiptChange or a single-Change nested Receipt");
 }
 
 function depositEvent(
@@ -130,8 +135,7 @@ function completeUnstakeEvent(owner: `0x${string}`, amountMon: bigint): Change {
 }
 
 // ERC-20 Transfer event: (from indexed, to indexed, value unindexed).
-// boostYield emits a Transfer moving shMON shares from the staker to the
-// yield originator.
+// boostYield settles with one of these, burning the staker's shMON.
 function transferEvent(
   from: `0x${string}`,
   to: `0x${string}`,
@@ -147,6 +151,34 @@ function transferEvent(
       args: { from, to }, // indexed only
     }) as readonly Hex[],
     data: encodeAbiParameters([{ type: "uint256" }], [value]),
+  };
+}
+
+// FastLane BoostYield event: (sender, yieldOriginator, validatorId indexed;
+// amount, sharesBurned unindexed). This is the canonical boostYield evidence:
+// it names the credited originator, which the burn Transfer cannot.
+function boostYieldEvent(
+  sender: `0x${string}`,
+  yieldOriginator: `0x${string}`,
+  amount: bigint,
+  options: {
+    validatorId?: bigint;
+    sharesBurned?: boolean;
+    emitter?: `0x${string}`;
+  } = {},
+): Change {
+  return {
+    kind: "event",
+    address: options.emitter ?? FASTLANE_STAKING_ADDRESS,
+    topics: encodeEventTopics({
+      abi: FastLaneStakingAbi,
+      eventName: "BoostYield",
+      args: { sender, yieldOriginator, validatorId: options.validatorId ?? 0n }, // indexed only
+    }) as readonly Hex[],
+    data: encodeAbiParameters(
+      [{ type: "uint256" }, { type: "bool" }],
+      [amount, options.sharesBurned ?? true],
+    ),
   };
 }
 
@@ -453,6 +485,9 @@ describe("FastLane shMONAD staking", () => {
     );
   });
 
+  // Change order, addresses and amounts here are the ones a mainnet
+  // deposit -> boostYield run reports: the burn settles first, then the vault
+  // says whose yield it credited and what that was worth in MON.
   it("parses boostYield Changes with exact identity, length, and order", async () => {
     const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
     const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
@@ -461,22 +496,26 @@ describe("FastLane shMONAD staking", () => {
     });
     if (capability.kind !== "capability") throw new Error("expected capability");
 
-    const transferred = transferEvent(ACCOUNT, yieldOriginator, 10n ** 18n);
+    const burned = transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n);
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
 
-    const receipt = registry.parseReceipt(capability, [transferred]);
+    const receipt = registry.parseReceipt(capability, [burned, boosted]);
     expect(receipt.outcome).toEqual({
       operation: "boostYield",
-      from: ACCOUNT,
-      shares: "1000000000000000000",
+      sender: ACCOUNT,
       yieldOriginator,
+      validatorId: "0",
+      amount: "798909778210594794",
+      shares: "500000000000000000",
     });
 
     // Identity + length + order assertions
-    expect(receipt.changes).toHaveLength(1);
-    expect(changeOf(receipt.changes[0])).toBe(transferred);
+    expect(receipt.changes).toHaveLength(2);
+    expect(changeOf(receipt.changes[0])).toBe(burned);
+    expect(changeOf(receipt.changes[1])).toBe(boosted);
   });
 
-  it("rejects boostYield Receipt when the Transfer comes from another token", async () => {
+  it("preserves another token's Transfer through the ERC-20 dependency Receipt", async () => {
     const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
     const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
       shares: "1",
@@ -484,23 +523,27 @@ describe("FastLane shMONAD staking", () => {
     });
     if (capability.kind !== "capability") throw new Error("expected capability");
 
-    // boostYield's canonical event is the shared ERC-20 Transfer signature, so
-    // any token's Transfer decodes. Only shMON's counts as FastLane evidence;
-    // another token's is delegated to the ERC-20 dependency and leaves the
-    // boostYield outcome unsatisfied.
-    const otherToken = transferEvent(
+    const burned = transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n);
+    // Another token moving in the same transaction is not a boostYield
+    // candidate, so it neither competes with the burn nor gets dropped.
+    const unrelated = transferEvent(
       ACCOUNT,
       yieldOriginator,
-      10n ** 18n,
+      42n,
       getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
     );
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
 
-    expect(() => registry.parseReceipt(capability, [otherToken])).toThrow(
-      "FastLane boostYield Receipt requires Transfer event",
-    );
+    const receipt = registry.parseReceipt(capability, [burned, unrelated, boosted]);
+    expect(receipt.outcome).toMatchObject({
+      operation: "boostYield",
+      shares: "500000000000000000",
+    });
+    expect(receipt.changes).toHaveLength(3);
+    expect(changeOf(receipt.changes[1])).toBe(unrelated);
   });
 
-  it("rejects boostYield Receipt when no Transfer event is present", async () => {
+  it("rejects boostYield Receipt when the BoostYield event comes from another emitter", async () => {
     const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
     const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
       shares: "1",
@@ -508,10 +551,135 @@ describe("FastLane shMONAD staking", () => {
     });
     if (capability.kind !== "capability") throw new Error("expected capability");
 
-    // Empty Changes must not satisfy the boostYield Receipt, which requires a
-    // Transfer event as the canonical outcome source.
+    const burned = transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n);
+    // A validly encoded BoostYield from any other contract is not FastLane
+    // evidence. Once the emitter check rejects it, the Change falls through to
+    // the ERC-20 dependency, which does not recognise a BoostYield topic.
+    const forged = boostYieldEvent(ACCOUNT, yieldOriginator, 10n ** 18n, {
+      emitter: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+    });
+
+    expect(() => registry.parseReceipt(capability, [burned, forged])).toThrow(
+      "emitted an unsupported ERC-20 event",
+    );
+  });
+
+  it("rejects boostYield Receipt when a second FastLane Transfer competes with the burn", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Two valid shMON Transfers with different recipients and amounts. Nothing
+    // in a single-outcome Receipt distinguishes them, so keeping the first would
+    // name it canonical without evidence.
+    const burned = transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n);
+    const second = transferEvent(ACCOUNT, yieldOriginator, 7n * 10n ** 17n);
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
+
+    expect(() => registry.parseReceipt(capability, [burned, second, boosted])).toThrow(
+      "FastLane boostYield Receipt requires exactly one FastLane shMON Transfer",
+    );
+  });
+
+  it("rejects boostYield Receipt when a second BoostYield event competes", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    const burned = transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n);
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
+    const other = boostYieldEvent(
+      ACCOUNT,
+      getAddress("0x2222222222222222222222222222222222222222"),
+      1n,
+    );
+
+    expect(() => registry.parseReceipt(capability, [burned, boosted, other])).toThrow(
+      "FastLane boostYield Receipt requires exactly one FastLane BoostYield event",
+    );
+  });
+
+  it("rejects boostYield Receipt when no BoostYield event is present", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Empty Changes must not satisfy the boostYield Receipt. Neither may a
+    // burn on its own: without the event nothing says whose yield it credited.
     expect(() => registry.parseReceipt(capability, [])).toThrow(
-      "FastLane boostYield Receipt requires Transfer event",
+      "FastLane boostYield Receipt requires exactly one FastLane BoostYield event",
+    );
+    expect(() =>
+      registry.parseReceipt(capability, [transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n)]),
+    ).toThrow("FastLane boostYield Receipt requires exactly one FastLane BoostYield event");
+  });
+
+  it("rejects boostYield Receipt when the burn does not come from the BoostYield sender", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Right amount, wrong staker: someone else's shMON was burned, so the
+    // Receipt would credit this account for shares it never spent.
+    const burned = transferEvent(
+      getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      BURN,
+      5n * 10n ** 17n,
+    );
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
+
+    expect(() => registry.parseReceipt(capability, [burned, boosted])).toThrow(
+      "FastLane boostYield Receipt requires the boosted shMON to be burned from the BoostYield sender",
+    );
+  });
+
+  it("rejects boostYield Receipt when the shMON moves somewhere instead of being burned", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // A plain shMON transfer to the originator is what an unbound Receipt used
+    // to accept as the boostYield outcome. The shares path burns instead.
+    const moved = transferEvent(ACCOUNT, yieldOriginator, 5n * 10n ** 17n);
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
+
+    expect(() => registry.parseReceipt(capability, [moved, boosted])).toThrow(
+      "FastLane boostYield Receipt requires the boosted shMON to be burned from the BoostYield sender",
+    );
+  });
+
+  it("rejects boostYield Receipt when the event reports no shares were burned", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // sharesBurned === false is the payable MON path, which this Capability
+    // never builds. Its Changes cannot be evidence for the shares call.
+    const burned = transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n);
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 10n ** 18n, {
+      sharesBurned: false,
+    });
+
+    expect(() => registry.parseReceipt(capability, [burned, boosted])).toThrow(
+      "FastLane boostYield Receipt requires the shares-burning boostYield path",
     );
   });
 
@@ -883,12 +1051,14 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
 
   // Chains stake (deposit) -> boostYield in a single simulate call so the
   // simulator's mergeDiff persists the minted shMON balance into state
-  // overrides before boostYield runs. boostYield transfers shMON shares from
-  // the staker to a yield originator. This verifies the boostYield transaction
-  // is constructed correctly and reaches the contract on Monad mainnet.
-  // boostYield may revert if the yield originator is not registered on-chain;
-  // a revert here proves correct ABI encoding and contract construction, not a
-  // client-side failure — mirroring the completeUnstake epoch-gate test pattern.
+  // overrides before boostYield runs. The shares path burns the staker's shMON
+  // and credits the yield originator, so mainnet reports two Changes from the
+  // vault: Transfer(staker -> zero address) then BoostYield naming the
+  // originator, the validator and the MON the burn was worth. The Receipt has
+  // to bind them, so this asserts a clean Receipt rather than tolerating a
+  // halt: an unbound parser dropped the BoostYield Change into the ERC-20
+  // dependency and halted the run with RECEIPT_FAILED, which a
+  // halt-tolerant assertion would have reported as a pass.
   it("simulates boostYield after stake via state chaining", {
     timeout: 240_000,
   }, async () => {
@@ -917,23 +1087,27 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
       receipt: (node, changes) => registry.parseReceipt(node, changes),
     }).simulate(combined);
 
-    // stake (deposit) must always succeed with zero Warnings.
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.results).toHaveLength(2);
     expect(outcome.results[0]?.warnings).toEqual([]);
     expect(outcome.results[0]?.receipt?.outcome).toMatchObject({ operation: "deposit" });
 
-    // boostYield either succeeds (zero Warnings, clean Receipt) or halts
-    // on-chain (e.g. insufficient uncommitted shares, unregistered yield
-    // originator, or estimation failure). A halt at index 1 proves the
-    // boostYield transaction was constructed correctly and reached the
-    // contract — the failure is due to on-chain state, not a client-side
-    // ABI encoding or construction error.
-    if (outcome.halted) {
-      expect(outcome.halted.transactionIndex).toBe(1);
-    } else {
-      expect(outcome.results[1]?.warnings).toEqual([]);
-      expect(outcome.results[1]?.receipt?.outcome).toMatchObject({
-        operation: "boostYield",
-      });
-    }
+    expect(outcome.results[1]?.reverted).toBe(false);
+    expect(outcome.results[1]?.warnings).toEqual([]);
+    // The burn is exactly the shares the Capability asked for; the MON it was
+    // worth follows the live exchange rate, so assert it is positive, not fixed.
+    expect(outcome.results[1]?.receipt?.outcome).toMatchObject({
+      operation: "boostYield",
+      sender: ACCOUNT,
+      yieldOriginator,
+      shares: "500000000000000000",
+    });
+    const boosted = outcome.results[1]?.receipt?.outcome as {
+      amount: string;
+      validatorId: string;
+    };
+    expect(BigInt(boosted.amount)).toBeGreaterThan(0n);
+    expect(boosted.validatorId).toMatch(/^\d+$/);
+    expect(outcome.results[1]?.receipt?.changes).toHaveLength(2);
   });
 });

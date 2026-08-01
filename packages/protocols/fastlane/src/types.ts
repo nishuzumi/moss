@@ -33,7 +33,9 @@ export type RedeemOutcome = {
 
 export type BoostYieldOutcome = {
   operation: "boostYield";
-  from: AddressValue;
-  shares: string;
+  sender: AddressValue;
   yieldOriginator: AddressValue;
+  validatorId: string;
+  amount: string;
+  shares: string;
 };
