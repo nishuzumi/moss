@@ -192,6 +192,12 @@ export class FastLane {
     verb: "unstake",
     params: completeUnstakeParams,
     receipt: "completeUnstakeReceipt",
+    // This step is inflow-only: requestUnstake already committed the shMON, and
+    // completion only pays MON back to the owner. `fundOut` as settled in #114
+    // means assets leave the account in this transaction, so it does not fit,
+    // but Registry rejects an empty risk set and the closed set has no
+    // inflow-only entry. Kept as the least-wrong placeholder pending the ruling
+    // asked for in #12 and #104.
     risk: ["fundOut"],
     tags: ["staking", "unstake", "delayed"],
   })
@@ -331,6 +337,17 @@ export class FastLane {
     if (!event || !native || event.assets !== native.value) {
       throw new Error("FastLane deposit Receipt requires matching Deposit and native Changes");
     }
+    // Bind the native transfer to the event, not just to its amount: the staked
+    // MON has to leave the Deposit sender and arrive at the vault. Without this
+    // the same amount moving anywhere else satisfies the Receipt.
+    if (
+      !sameAddress(native.from, event.sender) ||
+      !sameAddress(native.to, FASTLANE_STAKING_ADDRESS)
+    ) {
+      throw new Error(
+        "FastLane deposit Receipt requires the staked MON to move from the Deposit sender to FastLane",
+      );
+    }
 
     return {
       kind: "receipt",
@@ -384,6 +401,17 @@ export class FastLane {
 
     if (!event || !native || event.assets !== native.value) {
       throw new Error("FastLane redeem Receipt requires matching Withdraw and native Changes");
+    }
+    // The payout has to come out of the vault and land on the receiver the
+    // Receipt names. Amount-only matching accepts the right MON reaching the
+    // wrong account.
+    if (
+      !sameAddress(native.from, FASTLANE_STAKING_ADDRESS) ||
+      !sameAddress(native.to, event.receiver)
+    ) {
+      throw new Error(
+        "FastLane redeem Receipt requires the MON payout to move from FastLane to the Withdraw receiver",
+      );
     }
 
     return {
@@ -477,6 +505,17 @@ export class FastLane {
         "FastLane completeUnstake Receipt requires matching CompleteUnstake and native Changes",
       );
     }
+    // Same binding as redeem, against the owner the CompleteUnstake event names.
+    // Confirmed on mainnet: tx 0xf18ff4f892de84b9cafbaf123788cedf6533578c857d42716d88886ac4d4ef13
+    // pays amountMon straight from the vault to the CompleteUnstake owner.
+    if (
+      !sameAddress(native.from, FASTLANE_STAKING_ADDRESS) ||
+      !sameAddress(native.to, event.owner)
+    ) {
+      throw new Error(
+        "FastLane completeUnstake Receipt requires the MON payout to move from FastLane to the CompleteUnstake owner",
+      );
+    }
 
     return {
       kind: "receipt",
@@ -528,7 +567,20 @@ export class FastLane {
   }
 }
 
+// The simulator reports trace addresses as the node returned them (lowercase)
+// while decodeEventLog checksums what it decodes, so every address comparison
+// here is case-insensitive.
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 function tryDecodeFastLaneEvent(change: Extract<Change, { kind: "event" }>) {
+  // Only the staking vault can produce FastLane evidence. Decoding by topics
+  // alone accepts a matching event from any contract, which matters most for
+  // boostYield: its canonical event is the shared ERC-20 Transfer signature, so
+  // every token on Monad emits something that decodes here. Anything from
+  // another address falls through to the ERC-20 dependency instead.
+  if (!sameAddress(change.address, FASTLANE_STAKING_ADDRESS)) return undefined;
   try {
     return decodeEventLog({
       abi: FastLaneStakingAbi,

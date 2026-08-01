@@ -61,10 +61,11 @@ function depositEvent(
   owner: `0x${string}`,
   assets: bigint,
   shares: bigint,
+  emitter: `0x${string}` = FASTLANE_STAKING_ADDRESS,
 ): Change {
   return {
     kind: "event",
-    address: FASTLANE_STAKING_ADDRESS,
+    address: emitter,
     topics: encodeEventTopics({
       abi: FastLaneStakingAbi,
       eventName: "Deposit",
@@ -131,10 +132,15 @@ function completeUnstakeEvent(owner: `0x${string}`, amountMon: bigint): Change {
 // ERC-20 Transfer event: (from indexed, to indexed, value unindexed).
 // boostYield emits a Transfer moving shMON shares from the staker to the
 // yield originator.
-function transferEvent(from: `0x${string}`, to: `0x${string}`, value: bigint): Change {
+function transferEvent(
+  from: `0x${string}`,
+  to: `0x${string}`,
+  value: bigint,
+  emitter: `0x${string}` = FASTLANE_STAKING_ADDRESS,
+): Change {
   return {
     kind: "event",
-    address: FASTLANE_STAKING_ADDRESS,
+    address: emitter,
     topics: encodeEventTopics({
       abi: FastLaneStakingAbi,
       eventName: "Transfer",
@@ -192,6 +198,82 @@ describe("FastLane shMONAD staking", () => {
     expect(receipt.changes).toHaveLength(2);
     expect(changeOf(receipt.changes[0])).toBe(native);
     expect(changeOf(receipt.changes[1])).toBe(deposited);
+  });
+
+  // The simulator hands Receipt parsers the addresses the trace reported, which
+  // are lowercase, while decodeEventLog checksums the addresses it decodes. Both
+  // spellings name the same account, so endpoint binding compares them
+  // case-insensitively.
+  it("parses stake (deposit) Changes whose native endpoints are lowercase", async () => {
+    const capability = await registry.action("fastlane", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    const native = {
+      kind: "nativeTransfer",
+      from: ACCOUNT.toLowerCase() as `0x${string}`,
+      to: FASTLANE_STAKING_ADDRESS.toLowerCase() as `0x${string}`,
+      value: "1000000000000000000",
+    } satisfies Change;
+
+    const deposited = depositEvent(ACCOUNT, ACCOUNT, 10n ** 18n, 10n ** 18n);
+
+    const receipt = registry.parseReceipt(capability, [native, deposited]);
+    expect(receipt.outcome).toMatchObject({ operation: "deposit", sender: ACCOUNT });
+  });
+
+  it("rejects stake (deposit) Receipt when the Deposit event comes from another emitter", async () => {
+    const capability = await registry.action("fastlane", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    const native = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: FASTLANE_STAKING_ADDRESS,
+      value: "1000000000000000000",
+    } satisfies Change;
+
+    // A validly encoded Deposit from any other contract is not FastLane
+    // evidence. Once the emitter check rejects it, the Change falls through to
+    // the ERC-20 dependency, which does not recognise a Deposit topic either.
+    const forged = depositEvent(
+      ACCOUNT,
+      ACCOUNT,
+      10n ** 18n,
+      10n ** 18n,
+      getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+    );
+
+    expect(() => registry.parseReceipt(capability, [native, forged])).toThrow(
+      "emitted an unsupported ERC-20 event",
+    );
+  });
+
+  it("rejects stake (deposit) Receipt when the staked MON does not reach FastLane", async () => {
+    const capability = await registry.action("fastlane", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Right amount, wrong destination: the MON never reaches the vault.
+    const native = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      value: "1000000000000000000",
+    } satisfies Change;
+
+    const deposited = depositEvent(ACCOUNT, ACCOUNT, 10n ** 18n, 10n ** 18n);
+
+    expect(() => registry.parseReceipt(capability, [native, deposited])).toThrow(
+      "FastLane deposit Receipt requires the staked MON to move from the Deposit sender to FastLane",
+    );
   });
 
   it("builds atomic redeem transaction with shares, receiver, owner", async () => {
@@ -273,6 +355,36 @@ describe("FastLane shMONAD staking", () => {
     );
   });
 
+  it("rejects atomic redeem Receipt when the MON payout goes to another recipient", async () => {
+    const capability = await registry.action("fastlane", "redeem", ACCOUNT, {
+      shares: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Right amount, wrong recipient. Matching on the amount alone lets this
+    // through and the Receipt then names the Withdraw receiver, not the account
+    // that actually got the MON.
+    const native = {
+      kind: "nativeTransfer",
+      from: FASTLANE_STAKING_ADDRESS,
+      to: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      value: "990000000000000000",
+    } satisfies Change;
+
+    const withdrawn = withdrawEvent(
+      ACCOUNT,
+      ACCOUNT,
+      ACCOUNT,
+      990_000_000_000_000_000n,
+      10n ** 18n,
+    );
+
+    expect(() => registry.parseReceipt(capability, [withdrawn, native])).toThrow(
+      "FastLane redeem Receipt requires the MON payout to move from FastLane to the Withdraw receiver",
+    );
+  });
+
   it("parses requestUnstake Changes with exact identity, length, and order", async () => {
     const capability = await registry.action("fastlane", "requestUnstake", ACCOUNT, {
       shares: "1",
@@ -321,6 +433,26 @@ describe("FastLane shMONAD staking", () => {
     expect(changeOf(receipt.changes[1])).toBe(native);
   });
 
+  it("rejects completeUnstake Receipt when the MON payout goes to another recipient", async () => {
+    const capability = await registry.action("fastlane", "completeUnstake", ACCOUNT, {});
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Right amount, wrong recipient. The owner named in the Receipt never
+    // receives the MON.
+    const native = {
+      kind: "nativeTransfer",
+      from: FASTLANE_STAKING_ADDRESS,
+      to: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      value: "990000000000000000",
+    } satisfies Change;
+
+    const completeEvent = completeUnstakeEvent(ACCOUNT, 990_000_000_000_000_000n);
+
+    expect(() => registry.parseReceipt(capability, [completeEvent, native])).toThrow(
+      "FastLane completeUnstake Receipt requires the MON payout to move from FastLane to the CompleteUnstake owner",
+    );
+  });
+
   it("parses boostYield Changes with exact identity, length, and order", async () => {
     const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
     const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
@@ -342,6 +474,30 @@ describe("FastLane shMONAD staking", () => {
     // Identity + length + order assertions
     expect(receipt.changes).toHaveLength(1);
     expect(changeOf(receipt.changes[0])).toBe(transferred);
+  });
+
+  it("rejects boostYield Receipt when the Transfer comes from another token", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // boostYield's canonical event is the shared ERC-20 Transfer signature, so
+    // any token's Transfer decodes. Only shMON's counts as FastLane evidence;
+    // another token's is delegated to the ERC-20 dependency and leaves the
+    // boostYield outcome unsatisfied.
+    const otherToken = transferEvent(
+      ACCOUNT,
+      yieldOriginator,
+      10n ** 18n,
+      getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+    );
+
+    expect(() => registry.parseReceipt(capability, [otherToken])).toThrow(
+      "FastLane boostYield Receipt requires Transfer event",
+    );
   });
 
   it("rejects boostYield Receipt when no Transfer event is present", async () => {
