@@ -7,10 +7,12 @@ import {
   compareDeployedAbi,
   ERC1967_IMPLEMENTATION_SLOT,
   erc1967ImplementationAddress,
+  type FacetSource,
   type FetchAbiError,
   type FetchAbiErrorKind,
   fetchAbi,
   renderAbiModule,
+  type SelectorRowStatus,
 } from "../src/index.js";
 
 declare const address: string;
@@ -64,3 +66,16 @@ void slot;
 declare const rawSlotWord: unknown;
 const implementation: `0x${string}` = erc1967ImplementationAddress(rawSlotWord);
 void implementation;
+
+// The selector-proxy verdicts stay closed literal unions, like the fetch error
+// kinds above: a caller can switch on them exhaustively.
+const rowStatus: SelectorRowStatus = "selector-collision";
+void rowStatus;
+// @ts-expect-error unknown row statuses are rejected
+const badRowStatus: SelectorRowStatus = "collision";
+void badRowStatus;
+const facetSource: FacetSource = "selectorToFacet";
+void facetSource;
+// @ts-expect-error unknown facet sources are rejected
+const badFacetSource: FacetSource = "diamond";
+void badFacetSource;

@@ -60,8 +60,26 @@ const transferEvent = {
   ],
 } as const;
 
+/** The classic 4-byte collision: different signatures, one selector. */
+const burn = {
+  type: "function",
+  name: "burn",
+  inputs: [{ name: "amount", type: "uint256" }],
+  outputs: [],
+  stateMutability: "nonpayable",
+} as const;
+
+const collider = {
+  type: "function",
+  name: "collate_propagate_storage",
+  inputs: [{ name: "data", type: "bytes16" }],
+  outputs: [],
+  stateMutability: "nonpayable",
+} as const;
+
 const TRANSFER = toFunctionSelector(transfer) as Selector;
 const BALANCE_OF = toFunctionSelector(balanceOf) as Selector;
+const BURN = toFunctionSelector(burn) as Selector;
 const UNKNOWN = "0xdeadbeef" as Selector;
 
 /** bytes4 argument of a point lookup: left-aligned in the single word. */
@@ -136,6 +154,28 @@ function facetAddressesCall(entries: FacetEntries): EthCall {
 const revertingCall: EthCall = async () => {
   throw new EthCallRevert("execution reverted");
 };
+
+describe("loupe selector constants", () => {
+  it("derives the selectors the specs publish", () => {
+    // Pinned against the published values (EIP-2535 for the four loupe views,
+    // Pendle's IPActionStorageV4 for selectorToFacet). The derivation covers a
+    // hand-typed constant; this covers a typo in a LOUPE_ABI signature string,
+    // which would otherwise be wrong on both sides of a fake-transport match.
+    expect({
+      facets: FACETS_SELECTOR,
+      facetAddresses: FACET_ADDRESSES_SELECTOR,
+      facetFunctionSelectors: FACET_FUNCTION_SELECTORS_SELECTOR,
+      facetAddress: FACET_ADDRESS_SELECTOR,
+      selectorToFacet: SELECTOR_TO_FACET_SELECTOR,
+    }).toEqual({
+      facets: "0x7a0ed627",
+      facetAddresses: "0x52ef6b2c",
+      facetFunctionSelectors: "0xadfca15e",
+      facetAddress: "0xcdffacc6",
+      selectorToFacet: "0xae7473ac",
+    });
+  });
+});
 
 describe("resolveSelectorProxy", () => {
   it("resolves the complete map through facets()", async () => {
@@ -634,28 +674,13 @@ describe("crossCheckSelectorProxyAbi", () => {
   });
 
   it("reports a function absent from its routed facet, naming any selector collision", async () => {
-    const burn = {
-      type: "function",
-      name: "burn",
-      inputs: [{ name: "amount", type: "uint256" }],
-      outputs: [],
-      stateMutability: "nonpayable",
-    } as const;
-    const collider = {
-      type: "function",
-      name: "collate_propagate_storage",
-      inputs: [{ name: "data", type: "bytes16" }],
-      outputs: [],
-      stateMutability: "nonpayable",
-    } as const;
-    // The classic 4-byte collision: different signatures, same selector.
     expect(toFunctionSelector(collider)).toBe(toFunctionSelector(burn));
     const { fetchFacetAbi } = fetcher({ [FACET_A]: [collider], [FACET_B]: [] });
     const result = await crossCheckSelectorProxyAbi({
       vendored: [burn, transfer],
       proxy: PROXY,
       call: facetsCall([
-        [FACET_A, [toFunctionSelector(burn) as Selector]],
+        [FACET_A, [BURN]],
         [FACET_B, [TRANSFER]],
       ]),
       getCode: hasCode,
@@ -667,6 +692,33 @@ describe("crossCheckSelectorProxyAbi", () => {
     );
     expect(result.rows[1]).toMatchObject({ facet: FACET_B, status: "not-in-facet-abi" });
     expect(result.rows[1]?.detail).toMatch(/does not contain this function/);
+  });
+
+  it.each([
+    ["after the vendored signature", [burn, collider]],
+    ["before it", [collider, burn]],
+  ] as const)("does not pass a row when a collider is listed %s", async (_name, items) => {
+    // Both signatures hash to 0x42966c68, so the facet dispatches only one
+    // of them. Finding the vendored signature in the ABI is not evidence
+    // that it is the one served, in either ABI order.
+    const { fetchFacetAbi } = fetcher({ [FACET_A]: [...items] });
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [burn],
+      proxy: PROXY,
+      call: facetsCall([[FACET_A, [BURN]]]),
+      getCode: hasCode,
+      fetchFacetAbi,
+    });
+    expect(result.rows).toMatchObject([
+      { selector: BURN, facet: FACET_A, status: "selector-collision" },
+    ]);
+    expect(result.rows[0]?.detail).toMatch(
+      /also implements function collate_propagate_storage\(bytes16\)/,
+    );
+    // The other function still surfaces in the union comparison.
+    expect(result.issues).toMatchObject([
+      { kind: "unexpected", signature: "function collate_propagate_storage(bytes16)" },
+    ]);
   });
 
   it("reports changed semantics on the routed facet as a mismatch", async () => {

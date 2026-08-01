@@ -415,7 +415,12 @@ export function unionFacetAbis(facetAbis: ReadonlyMap<`0x${string}`, Abi>): Face
   return { union, conflicts };
 }
 
-/** Per-selector routing verdict for one vendored function. */
+/**
+ * Per-selector routing verdict for one vendored function. `selector-collision`
+ * is the evidence verdict: the facet's verified ABI carries the vendored
+ * signature and a second function at the same 4-byte selector, so which of the
+ * two the facet dispatches cannot be read off the ABI.
+ */
 export type SelectorRowStatus =
   | "matched"
   | "unmapped"
@@ -423,6 +428,7 @@ export type SelectorRowStatus =
   | "facet-unverified"
   | "facet-fetch-failed"
   | "not-in-facet-abi"
+  | "selector-collision"
   | "mismatch";
 
 export interface SelectorRow {
@@ -600,17 +606,21 @@ export async function crossCheckSelectorProxyAbi(
         detail: facetReport.detail,
       };
     }
+    // The whole facet ABI is scanned, not just up to the match: a second
+    // function at the same selector can be listed after the vendored one, and
+    // stopping at the match would drop it.
     let match: Record<string, unknown> | undefined;
     let collision: string | undefined;
     for (const item of verifiedAbis.get(facet) ?? []) {
       if (item.type !== "function") continue;
       const record = item as unknown as Record<string, unknown>;
-      if (signatureOf(record) === signature) {
-        match = record;
-        break;
+      const itemSignature = signatureOf(record);
+      if (itemSignature === signature) {
+        match ??= record;
+        continue;
       }
       if ((toFunctionSelector(item).toLowerCase() as Selector) === selector) {
-        collision = signatureOf(record);
+        collision ??= itemSignature;
       }
     }
     if (match === undefined) {
@@ -623,6 +633,19 @@ export async function crossCheckSelectorProxyAbi(
           collision === undefined
             ? "the facet's verified ABI does not contain this function"
             : `the facet's verified ABI implements ${collision} at this selector`,
+      };
+    }
+    if (collision !== undefined) {
+      // Two signatures at one selector: the facet dispatches whichever its
+      // bytecode routes there, so finding the vendored signature is not
+      // evidence that it is the one served. The union comparison still
+      // reports the other function and any mismatch on this signature.
+      return {
+        selector,
+        signature,
+        facet,
+        status: "selector-collision" as const,
+        detail: `the facet's verified ABI also implements ${collision} at this selector`,
       };
     }
     const expected = semanticsOf(fn as unknown as Record<string, unknown>);
