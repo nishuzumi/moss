@@ -486,8 +486,9 @@ describe("FastLane shMONAD staking", () => {
   });
 
   // Change order, addresses and amounts here are the ones a mainnet
-  // deposit -> boostYield run reports: the burn settles first, then the vault
-  // says whose yield it credited and what that was worth in MON.
+  // deposit -> boostYield run reported: the burn settles first, then the vault
+  // says whose yield it credited and what that was worth in MON. The MON figure
+  // follows the live exchange rate, so a fresh run reports a nearby number.
   it("parses boostYield Changes with exact identity, length, and order", async () => {
     const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
     const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
