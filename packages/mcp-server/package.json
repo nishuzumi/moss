@@ -24,6 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@themoss/core": "workspace:*",
+    "@themoss/protocol-aave": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
