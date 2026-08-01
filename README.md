@@ -24,10 +24,11 @@ Moss currently targets Monad mainnet, chain ID `143`.
 | ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`, `balanceOf` |
 | ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
+| aPriori | `@themoss/protocol-apriori` | `stake`, `unstake`, `claim` | — |
+| PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+ERC-1155 `transfer` accepts a collection, token ID, amount, and recipient. Token IDs and amounts are base-10 uint256 strings, including zero. The Capability builds one `safeTransferFrom`; batch transfer construction is not currently exposed. Receipts still decode both `TransferSingle` and `TransferBatch` Changes without aggregating or reordering their items.
 | Monad Cards | `@themoss/protocol-monad-cards` | — | `totalMinted` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
-
-ERC-1155 `transfer` accepts a collection, token ID, amount, and recipient. Token IDs and amounts are base-10 uint256 strings, including zero. The Capability builds one `safeTransferFrom`; batch transfer construction is not currently exposed. Receipts still decode both `TransferSingle` and `TransferBatch` Changes without aggregating or reordering their items.
 
 ## Quickstart
 

@@ -55,6 +55,7 @@ jobs:
             nodejs.org:443
             registry.npmjs.org:443
             api.kuru.io:443
+            api-v2.pendle.finance:443
             rpc.monad.xyz:443
             moss-rpc.0xmon.dev:443
 
