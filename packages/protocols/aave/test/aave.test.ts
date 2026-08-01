@@ -558,6 +558,27 @@ describe("Aave", () => {
         "requires one USDT0 transfer",
       ],
       [
+        // Emitting a Transfer with any from, to and value costs an attacker
+        // nothing, so an identical decoy placed ahead of the real funding
+        // transfer must fail rather than resolve to whichever came first.
+        "a decoy identical to the funding transfer",
+        [
+          supplyChanges()[0] as Change,
+          erc20Transfer(USDT0.underlying, ACCOUNT, USDT0.aToken, 1_000_000n),
+          ...supplyChanges().slice(1),
+        ],
+        "saw 2 USDT0 transfers; exactly one belongs to this operation",
+      ],
+      [
+        "a decoy for the same amount from somebody else",
+        [
+          supplyChanges()[0] as Change,
+          erc20Transfer(USDT0.underlying, OTHER, USDT0.aToken, 1_000_000n),
+          ...supplyChanges().slice(1),
+        ],
+        "saw 2 USDT0 transfers",
+      ],
+      [
         "a foreign token movement",
         [
           ...supplyChanges().slice(0, 6),

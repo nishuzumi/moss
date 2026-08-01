@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { generate } from "../scripts/abis.js";
+import { generate, readVendor, VENDORED_FILES } from "../scripts/abis.js";
 import { AAVE_V3_MONAD } from "../src/abis/address-book.js";
 import {
   AAVE_POOL_ADDRESS,
@@ -24,6 +25,21 @@ describe("abi and deployment provenance chain", () => {
     expect(Object.keys(generated).sort()).toEqual(["src/abis/aave.ts", "src/abis/address-book.ts"]);
     for (const [file, contents] of Object.entries(generated)) {
       expect(readFileSync(join(packageRoot, file), "utf8"), file).toBe(contents);
+    }
+  });
+
+  // The upstream half of the chain, checkable without the network: every
+  // vendored byte has to hash to what VENDOR.json recorded when it was
+  // downloaded. Without this, only `pnpm update:abis` could catch an edited
+  // copy of a third-party file.
+  it("every vendored file matches its recorded sha256", () => {
+    const vendor = readVendor(packageRoot);
+    const recorded = Object.keys(vendor.files);
+    expect(recorded.length).toBeGreaterThanOrEqual(VENDORED_FILES.length);
+    for (const file of VENDORED_FILES) expect(recorded).toContain(file);
+    for (const [file, digest] of Object.entries(vendor.files)) {
+      const bytes = readFileSync(join(packageRoot, "abis-src", file));
+      expect(createHash("sha256").update(bytes).digest("hex"), file).toBe(digest);
     }
   });
 

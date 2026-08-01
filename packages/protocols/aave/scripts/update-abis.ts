@@ -115,6 +115,16 @@ const vendor: VendorInfo = {
   tarballSha256: sha256,
   vendoredAt: new Date().toISOString().slice(0, 10),
   releaseAgeGuardDays: MIN_RELEASE_AGE_DAYS,
+  // Per-file digests so the upstream bytes stay verifiable offline, not only
+  // by whoever can re-download the tarball.
+  files: Object.fromEntries(
+    [...copied].sort().map((file) => [
+      file,
+      createHash("sha256")
+        .update(readFileSync(join(packageRoot, "abis-src", file)))
+        .digest("hex"),
+    ]),
+  ),
 };
 writeFileSync(join(packageRoot, "abis-src", "VENDOR.json"), `${JSON.stringify(vendor, null, 2)}\n`);
 

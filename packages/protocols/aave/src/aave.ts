@@ -17,12 +17,18 @@
  * address rather than a Token reference.
  *
  * Risk model (closed set per ADR 0003):
- *   - `fundOut`  - supply and repay send the underlying out; withdraw burns a
- *     supply position and can drop the health factor; borrow encumbers the
- *     account's collateral against liquidation. The closed RiskLabel set has no
- *     debt or liquidation label, so `fundOut` is the nearest available marker
- *     that these Capabilities put account value at risk.
+ *   - `fundOut`  - supply and repay send the underlying out of the account in
+ *     the transaction itself, and withdraw burns the aToken position. All
+ *     three are current-transaction asset outflow, which is what the label
+ *     means.
  *   - `approval` - supply and repay grant the Pool exactly the amount moved.
+ *
+ * `borrow` is the one that does not fit. Nothing leaves the account: it takes
+ * on a future repayment obligation, which the `fundOut` boundary explicitly
+ * excludes. The closed set has no word for that yet, and Registry requires at
+ * least one label, so `borrow` carries `fundOut` as a placeholder and names
+ * `debt` in its tags. It should become `risk: ["debt"]` as soon as that label
+ * exists in Core.
  */
 import {
   type ActionCtx,
@@ -236,6 +242,8 @@ export class Aave {
     verb: "borrow",
     params: borrowParams,
     receipt: "borrowReceipt",
+    // Placeholder: nothing leaves the account here, so this should be `debt`
+    // once Core has that label. See the risk note at the top of this file.
     risk: ["fundOut"],
     tags: ["lending", "aave-v3", "debt"],
   })

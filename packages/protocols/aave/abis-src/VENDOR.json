@@ -3,5 +3,15 @@
   "version": "4.61.2",
   "tarballSha256": "c3947b04fef6f096faf881950462dadde17744481a7a1d80a858ba62e35b15be",
   "vendoredAt": "2026-08-01",
-  "releaseAgeGuardDays": 7
+  "releaseAgeGuardDays": 7,
+  "files": {
+    "dist/AaveV3Monad.mjs": "9389b2189c6b6f6b378eafcc2f8817b57baa5e6733f35581487d3bc79305beae",
+    "dist/AaveV3Monad.mjs.map": "41c447a4b356626baaf855192921b5d18425b1ff335ad0b4eb21686e2796c3e5",
+    "dist/abis/IAToken.mjs": "47e9f2b7c87556e813cdb612775ace46ac00cd74285c1125336a14b685139f06",
+    "dist/abis/IAToken.mjs.map": "8816a5acf3a75ac1f97c40350c3dfe4e66fa18d728979faabc157430cc2afc1b",
+    "dist/abis/IPool.mjs": "32faf98bff51dbcc0f8f0b63f231a7b0691a65f96e975c51dbf92e3c9bada584",
+    "dist/abis/IPool.mjs.map": "07b0d54dc340d9659489bbe3ecbef1d499796116c95e765fb592937a9d2652c9",
+    "dist/chunk-2MM5EJJX.mjs": "85e9dfed5a77cfb446092d842086a44379e22f7edc2a1146b2baa04fc21fd976",
+    "dist/chunk-2MM5EJJX.mjs.map": "8a44d0a59c3bcf7f0df97dd85de8c242efbe7a2d3a2501923280ada4842eb326"
+  }
 }

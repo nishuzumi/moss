@@ -23,6 +23,20 @@ export interface VendorInfo {
   tarballSha256: string;
   vendoredAt: string;
   releaseAgeGuardDays: number;
+  /**
+   * sha256 of every vendored file, keyed by its path under abis-src/. The
+   * tarball digest alone is only checkable by re-running `update:abis` with
+   * network access; these make the upstream bytes verifiable offline, so
+   * `pnpm test` catches an edited copy on its own.
+   */
+  files: Record<string, string>;
+}
+
+/** Reads the committed provenance record. */
+export function readVendor(packageRoot: string): VendorInfo {
+  return JSON.parse(
+    readFileSync(join(packageRoot, "abis-src", "VENDOR.json"), "utf8"),
+  ) as VendorInfo;
 }
 
 /**
@@ -74,9 +88,7 @@ function vendorHeader(vendor: VendorInfo, what: string): string {
 }
 
 export async function generate(packageRoot: string): Promise<Record<string, string>> {
-  const vendor = JSON.parse(
-    readFileSync(join(packageRoot, "abis-src", "VENDOR.json"), "utf8"),
-  ) as VendorInfo;
+  const vendor = readVendor(packageRoot);
 
   let abis = `${vendorHeader(vendor, "ABI")}\
 //   verification: every selector and event topic the adapter uses was found in

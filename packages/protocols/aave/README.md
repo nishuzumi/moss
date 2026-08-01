@@ -17,6 +17,13 @@ an allowance because the Pool pulls the underlying with `transferFrom`, so they
 nest one ERC-20 approval for exactly the amount being moved. Nothing is signed
 or sent here.
 
+`borrow`'s risk label is a placeholder. `fundOut` means assets leave the account
+in the current transaction, which is true of supply, repay and the aToken burn
+in withdraw, but not of a borrow: nothing leaves, an obligation is created. The
+closed set has no word for that yet and Registry requires at least one label, so
+`borrow` carries `fundOut` and names `debt` in its tags. It should become
+`risk: ["debt"]` the moment that label lands in Core.
+
 `borrow` is inflow-only by design: the asset arrives and nothing leaves, because
 the cost is debt rather than an asset. Its Receipt proves the inflow and the
 debt-token mint, and refuses anything else.
