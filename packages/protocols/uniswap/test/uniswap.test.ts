@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
   type Change,
+  createRuntime,
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
@@ -10,7 +11,7 @@ import {
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS } from "@themoss/system";
 import {
   decodeAbiParameters,
   decodeFunctionData,
@@ -438,7 +439,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Uniswap mainnet", () => {
   it("matches the pinned deployments and quotes both directions live", {
     timeout: 120_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const manifest = JSON.parse(
       readFileSync(new URL("../abis.json", import.meta.url), "utf8"),
     ) as Record<string, { address: `0x${string}`; deployedBytecodeKeccak256: Hex }>;
@@ -505,7 +506,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Uniswap mainnet", () => {
   it("simulates a native swap into an exhaustive typed Receipt with zero Warnings", {
     timeout: 180_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Uniswap);
     const capability = await registry.action("uniswap", "swap", ACCOUNT, {
       tokenIn: NATIVE,
@@ -536,7 +537,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Uniswap mainnet", () => {
     // proves both approval Receipts live with zero Warnings; the final
     // swap then reverts only on the account's missing USDC balance
     // (deterministic for any unfunded account), never on encoding.
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Uniswap);
     const capability = await registry.action("uniswap", "swap", ACCOUNT, {
       tokenIn: USDC_ADDRESS,

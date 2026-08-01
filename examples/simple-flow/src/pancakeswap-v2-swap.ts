@@ -1,14 +1,12 @@
 /** Quote, build, and simulate one PancakeSwap v2 Capability. */
-import { NATIVE, Registry } from "@themoss/core";
+import { createRuntime, NATIVE, Registry } from "@themoss/core";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS } from "@themoss/system";
 
 const ACCOUNT = (process.env.MOSS_ACCOUNT ??
   "0xcccccccccccccccccccccccccccccccccccccccc") as `0x${string}`;
-const runtime = await monadRuntime({
-  ...(process.env.MOSS_RPC_URL ? { rpcUrl: process.env.MOSS_RPC_URL } : {}),
-});
+const runtime = await createRuntime();
 const registry = new Registry(runtime).use(pancakeswap);
 const simulator = createTraceSimulator(runtime, {
   receipt: (capability, changes) => registry.parseReceipt(capability, changes),

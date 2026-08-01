@@ -1,4 +1,5 @@
 import { createRuntime, type MossRuntime, Registry } from "@themoss/core";
+
 import { getAddress } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import { MONAD_CARDS_ADDRESS, MonadCards, monadCardsAbi } from "../src/index.js";
@@ -74,9 +75,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Monad Cards on Monad mainnet", () 
   it("is the Monad Cards collection and returns a positive minted supply", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await createRuntime({
-      rpcUrl: process.env.MOSS_RPC_URL ?? "https://rpc.monad.xyz",
-    });
+    const runtime = await createRuntime();
     expect(
       (await runtime.client.getCode({ address: MONAD_CARDS_ADDRESS }))?.length,
     ).toBeGreaterThan(2);

@@ -1,12 +1,13 @@
 import {
   type Change,
+  createRuntime,
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
   Registry,
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
-import { monadRuntime, USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS, WMON_ADDRESS } from "@themoss/system";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { factoryAbi } from "../src/abis/factory.js";
@@ -430,7 +431,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("PancakeSwap mainnet", () => {
   it("has deployed bytecode and self-consistent router/factory/WMON wiring", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
 
     for (const address of [PANCAKESWAP_V3_ROUTER_ADDRESS, PANCAKESWAP_V3_FACTORY_ADDRESS]) {
       expect((await runtime.client.getCode({ address }))?.length ?? 0).toBeGreaterThan(2);

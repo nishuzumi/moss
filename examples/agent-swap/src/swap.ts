@@ -1,17 +1,17 @@
 /** Agent-side local-fork flow. No key enters Moss. */
 import { writeFileSync } from "node:fs";
-import { type JsonSafeValue, NATIVE, Registry, type TokenRef } from "@themoss/core";
+import { createRuntime, type JsonSafeValue, NATIVE, Registry, type TokenRef } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import type { KuruSwapOutcome } from "@themoss/protocol-kuru";
 import * as kuru from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
 import * as system from "@themoss/system";
-import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS } from "@themoss/system";
 import { isAddress, parseUnits } from "viem";
 import { devAccount, FORK_RPC_URL } from "./dev-wallet.js";
 
 const outputPath = process.argv[2] ?? "verified-capability.json";
-const runtime = await monadRuntime({ rpcUrl: FORK_RPC_URL });
+const runtime = await createRuntime({ rpcUrl: FORK_RPC_URL });
 const registry = new Registry(runtime).use(system, erc, kuru);
 const simulator = createTraceSimulator(runtime, {
   receipt: (capability, changes) => registry.parseReceipt(capability, changes),

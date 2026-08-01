@@ -1,16 +1,13 @@
 /** discover → load → action → simulate for one WMON Capability. */
-import { Registry } from "@themoss/core";
+import { createRuntime, Registry } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
 import { createTraceSimulator } from "@themoss/simulator";
 import * as system from "@themoss/system";
-import { monadRuntime } from "@themoss/system";
 
 const ACCOUNT = (process.env.MOSS_ACCOUNT ??
   "0xcccccccccccccccccccccccccccccccccccccccc") as `0x${string}`;
-const runtime = await monadRuntime({
-  ...(process.env.MOSS_RPC_URL ? { rpcUrl: process.env.MOSS_RPC_URL } : {}),
-});
+const runtime = await createRuntime();
 const registry = new Registry(runtime).use(system, erc, kuru);
 const simulator = createTraceSimulator(runtime, {
   receipt: (capability, changes) => registry.parseReceipt(capability, changes),

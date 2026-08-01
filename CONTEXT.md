@@ -91,7 +91,7 @@ A safe 1–32 character payload for a fixed token address selected explicitly by
 A Protocol-owned local name for a fixed address declared independently of its Handles and rendered as `Package(Title Cased Slug:localName)`. The combined payload inside `Package(...)` is a safe 1–32 character name. A Receipt sees its own Package labels, the Package labels inherited from its parser caller chain, and one unambiguous label from its own declared dependency graph.
 
 **Package boundary**:
-Core owns framework contracts; simulator owns trace mechanics; ERC and concrete Protocol packages own ABI semantics, Receipts, and protocol-exclusive deployment addresses; system owns the shared Monad Runtime and shared asset instances; MCP server owns transport. New Protocols affect only their package and the composition root.
+Core owns framework contracts; simulator owns trace mechanics; ERC and concrete Protocol packages own ABI semantics, Receipts, and protocol-exclusive deployment addresses; core owns the shared Monad Runtime; system owns shared asset instances; MCP server owns transport. New Protocols affect only their package and the composition root.
 
 **ABI origin**:
 The provenance tier of an ABI file: `compiled` (from contract source), `explorer` (verified-contract page), or `vendored` (documented third-party source, behavior verified on-chain). Every ABI declares exactly one.

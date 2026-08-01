@@ -32,7 +32,7 @@ export {
   Registry,
   type Stub,
 } from "./registry.js";
-export { createRuntime, type MossRuntime } from "./runtime.js";
+export { createRuntime, defaultRpcUrl, MONAD_CHAIN_ID, type MossRuntime } from "./runtime.js";
 export {
   Address,
   BasisPoints,
