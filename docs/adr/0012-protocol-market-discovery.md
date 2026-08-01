@@ -1,6 +1,12 @@
-# Kuru markets come from the official filtered API and are verified on-chain
+# Discovered markets come from the protocol's official API and are verified on-chain
 
-Kuru has no pair-indexed on-chain `getPool`; its official SDK discovers candidate markets through the filtered-markets API. The Kuru Protocol follows that discovery path for direct and via-MON candidates, then verifies every returned market against the Router's on-chain `verifiedMarket` data before quoting or constructing a Capability. The API supplies candidates, never trusted market facts.
+A protocol whose markets are created permissionlessly has no complete on-chain index to read, so its own SDK discovers them through an official HTTP service. A Protocol in this position follows that same discovery path, then re-derives every fact it acts on from chain state before quoting or constructing a Capability. **The service supplies candidates, never trusted market facts**, and a candidate that fails on-chain verification is dropped rather than used.
+
+Two Protocols implement this today, and a third should follow the same shape rather than inventing another.
+
+**Kuru** has no pair-indexed on-chain `getPool`. It discovers direct and via-MON candidates through the filtered-markets API, then verifies every returned market against the Router's on-chain `verifiedMarket` data.
+
+**Pendle** has no enumerable on-chain market list. It discovers candidates through the official markets API, then verifies each one against the official V6 Factory: `isValidMarket(market)` must hold, the market's own `factory()` must point back at the pinned Factory, and `readTokens` must return non-zero, distinct SY/PT/YT. Verifying none of the nominated candidates is an explicit error, not an empty result.
 
 The filtered-markets HTTP request is bounded by a timeout, maximum response size, maximum candidate count, and maximum constructed route count. Discovery failure, malformed responses, oversized responses, excessive candidates, and excessive direct or via-MON route combinations stop the Query or Capability before unbounded on-chain verification or quoting fanout.
 
@@ -16,7 +22,11 @@ The Kuru package owns the official `https://api.kuru.io` base URL. This protocol
 
 The Kuru package also owns its fixed Router deployment and the private zero-address conversion used for native MON. Shared token addresses remain imports from `@themoss/system`; market addresses remain dynamic. The Router constant cites its official source and has an on-chain deployed-bytecode check. The ABI cross-check manifest (`abis.json`, ADR 0007) pins the Router proxy's *implementation* address and the Router-reported market-template implementation for provenance verification only; they never enter runtime routing and do not weaken the dynamic-market rule.
 
+Each Protocol owns its own service URL, request bounds, and verification predicate; those differ per protocol and do not generalize. What does not vary is the shape: candidates from the service, facts from the chain, explicit failure when verification cannot be performed, and no static fallback.
+
 ## Considered Options
+
+These were weighed for Kuru and apply unchanged to any Protocol reaching this decision.
 
 - **Static market addresses** — rejected because new markets require code releases and the adapter silently supports only an allowlist.
 - **Index `MarketRegistered` on every call** — valid and fully on-chain, but duplicates an indexer inside a request path when Kuru already exposes the same candidate lookup used by its SDK.

@@ -56,6 +56,13 @@ export interface TransactionSimulation {
 export interface SimulateOutcome {
   results: TransactionSimulation[];
   halted?: { transactionIndex: number; reason: string };
+  /**
+   * Addresses the caller gave a synthetic prestate through `stateOverrides`, absent when it gave
+   * none. A run that reports them proves behavior under state that was supplied rather than read,
+   * so an absent `halted` does not mean the live account could afford the transaction — check this
+   * before treating a clean outcome as safe to sign.
+   */
+  syntheticState?: readonly Address[];
 }
 
 export interface Simulator {
@@ -92,6 +99,12 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
     ]),
   );
 
+  // Only what the caller supplied counts as synthetic. The sender prefund below is applied to
+  // every run and predates this option, so reporting it would make the field meaningless.
+  const syntheticState = Object.keys(options.stateOverrides ?? {}) as Address[];
+  const finish = (outcome: SimulateOutcome): SimulateOutcome =>
+    syntheticState.length > 0 ? { ...outcome, syntheticState } : outcome;
+
   return {
     async simulate(root): Promise<SimulateOutcome> {
       const executable = flattenCapabilityTree(root);
@@ -124,7 +137,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             gas: null,
           });
         }
-        return { results, halted: { transactionIndex: 0, reason } };
+        return finish({ results, halted: { transactionIndex: 0, reason } });
       }
 
       for (const [transactionIndex, { capability, transaction }] of executable.entries()) {
@@ -151,7 +164,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "TRACE_FAILED", message: reason }],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         if (frame.error) {
@@ -174,7 +187,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "REVERTED", message: `transaction reverted: ${reason}` }],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         let changes: readonly Change[];
@@ -194,7 +207,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [warning],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         let receipt: Receipt;
@@ -220,7 +233,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             ],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         const gas = await estimateGasWithOverrides(runtime.client, call, block, overrides);
@@ -247,7 +260,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
               warnings: [{ code: "STATE_CHAIN_FAILED", message: reason }],
               gas: gas?.toString() ?? null,
             });
-            return { results, halted: { transactionIndex, reason } };
+            return finish({ results, halted: { transactionIndex, reason } });
           }
         }
         results.push({
@@ -261,7 +274,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
           gas: gas?.toString() ?? null,
         });
       }
-      return { results };
+      return finish({ results });
     },
   };
 }

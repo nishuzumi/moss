@@ -418,4 +418,43 @@ describe("Capability simulation", () => {
       reason: "parser rejected ambiguous evidence",
     });
   });
+
+  it("reports the addresses whose prestate the caller supplied", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, logs: [] }]),
+      {
+        stateOverrides: { [B]: { balance: "0x1" } },
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    // The signal a consumer needs: this run proves behaviour under state that was supplied rather
+    // than read, so an absent `halted` is not evidence the live account could afford it.
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.syntheticState).toEqual([B]);
+  });
+
+  it("omits syntheticState when the caller supplied no prestate", async () => {
+    // The sender prefund still happens here and deliberately does not count: reporting it would
+    // mark every run synthetic and destroy the signal.
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, logs: [] }]),
+      { receipt: (node, changes) => coveringReceipt(node.protocol, changes) },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome).not.toHaveProperty("syntheticState");
+  });
+
+  it("still reports synthetic state on a halted run", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, error: "execution reverted" }]),
+      {
+        stateOverrides: { [B]: { balance: "0x1" } },
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeDefined();
+    expect(outcome.syntheticState).toEqual([B]);
+  });
 });
