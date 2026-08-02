@@ -7,7 +7,7 @@ import {
   type ReceiptResult,
   Registry,
 } from "@themoss/core";
-import { createTraceSimulator } from "@themoss/simulator";
+import { createTraceSimulator, type SimulateOutcome } from "@themoss/simulator";
 import { monadRuntime } from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
@@ -890,11 +890,58 @@ describe("FastLane shMONAD staking", () => {
   });
 });
 
+// One runtime for the whole live block. `createRuntime` verifies the chain ID on
+// every call, so building one per case spent nine `eth_chainId` requests on the
+// public endpoint and bought no coverage.
+let runtimeOnce: Promise<MossRuntime> | undefined;
+function liveRuntime(): Promise<MossRuntime> {
+  runtimeOnce ??= monadRuntime();
+  return runtimeOnce;
+}
+
+// Two cases simulate the same stake -> redeem chain, the state chaining one and
+// the loop closure one, from the same account for the same amounts. One simulate
+// of that chain is six requests against the public endpoint: one
+// `eth_blockNumber`, two `callTracer` traces, one `prestateTracer` diff and two
+// `eth_estimateGas`. Tracing it twice proved nothing the first trace had not, so
+// the two cases share one outcome and keep their own assertions over it.
+let stakeRedeemOnce: Promise<SimulateOutcome> | undefined;
+function stakeRedeemOutcome(): Promise<SimulateOutcome> {
+  stakeRedeemOnce ??= (async () => {
+    const runtime = await liveRuntime();
+    const registry = new Registry(runtime).use(FastLane);
+
+    const stakeCap = await registry.action("fastlane", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: ACCOUNT,
+    });
+    if (stakeCap.kind !== "capability") throw new Error("expected stake (deposit) Capability");
+
+    // Redeem less than the deposited amount to tolerate exchange-rate drift
+    // between assets (MON) and shares (shMON).
+    const redeemCap = await registry.action("fastlane", "redeem", ACCOUNT, {
+      shares: "0.5",
+      receiver: ACCOUNT,
+    });
+    if (redeemCap.kind !== "capability") throw new Error("expected redeem Capability");
+
+    const combined: CapabilityNode = {
+      ...stakeCap,
+      children: [...stakeCap.children, redeemCap],
+    };
+
+    return createTraceSimulator(runtime, {
+      receipt: (node, changes) => registry.parseReceipt(node, changes),
+    }).simulate(combined);
+  })();
+  return stakeRedeemOnce;
+}
+
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("has deployed bytecode at the staking proxy address", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     expect(
       (await runtime.client.getCode({ address: FASTLANE_STAKING_ADDRESS }))?.length,
     ).toBeGreaterThan(2);
@@ -903,7 +950,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("matches on-chain name/symbol/decimals against exported SHMON_* constants", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     const [name, symbol, decimals] = await Promise.all([
       runtime.client.readContract({
         address: FASTLANE_STAKING_ADDRESS,
@@ -929,7 +976,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("returns ERC-4626 preview/convert quotes that round-trip consistently", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     const registry = new Registry(runtime).use(FastLane);
 
     const deposit = await registry.action("fastlane", "previewDeposit", ACCOUNT, {
@@ -960,7 +1007,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("simulates a stake into an exhaustive typed Receipt", {
     timeout: 180_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     const registry = new Registry(runtime).use(FastLane);
     const capability = await registry.action("fastlane", "deposit", ACCOUNT, {
       amount: "1",
@@ -980,37 +1027,12 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   // Chains stake (deposit) -> redeem (atomic) in a single simulate call so the
   // simulator's mergeDiff persists the minted shMON balance into state overrides
   // before the atomic redeem runs. This is the ERC-4626 redeem path: it burns
-  // shMON and returns MON in the same transaction.
+  // shMON and returns MON in the same transaction. The trace is shared with the
+  // loop closure case below.
   it("simulates atomic redeem after stake via state chaining", {
     timeout: 240_000,
   }, async () => {
-    const runtime = await monadRuntime();
-    const registry = new Registry(runtime).use(FastLane);
-
-    const depositCap = await registry.action("fastlane", "deposit", ACCOUNT, {
-      amount: "1",
-      receiver: ACCOUNT,
-    });
-    if (depositCap.kind !== "capability") throw new Error("expected deposit Capability");
-
-    // Redeem less than the deposited amount to tolerate exchange-rate drift
-    // between assets (MON) and shares (shMON).
-    const redeemCap = await registry.action("fastlane", "redeem", ACCOUNT, {
-      shares: "0.5",
-      receiver: ACCOUNT,
-    });
-    if (redeemCap.kind !== "capability") {
-      throw new Error("expected redeem Capability");
-    }
-
-    const combined: CapabilityNode = {
-      ...depositCap,
-      children: [...depositCap.children, redeemCap],
-    };
-
-    const outcome = await createTraceSimulator(runtime, {
-      receipt: (node, changes) => registry.parseReceipt(node, changes),
-    }).simulate(combined);
+    const outcome = await stakeRedeemOutcome();
 
     expect(outcome.halted).toBeUndefined();
     expect(outcome.results).toHaveLength(2);
@@ -1029,7 +1051,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("simulates requestUnstake after stake via state chaining", {
     timeout: 240_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     const registry = new Registry(runtime).use(FastLane);
 
     const depositCap = await registry.action("fastlane", "deposit", ACCOUNT, {
@@ -1075,7 +1097,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("halts when completeUnstake runs before the completion epoch", {
     timeout: 240_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     const registry = new Registry(runtime).use(FastLane);
 
     const depositCap = await registry.action("fastlane", "deposit", ACCOUNT, {
@@ -1122,40 +1144,17 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   });
 
   // Closes the stake (deposit) -> redeem (atomic) loop with exhaustive Receipt
-  // assertions. Complements the lighter "simulates atomic redeem after stake
-  // via state chaining" test by verifying the full Receipt payload (not just
-  // the operation field), the assets/shares relationship between the two legs,
-  // and the loop-closure invariant that redeemed shares never exceed minted
-  // shares. This is the canonical mainnet round-trip: user stakes MON, then
-  // atomically redeems shMON back to MON in the same simulate call.
+  // assertions over the shared stake -> redeem trace. Complements the lighter
+  // "simulates atomic redeem after stake via state chaining" case by verifying
+  // the full Receipt payload (not just the operation field), the assets/shares
+  // relationship between the two legs, and the loop-closure invariant that
+  // redeemed shares never exceed minted shares. This is the canonical mainnet
+  // round-trip: user stakes MON, then atomically redeems shMON back to MON in the
+  // same simulate call.
   it("closes the stake -> redeem loop with exhaustive Receipt and cross-check assertions", {
     timeout: 240_000,
   }, async () => {
-    const runtime = await monadRuntime();
-    const registry = new Registry(runtime).use(FastLane);
-
-    const stakeCap = await registry.action("fastlane", "deposit", ACCOUNT, {
-      amount: "1",
-      receiver: ACCOUNT,
-    });
-    if (stakeCap.kind !== "capability") throw new Error("expected stake (deposit) Capability");
-
-    // Redeem less than the deposited amount to tolerate exchange-rate drift
-    // between assets (MON) and shares (shMON).
-    const redeemCap = await registry.action("fastlane", "redeem", ACCOUNT, {
-      shares: "0.5",
-      receiver: ACCOUNT,
-    });
-    if (redeemCap.kind !== "capability") throw new Error("expected redeem Capability");
-
-    const combined: CapabilityNode = {
-      ...stakeCap,
-      children: [...stakeCap.children, redeemCap],
-    };
-
-    const outcome = await createTraceSimulator(runtime, {
-      receipt: (node, changes) => registry.parseReceipt(node, changes),
-    }).simulate(combined);
+    const outcome = await stakeRedeemOutcome();
 
     // No halt, two clean legs.
     expect(outcome.halted).toBeUndefined();
@@ -1233,7 +1232,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
   it("simulates boostYield after stake via state chaining", {
     timeout: 240_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await liveRuntime();
     const registry = new Registry(runtime).use(FastLane);
 
     const depositCap = await registry.action("fastlane", "deposit", ACCOUNT, {
