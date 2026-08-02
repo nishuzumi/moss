@@ -89,6 +89,14 @@ describe("moss MCP server", () => {
         }),
       ]),
     );
+    const stakes = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "stake" } }),
+    ) as { protocol: string; method: string }[];
+    expect(stakes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "apriori", method: "stake", kind: "capability" }),
+      ]),
+    );
     const loaded = parseText(
       await client.callTool({
         name: "load",
@@ -98,6 +106,34 @@ describe("moss MCP server", () => {
     expect(loaded[0]?.params.slippage).toMatchObject({
       type: { default: 50, description: expect.stringContaining("1 bps equals 0.01%") },
       description: expect.stringContaining("adverse movement"),
+    });
+
+    const monadCards = parseText(
+      await client.callTool({ name: "discover", arguments: { protocol: "monad-cards" } }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(monadCards).toEqual([
+      expect.objectContaining({
+        protocol: "monad-cards",
+        method: "totalMinted",
+        kind: "query",
+      }),
+    ]);
+    const loadedMonadCards = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "monad-cards", method: "totalMinted" }] },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(loadedMonadCards[0]?.params).toEqual({});
+
+    const unstakeLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "apriori", method: "unstake" }] },
+      }),
+    ) as { params: Record<string, { description: string }> }[];
+    expect(unstakeLoaded[0]?.params.controller).toMatchObject({
+      description: expect.stringContaining("controller"),
     });
   });
 
@@ -318,6 +354,67 @@ describe("moss MCP server", () => {
     expect(response.isError).toBe(true);
     expect(simulated).toBe(false);
   });
+
+  it("rejects an over-deep Capability tree before decoding or tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: { capability: nestedReceiptCapability(17) },
+    });
+
+    expect(response.isError).toBe(true);
+    const content = response.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain("CAPABILITY_DEPTH");
+    expect(content[0]?.text).toContain("Capability depth exceeds 16");
+    expect(simulated).toBe(false);
+  });
+
+  it("rejects oversized values and partial calldata bytes before tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const base = receiptCapability("kuru", "swap");
+    const withTransaction = (data: `0x${string}`, value: `0x${string}`): CapabilityNode => ({
+      ...base,
+      children: [
+        {
+          kind: "transaction",
+          transaction: {
+            from: "0xcccccccccccccccccccccccccccccccccccccccc",
+            to: "0xdddddddddddddddddddddddddddddddddddddddd",
+            data,
+            value,
+          },
+        },
+      ],
+    });
+
+    const oversizedValue = await client.callTool({
+      name: "simulate",
+      arguments: { capability: withTransaction("0x", `0x1${"0".repeat(64)}`) },
+    });
+    expect(oversizedValue.isError).toBe(true);
+    expect((oversizedValue.content as { text: string }[])[0]?.text).toContain("VALUE_OVERFLOW");
+
+    const partialByte = await client.callTool({
+      name: "simulate",
+      arguments: { capability: withTransaction("0x0", "0x0") },
+    });
+    expect(partialByte.isError).toBe(true);
+    expect((partialByte.content as { text: string }[])[0]?.text).toContain("CALLDATA_PARTIAL_BYTE");
+
+    expect(simulated).toBe(false);
+  });
 });
 
 function eventChange(address: `0x${string}`): Change {
@@ -377,6 +474,15 @@ function receiptCapability(protocol: string, method: string): CapabilityNode {
       },
     ],
   };
+}
+
+function nestedReceiptCapability(depth: number): CapabilityNode {
+  let node = receiptCapability("kuru", "swap");
+  for (let level = 1; level < depth; level += 1) {
+    const parent = receiptCapability("kuru", "swap");
+    node = { ...parent, children: [node, ...parent.children] };
+  }
+  return node;
 }
 
 function erc20Change(

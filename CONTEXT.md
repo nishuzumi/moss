@@ -27,7 +27,7 @@ An ABI-typed gateway to one contract that can encode an unsigned transaction, re
 _Avoid_: contract instance, client
 
 **Capability tree**:
-The sole executable structure for a write: an ordered tree of CapabilityNode composition nodes and TransactionNode leaves. There is no independent transaction list.
+The sole executable structure for a write: an ordered tree of CapabilityNode composition nodes and TransactionNode leaves. There is no independent transaction list. Core validates it against one fail-closed complexity contract before execution and rejects cycles and shared nodes; the structure must remain a bounded tree.
 _Avoid_: Plan, transaction bundle
 
 **CapabilityNode**:
@@ -43,7 +43,7 @@ A reusable, context-free value contract carrying validation, transformation, def
 A Capability or Query input field pairing a Parameter type with a separate description of that field's specific role.
 
 **Risk label**:
-A Capability tag naming a category of danger, such as `fundOut`, `approval`, or `priceImpact`. It is authoring metadata, not runtime evidence.
+A Core-defined closed-set category of danger declared by a Capability, such as `fundOut`, `approval`, `priceImpact`, or `debt`. `fundOut` means assets leave the account in the current transaction and does not include future repayment obligations. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. It is authoring metadata, not runtime evidence.
 _Avoid_: warning, flag
 
 **Protocol trust boundary**:
@@ -91,7 +91,7 @@ A safe 1–32 character payload for a fixed token address selected explicitly by
 A Protocol-owned local name for a fixed address declared independently of its Handles and rendered as `Package(Title Cased Slug:localName)`. The combined payload inside `Package(...)` is a safe 1–32 character name. A Receipt sees its own Package labels, the Package labels inherited from its parser caller chain, and one unambiguous label from its own declared dependency graph.
 
 **Package boundary**:
-Core owns framework contracts; simulator owns trace mechanics; ERC and concrete Protocol packages own ABI semantics, Receipts, and protocol-exclusive deployment addresses; system owns the shared Monad Runtime and shared asset instances; MCP server owns transport. New Protocols affect only their package and the composition root.
+Core owns framework contracts; simulator owns trace mechanics; ERC and concrete Protocol packages own ABI semantics, Receipts, and protocol-exclusive deployment addresses; core owns the shared Monad Runtime; system owns shared asset instances; MCP server owns transport. New Protocols affect only their package and the composition root.
 
 **ABI origin**:
 The provenance tier of an ABI file: `compiled` (from contract source), `explorer` (verified-contract page), or `vendored` (documented third-party source, behavior verified on-chain). Every ABI declares exactly one.

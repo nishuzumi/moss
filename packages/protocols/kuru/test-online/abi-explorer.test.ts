@@ -48,6 +48,7 @@
  * The template assertion below is the tripwire that forces this record to
  * be redone whenever Kuru upgrades.
  */
+
 import { readFileSync } from "node:fs";
 import {
   compareDeployedAbi,
@@ -55,7 +56,8 @@ import {
   erc1967ImplementationAddress,
   fetchAbi,
 } from "@themoss/abi-tools";
-import { monadRuntime } from "@themoss/system";
+import { createRuntime } from "@themoss/core";
+
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { KuruRouterAbi } from "../src/abis/kuru.js";
@@ -82,7 +84,7 @@ describe("Kuru ABI explorer cross-check", () => {
   });
 
   it("Router proxy still points at the recorded implementation", { timeout: 60_000 }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const slot = await runtime.client.getStorageAt({
       address: manifest.router.proxy,
       slot: ERC1967_IMPLEMENTATION_SLOT,
@@ -95,7 +97,7 @@ describe("Kuru ABI explorer cross-check", () => {
   it("orderBookImplementation() still equals the recorded market template", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const template = await runtime.client.readContract({
       address: manifest.router.proxy,
       abi: KuruRouterAbi,

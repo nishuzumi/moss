@@ -111,6 +111,30 @@ class ApprovalProtocol {
 const noParams = {} satisfies ParamsSpec;
 
 @Protocol({
+  name: "debt-fixture",
+  category: "lending",
+  description: "Fixture debt Protocol.",
+  contracts: {},
+})
+class DebtProtocol {
+  @Capability<DebtProtocol, typeof noParams>({
+    intent: "Increase fixture debt",
+    verb: "borrow",
+    params: noParams,
+    receipt: "borrowReceipt",
+    risk: ["debt"],
+  })
+  async borrow(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT)];
+  }
+
+  @Receipt()
+  borrowReceipt(changes: readonly Change[]): MossReceipt<{ operation: "borrow" }> {
+    return receiptFor("borrow", changes);
+  }
+}
+
+@Protocol({
   name: "composed",
   category: "dex",
   description: "Fixture composed Protocol.",
@@ -298,7 +322,7 @@ class UndescribedParameterProtocol {
   }
 }
 
-function receiptFor<T extends "approve" | "swap">(
+function receiptFor<T extends "approve" | "borrow" | "swap">(
   operation: T,
   changes: readonly Change[],
 ): MossReceipt<{ operation: T }> {
@@ -322,6 +346,13 @@ const runtime: MossRuntime = {
 };
 
 describe("framework core seam", () => {
+  it("loads the debt risk label through Registry", () => {
+    const registry = new Registry(runtime).use(DebtProtocol);
+    const [loaded] = registry.load([{ protocol: "debt-fixture", method: "borrow" }]);
+
+    expect(loaded?.risk).toEqual(["debt"]);
+  });
+
   it("registers a Protocol directly and builds its one-transaction Capability", async () => {
     const registry = new Registry(runtime);
     registry.use(TestVault);

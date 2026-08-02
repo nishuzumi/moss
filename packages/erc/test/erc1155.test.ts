@@ -8,6 +8,7 @@ import {
   verifyReceiptCoverage,
 } from "@themoss/core";
 import { createTraceSimulator } from "@themoss/simulator";
+
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { ierc1155Abi } from "../src/abis/erc.js";
@@ -458,7 +459,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("ERC1155 on Monad mainnet", () => {
   it("reads metadata and simulates with zero Warnings and exhaustive Receipt coverage", {
     timeout: 120_000,
   }, async () => {
-    const runtime = await createRuntime({ rpcUrl: "https://rpc.monad.xyz" });
+    const runtime = await createRuntime();
     expect((await runtime.client.getCode({ address: collection }))?.length).toBeGreaterThan(2);
     const registry = new Registry(runtime).use(ERC1155);
 

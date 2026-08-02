@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { monadRuntime } from "@themoss/system";
+import { createRuntime } from "@themoss/core";
+
 import { defaultProtocolModules } from "./composition.js";
 import { createMossServer } from "./server.js";
 
-const rpcUrl = process.env.MOSS_RPC_URL;
-const runtime = await monadRuntime({ ...(rpcUrl ? { rpcUrl } : {}) });
+// createRuntime resolves MOSS_RPC_URL itself; the endpoint it settled on is
+// printed below.
+const runtime = await createRuntime();
 const { server, registry } = createMossServer({
   runtime,
   protocols: defaultProtocolModules,

@@ -1,0 +1,33 @@
+{
+  "name": "@themoss/protocol-monad-cards",
+  "version": "0.1.0",
+  "description": "Moss Protocol for the Monad Cards minted-supply Query on Monad mainnet",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "update:abis": "tsx scripts/update-abis.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "viem": "^2.54.3",
+    "vitest": "^3.2.6"
+  }
+}

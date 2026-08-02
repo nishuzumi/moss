@@ -9,7 +9,9 @@
       "@themoss/simulator",
       "@themoss/erc",
       "@themoss/system",
+      "@themoss/protocol-apriori",
       "@themoss/protocol-kuru",
+      "@themoss/protocol-monad-cards",
       "@themoss/protocol-pancakeswap",
       "@themoss/mcp-server"
     ]

@@ -10,6 +10,10 @@ export {
   Receipt,
 } from "./decorators.js";
 export {
+  CAPABILITY_TREE_LIMITS,
+  CapabilityTreeError,
+  type CapabilityTreeErrorCode,
+  type CapabilityTreeLimits,
   type ExecutableCapability,
   flattenCapabilityTree,
   ReceiptCoverageError,
@@ -27,7 +31,7 @@ export {
   Registry,
   type Stub,
 } from "./registry.js";
-export { createRuntime, type MossRuntime } from "./runtime.js";
+export { createRuntime, defaultRpcUrl, MONAD_CHAIN_ID, type MossRuntime } from "./runtime.js";
 export {
   Address,
   BasisPoints,
