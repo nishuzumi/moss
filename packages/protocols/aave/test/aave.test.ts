@@ -863,6 +863,16 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
       });
       if (metadata.kind !== "query") throw new Error("expected a Query");
       expect(metadata.data, reserve.symbol).toMatchObject({ decimals: reserve.decimals });
+      // Aave v3.2 removed stable-rate borrowing and this deployment agrees, so
+      // pinning the variable mode instead of exposing interestRateMode rests on
+      // a deployment fact this suite checks rather than on a preference.
+      const onChain = await runtime.client.readContract({
+        address: AAVE_POOL_ADDRESS,
+        abi: AavePoolAbi,
+        functionName: "getReserveData",
+        args: [reserve.underlying],
+      });
+      expect(getAddress(onChain.stableDebtTokenAddress), reserve.symbol).toBe(ZERO);
     }
   });
 

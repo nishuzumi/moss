@@ -14,8 +14,11 @@ plus Queries for account health and reserve rates.
 
 Every Capability owns exactly one direct transaction. `supply` and `repay` need
 an allowance because the Pool pulls the underlying with `transferFrom`, so they
-nest one ERC-20 approval for exactly the amount being moved. Nothing is signed
-or sent here.
+nest one ERC-20 approval for the amount the request names, never an unlimited
+one. A supply spends all of it. A repay is capped on chain: `BorrowLogic` lowers
+`paybackAmount` to the account's current debt before calling `transferFrom`, so
+repaying more than is owed spends less than was approved and leaves the
+remainder standing. Nothing is signed or sent here.
 
 `borrow` carries `debt` and not `fundOut`. `fundOut` means assets leave the
 account in the current transaction, which is true of supply, repay and the
@@ -122,13 +125,25 @@ event. A parser accepts only:
 - exactly one `Supply`, `Withdraw`, `Borrow` or `Repay` emitted by the Pool
   itself, plus `ReserveDataUpdated` and at most one collateral flag;
 - exactly one scaled-balance `Mint` or `Burn` emitted by that reserve's own
-  aToken or variable debt token, naming the account the Pool named;
+  aToken or variable debt token, naming on both indexed arguments the accounts
+  the Pool named;
 - exactly one underlying transfer, matched on both ends and on the exact amount
   the Pool reported, in the order Aave's logic libraries produce it;
 - ERC-20 `Transfer` and `Approval` records, delegated to `@themoss/erc`, and
   only on the reserve's two tokens.
 
 Anything else fails the Receipt, which halts simulation with a Warning.
+
+Both optional shapes are bound to the operation rather than merely recognised. A
+supply accepts a collateral flag only as `Enabled` for its own reserve and its
+own `onBehalfOf`, a withdraw only as `Disabled` for its own reserve and `user`,
+and a borrow or a repay accepts none, because Aave changes collateral use on a
+borrow never and on a repay only in the aToken branch this Capability refuses.
+The position event is bound from the same execution path: `SupplyLogic` mints the
+aToken with the `Supply` event's `user` as caller, `BorrowLogic` mints the debt
+token with the `Borrow` event's `user` as caller, an aToken `Burn` names the
+`Withdraw` event's `user` and `to`, and a debt-token `Burn` names the `Repay`
+event's `user` with a zero target, since clearing debt delivers no underlying.
 
 A withdraw or a repay usually burns the position token, but `_burnScaled` mints
 the difference when accrued interest exceeds the amount removed, so those two
@@ -153,6 +168,8 @@ weekly through the ABI cross-check workflow.
 
 - Withdrawing or repaying the full balance needs `uint256` maximum, which this
   adapter does not expose yet; pass an explicit amount.
+- Repaying more than the outstanding debt leaves the unspent part of the
+  approval in place; the adapter does not revoke it.
 - `supplyWithPermit` and `repayWithATokens` are not exposed. Signature flows are
   out of scope for Moss, and repaying with aTokens is a different user intent.
 - `setUserUseReserveAsCollateral` and e-mode are not exposed.

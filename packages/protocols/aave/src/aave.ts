@@ -301,6 +301,10 @@ export class Aave {
   })
   async repay(params: RepayParams, ctx: ActionCtx): Promise<CapabilityResult> {
     const { reserve, amount } = prepare(params.asset, params.amount);
+    // The allowance is for the requested amount, not for whatever the Pool
+    // ends up pulling: `BorrowLogic.executeRepay` lowers `paybackAmount` to the
+    // account's current debt first, so repaying more than is owed leaves the
+    // difference approved rather than spent.
     return [
       await this.erc20.approve({
         token: reserve.underlying,
