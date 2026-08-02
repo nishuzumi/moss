@@ -91,19 +91,28 @@ confirms that on chain by finding every selector the adapter calls in the
 deployed Pool implementation and every Pool event topic in the Supply and Borrow
 logic libraries the Pool delegatecalls.
 
-The vendored `IPool` interface is not identical to the deployed implementation
-outside the adapter's surface. Measured against the explorer-verified
-implementation on 2026-08-01: five logic getters differ in `stateMutability`
-(`view` against `pure`), `configureEModeCategory` takes an extra `bool`,
-`dropReserve` and `resetIsolationModeTotalDebt` are absent, and the deployment
-adds `POOL_REVISION`, `UMBRELLA`, `multicall`, `initialize` and eleven custom
-errors. None of that touches `supply`, `withdraw`, `borrow`, `repay`,
-`getUserAccountData`, `getReserveData`, `getReservesList`,
-`ADDRESSES_PROVIDER` or any of the events the Receipts decode, all of which are
-field-for-field identical. A whole-ABI `test:abi:online` comparison would
-therefore need an allowlist covering real differences, which would hide drift
-rather than catch it, so this package verifies the surface it uses against
-deployed bytecode in the ordinary live suite instead.
+`pnpm test:abi:online` is the independent explorer anchor ADR 0007 asks for
+where the chain provides one. `abis.json` pins the Pool proxy and its
+implementation, the suite re-reads the proxy's ERC-1967 slot so an Aave upgrade
+turns it red, and it compares the ABI of the explorer-verified implementation
+against the vendored artifact over exactly the surface this adapter uses: the
+eight functions it calls and the seven events its Receipts decode, listed once
+in `test/surface.ts` and shared with the live bytecode check. It is keyed on
+`MONADSCAN_API_KEY`, fails rather than skips without one, and is not part of the
+default `pnpm test`.
+
+The comparison is scoped to that surface because the vendored `IPool` interface
+is genuinely not the deployed implementation everywhere else. Measured on
+2026-08-02 against the explorer-verified implementation (Exact Match, solc
+0.8.27), a whole-ABI comparison reports 27 differences: `configureEModeCategory`
+takes an extra `bool`, `dropReserve`, `resetIsolationModeTotalDebt` and the
+`IsolationModeTotalDebtUpdated` event are absent, five logic getters differ in
+`stateMutability` (`view` against `pure`), and the deployment adds
+`POOL_REVISION`, `UMBRELLA`, `multicall`, `initialize`,
+`configureEModeCategoryIsolated`, `getIsEModeCategoryIsolated` and eleven custom
+errors. An allowlist covering real differences hides later drift rather than
+catching it, and none of those differences touch the surface above, which is
+field for field identical: 15 items on each side, zero issues, no allowlist.
 
 ## Receipts
 
@@ -135,6 +144,10 @@ pnpm build && pnpm typecheck && pnpm lint && pnpm test
 `pnpm test` includes the live Monad mainnet suite, which simulates all four
 verbs against real positions. It is free: Moss never signs and never sends.
 Use `pnpm test:offline` when the chain is unreachable.
+
+`pnpm test:abi:online` is the keyed explorer cross-check. It needs
+`MONADSCAN_API_KEY`, is not part of `pnpm test`, and runs in CI on `main` and
+weekly through the ABI cross-check workflow.
 
 ## Known limitations
 

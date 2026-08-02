@@ -30,6 +30,7 @@ import {
   Aave,
   type AaveReserve,
 } from "../src/index.js";
+import { POOL_FUNCTIONS_USED, type PoolEventUsed } from "./surface.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const OTHER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
@@ -889,16 +890,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
       code(borrowLogic),
     ]);
 
-    for (const name of [
-      "supply",
-      "withdraw",
-      "borrow",
-      "repay",
-      "getUserAccountData",
-      "getReserveData",
-      "getReservesList",
-      "ADDRESSES_PROVIDER",
-    ] as const) {
+    for (const name of POOL_FUNCTIONS_USED) {
       const item = AavePoolAbi.find((entry) => entry.type === "function" && entry.name === name);
       if (!item) throw new Error(`the vendored ABI lost ${name}`);
       const selector = toFunctionSelector(toFunctionSignature(item)).slice(2);
@@ -907,16 +899,18 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
 
     // Aave emits the Pool's own events from the logic libraries it
     // delegatecalls. solc pushes a topic with its leading zero bytes trimmed,
-    // so compare against that minimal form.
-    for (const [name, library] of [
-      ["Supply", supplyCode],
-      ["Withdraw", supplyCode],
-      ["ReserveUsedAsCollateralEnabled", supplyCode],
-      ["ReserveUsedAsCollateralDisabled", supplyCode],
-      ["ReserveDataUpdated", supplyCode],
-      ["Borrow", borrowCode],
-      ["Repay", borrowCode],
-    ] as const) {
+    // so compare against that minimal form. Every event a Receipt decodes needs
+    // an emitting library here, which is what the satisfies clause enforces.
+    const emitters = {
+      Supply: supplyCode,
+      Withdraw: supplyCode,
+      ReserveUsedAsCollateralEnabled: supplyCode,
+      ReserveUsedAsCollateralDisabled: supplyCode,
+      ReserveDataUpdated: supplyCode,
+      Borrow: borrowCode,
+      Repay: borrowCode,
+    } satisfies Record<PoolEventUsed, string>;
+    for (const [name, library] of Object.entries(emitters)) {
       const item = AavePoolAbi.find((entry) => entry.type === "event" && entry.name === name);
       if (!item) throw new Error(`the vendored ABI lost ${name}`);
       const topic = toEventSelector(toEventSignature(item))

@@ -8,6 +8,9 @@ export default defineConfig({
   // transform must lower them (ADR 0001 toolchain constraint). This is also
   // why the repo pins vitest 3 — vite 8's oxc does not lower them.
   esbuild: { target: "es2022" },
+  // The keyed online explorer cross-check lives in test-online/ and runs only
+  // through vitest.online.config.ts (pnpm test:abi:online).
+  test: { include: ["test/**/*.test.ts"] },
   resolve: {
     // Tests run against workspace sources, not dists, so a stale build can
     // never produce phantom failures.
