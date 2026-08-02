@@ -428,6 +428,27 @@ describe("resolveSelectorProxy", () => {
     );
     expect(selectorCalls).toBe(1);
   });
+
+  it("propagates a transport failure during the facetAddresses() fanout", async () => {
+    // The loupe answers the address list, then one per-facet call dies on the
+    // socket. Reading that as a half-working loupe would drop the run to the
+    // point lookups (here, source "none"), so a reachable diamond would have
+    // its whole vendored surface judged against a map the proxy never gave.
+    const inner = facetAddressesCall([
+      [FACET_A, [TRANSFER]],
+      [FACET_B, [BALANCE_OF]],
+    ]);
+    const call: EthCall = async (request) => {
+      if (
+        request.data.startsWith(FACET_FUNCTION_SELECTORS_SELECTOR) &&
+        argAddress(request.data) === FACET_B
+      ) {
+        throw new Error("socket hang up");
+      }
+      return inner(request);
+    };
+    await expect(resolveSelectorProxy({ proxy: PROXY, call })).rejects.toThrow("socket hang up");
+  });
 });
 
 describe("unionFacetAbis", () => {

@@ -269,13 +269,22 @@ export async function resolveSelectorProxy(
     encodeFunctionData({ abi: LOUPE_ABI, functionName: "facetAddresses" }),
   );
   if (addressesData !== undefined) {
-    let entries: (readonly [string, readonly string[]])[] | undefined = [];
+    // Decoding is the only thing a `catch` may cover in this path. A
+    // transport failure inside the fanout has to propagate, so it is never
+    // reclassified as a loupe that answered badly, which would drop the run
+    // to a point lookup and report the whole vendored surface off a map the
+    // proxy never gave.
+    let facetAddresses: readonly `0x${string}`[] | undefined;
     try {
-      const facetAddresses = decodeFunctionResult({
+      facetAddresses = decodeFunctionResult({
         abi: LOUPE_ABI,
         functionName: "facetAddresses",
         data: addressesData,
       });
+    } catch {
+      facetAddresses = undefined;
+    }
+    if (facetAddresses !== undefined) {
       // Both bounds fire before the per-facet calls they would otherwise
       // drive: the facet bound right after the address list decodes, the
       // selector bound as each facet's list decodes, so an over-limit
@@ -285,6 +294,7 @@ export async function resolveSelectorProxy(
           `selector proxy ${proxy} lists ${facetAddresses.length} facets, over ${MAX_FACETS}`,
         );
       }
+      let entries: (readonly [string, readonly string[]])[] | undefined = [];
       let selectorBudget = 0;
       for (const facet of facetAddresses) {
         const selectorsData = await tryCall(
@@ -294,29 +304,34 @@ export async function resolveSelectorProxy(
             args: [facet],
           }),
         );
-        if (selectorsData === undefined) {
+        let selectors: readonly `0x${string}`[] | undefined;
+        if (selectorsData !== undefined) {
+          try {
+            selectors = decodeFunctionResult({
+              abi: LOUPE_ABI,
+              functionName: "facetFunctionSelectors",
+              data: selectorsData,
+            });
+          } catch {
+            selectors = undefined;
+          }
+        }
+        // A half-working loupe (addresses answered, a selector list reverted
+        // or did not decode) is not trusted as a complete map; fall through
+        // to the point lookups.
+        if (selectors === undefined) {
           entries = undefined;
           break;
         }
-        const selectors = decodeFunctionResult({
-          abi: LOUPE_ABI,
-          functionName: "facetFunctionSelectors",
-          data: selectorsData,
-        });
         selectorBudget += selectors.length;
         if (selectorBudget > MAX_SELECTORS) {
           throw new Error(`selector proxy ${proxy} maps over ${MAX_SELECTORS} selectors`);
         }
         entries.push([facet, selectors] as const);
       }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("selector proxy")) throw error;
-      entries = undefined;
-    }
-    // A half-working loupe (addresses answered, a selector list did not) is
-    // not trusted as a complete map; fall through to the point lookups.
-    if (entries !== undefined) {
-      return buildCompleteResolution(proxy, "facetAddresses", entries);
+      if (entries !== undefined) {
+        return buildCompleteResolution(proxy, "facetAddresses", entries);
+      }
     }
   }
 
