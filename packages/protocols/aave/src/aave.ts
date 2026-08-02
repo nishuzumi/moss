@@ -89,6 +89,12 @@ const VARIABLE_INTEREST_RATE_MODE = 2n;
 /** Aave takes no referral fee; the code has been inert since v2. */
 const NO_REFERRAL_CODE = 0;
 
+/**
+ * `VariableDebtToken.burn` passes `address(0)` as the scaled-balance `Burn`
+ * target: clearing debt moves no underlying, so there is no receiver.
+ */
+const NO_UNDERLYING_RECEIVER = "0x0000000000000000000000000000000000000000";
+
 /** Aave's year for interest maths (`MathUtils.SECONDS_PER_YEAR`, 365 days). */
 const SECONDS_PER_YEAR = 31_536_000;
 /** Reserve rates and indices are ray-scaled: 1 ray is 1e27. */
@@ -172,6 +178,22 @@ interface CollateralFlag {
   user: AddressValue;
 }
 
+/**
+ * Both indexed accounts a scaled-balance event named. `ScaledBalanceTokenBase`
+ * indexes two addresses on each side and Aave's logic libraries decide both, so
+ * a Receipt that keeps only one cannot check the other.
+ */
+type PositionParties =
+  | { event: "Mint"; caller: AddressValue; onBehalfOf: AddressValue }
+  | { event: "Burn"; from: AddressValue; target: AddressValue };
+
+/** The pair a scaled event must name, per operation and per event kind. */
+interface ExpectedParties {
+  mint: { caller: string; onBehalfOf: string };
+  /** Absent where only a Mint is reachable, which refuses any Burn. */
+  burn?: { from: string; target: string };
+}
+
 interface IndexedTransfer {
   outcome: Extract<ERC20Outcome, { operation: "transfer" }>;
   changeIndex: number;
@@ -184,8 +206,8 @@ interface Evidence {
   operation: AaveOperation;
   eventIndex: number;
   position: AavePositionChange;
-  /** Account named by the position event's indexed owner argument. */
-  positionOwner: AddressValue;
+  /** Both indexed accounts the position event named. */
+  parties: PositionParties;
   positionIndex: number;
   transfers: readonly IndexedTransfer[];
   collateral: CollateralFlag | null;
@@ -349,9 +371,10 @@ export class Aave {
   supplyReceipt(changes: readonly Change[]): ReceiptResult<AaveSupplyOutcome> {
     const found = this.#collect("supply", "Supply", "aToken", changes);
     const { args } = found.event;
-    // SupplyLogic pulls the underlying, then mints the aToken, then the Pool
-    // announces the supply. A supply always mints: it never removes balance.
-    requirePosition(found, { owner: args.onBehalfOf, event: "Mint" });
+    // SupplyLogic pulls the underlying, then mints the aToken naming the pair
+    // the Supply event names, then the Pool announces the supply. A supply
+    // always mints: it never removes balance.
+    requirePosition(found, { mint: { caller: args.user, onBehalfOf: args.onBehalfOf } });
     requireUnderlyingFlow(found, {
       from: args.user,
       to: found.reserve.aToken,
@@ -384,7 +407,10 @@ export class Aave {
   withdrawReceipt(changes: readonly Change[]): ReceiptResult<AaveWithdrawOutcome> {
     const found = this.#collect("withdraw", "Withdraw", "aToken", changes);
     const { args } = found.event;
-    requirePosition(found, { owner: args.user });
+    requirePosition(found, {
+      mint: { caller: args.user, onBehalfOf: args.user },
+      burn: { from: args.user, target: args.to },
+    });
     requireUnderlyingFlow(found, {
       from: found.reserve.aToken,
       to: args.to,
@@ -422,7 +448,7 @@ export class Aave {
         `Aave borrow Receipt saw interest rate mode ${args.interestRateMode}; only variable exists`,
       );
     }
-    requirePosition(found, { owner: args.onBehalfOf, event: "Mint" });
+    requirePosition(found, { mint: { caller: args.user, onBehalfOf: args.onBehalfOf } });
     refuseCollateral(found);
     requireUnderlyingFlow(found, {
       from: found.reserve.aToken,
@@ -457,7 +483,10 @@ export class Aave {
     if (args.useATokens) {
       throw new Error("Aave repay Receipt saw an aToken repayment; this Capability pays in kind");
     }
-    requirePosition(found, { owner: args.user });
+    requirePosition(found, {
+      mint: { caller: args.user, onBehalfOf: args.user },
+      burn: { from: args.user, target: NO_UNDERLYING_RECEIVER },
+    });
     refuseCollateral(found);
     requireUnderlyingFlow(found, {
       from: args.repayer,
@@ -501,7 +530,8 @@ export class Aave {
       | { event: OperationEvent<TName>; reserve: AddressValue; changeIndex: number }
       | undefined;
     let collateral: CollateralFlag | null = null;
-    const positions: { data: AavePositionChange; owner: AddressValue; changeIndex: number }[] = [];
+    const positions: { data: AavePositionChange; parties: PositionParties; changeIndex: number }[] =
+      [];
     const transfers: IndexedTransfer[] = [];
     const tokensTouched = new Set<string>();
 
@@ -577,9 +607,20 @@ export class Aave {
 
       const scaled = tryDecodeScaledEvent(change);
       if (scaled && (scaled.eventName === "Mint" || scaled.eventName === "Burn")) {
-        const owner = getAddress(
-          scaled.eventName === "Mint" ? scaled.args.onBehalfOf : scaled.args.from,
-        );
+        const parties: PositionParties =
+          scaled.eventName === "Mint"
+            ? {
+                event: "Mint",
+                caller: getAddress(scaled.args.caller),
+                onBehalfOf: getAddress(scaled.args.onBehalfOf),
+              }
+            : {
+                event: "Burn",
+                from: getAddress(scaled.args.from),
+                target: getAddress(scaled.args.target),
+              };
+        // The account whose position moved, for the human-readable line.
+        const owner = parties.event === "Mint" ? parties.onBehalfOf : parties.from;
         const data: AavePositionChange = {
           event: scaled.eventName,
           token: getAddress(change.address),
@@ -587,7 +628,7 @@ export class Aave {
           balanceIncrease: scaled.args.balanceIncrease.toString(),
           index: scaled.args.index.toString(),
         };
-        positions.push({ data, owner, changeIndex });
+        positions.push({ data, parties, changeIndex });
         tokensTouched.add(data.token.toLowerCase());
         return {
           kind: "change",
@@ -642,7 +683,7 @@ export class Aave {
       event: operationEvent.event,
       eventIndex: operationEvent.changeIndex,
       position: position.data,
-      positionOwner: position.owner,
+      parties: position.parties,
       positionIndex: position.changeIndex,
       transfers,
       collateral,
@@ -732,21 +773,50 @@ function requireUnderlyingFlow(
 }
 
 /**
- * The position event has to name the account the Pool named. `event` pins the
- * kind where only one is reachable: a supply or a borrow always mints. A
- * withdraw or a repay normally burns, but `_burnScaled` mints the difference
- * when accrued interest exceeds the amount removed, so those accept both.
+ * The position event has to name the accounts the Pool named, on both indexed
+ * arguments, in the roles Aave's own execution path gives them:
+ *
+ *   - `SupplyLogic.executeSupply` calls `aToken.mint(user, onBehalfOf, ...)`
+ *     with the same pair it then emits as `Supply(reserve, user, onBehalfOf)`;
+ *   - `BorrowLogic.executeBorrow` calls
+ *     `variableDebtToken.mint(user, onBehalfOf, ...)` with the pair it emits as
+ *     `Borrow(reserve, user, onBehalfOf)`;
+ *   - `executeWithdraw` calls `aToken.burn(user, to, ...)`, and
+ *     `ScaledBalanceTokenBase._burnScaled` puts that receiver in the `Burn`
+ *     event's `target`, so a withdraw's burn names the Pool event's `user` and
+ *     `to`;
+ *   - `executeRepay` calls `variableDebtToken.burn(onBehalfOf, ...)`, and the
+ *     debt token passes `address(0)` as the target, because clearing debt sends
+ *     no underlying to anyone.
+ *
+ * `event` is implied by the table rather than passed: a supply and a borrow
+ * always mint, so they declare no burn shape and any Burn is refused. A
+ * withdraw and a repay normally burn, but `_burnScaled` mints the difference
+ * when accrued interest exceeds the amount removed, and that mint names the
+ * same account twice.
  */
-function requirePosition(found: Evidence, expected: { owner: string; event?: "Mint" }): void {
-  if (expected.event && found.position.event !== expected.event) {
-    throw new Error(
-      `Aave ${found.operation} Receipt expected a position ${expected.event}, saw ${found.position.event}`,
+function requirePosition(found: Evidence, expected: ExpectedParties): void {
+  const { parties } = found;
+  const named: [field: string, actual: AddressValue, wanted: string][] = [];
+  if (parties.event === "Mint") {
+    named.push(
+      ["caller", parties.caller, expected.mint.caller],
+      ["onBehalfOf", parties.onBehalfOf, expected.mint.onBehalfOf],
     );
+  } else if (expected.burn) {
+    named.push(
+      ["from", parties.from, expected.burn.from],
+      ["target", parties.target, expected.burn.target],
+    );
+  } else {
+    throw new Error(`Aave ${found.operation} Receipt expected a position Mint, saw Burn`);
   }
-  if (!sameAddress(found.positionOwner, expected.owner)) {
-    throw new Error(
-      `Aave ${found.operation} Receipt position event names ${found.positionOwner}, not ${expected.owner}`,
-    );
+  for (const [field, actual, wanted] of named) {
+    if (!sameAddress(actual, wanted)) {
+      throw new Error(
+        `Aave ${found.operation} Receipt position event names ${field} ${actual}, not ${wanted}`,
+      );
+    }
   }
   if (found.positionIndex >= found.eventIndex) {
     throw new Error(`Aave ${found.operation} Receipt saw its position event after the Pool event`);

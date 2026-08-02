@@ -298,9 +298,14 @@ function repayChanges(useATokens = false): Change[] {
   ];
 }
 
+/** One Change swapped out of a fixture trace, leaving the rest untouched. */
+function replace(changes: Change[], index: number, change: Change): Change[] {
+  return changes.map((original, at) => (at === index ? change : original));
+}
+
 /** A supply trace carries its collateral flag at index 5. */
 function supplyWithFlag(flag: Change): Change[] {
-  return supplyChanges().map((change, index) => (index === 5 ? flag : change));
+  return replace(supplyChanges(), 5, flag);
 }
 
 /**
@@ -570,6 +575,64 @@ describe("Aave", () => {
         name,
       ).rejects.toThrow(message);
     }
+  });
+
+  it("binds both accounts a scaled position event names", async () => {
+    const supply = { asset: USDT0.underlying, amount: "1" };
+    const usdc = { asset: USDC.underlying, amount: "1" };
+
+    // Reported on #157: SupplyLogic mints the aToken with the supplier as
+    // caller, so a Mint naming anyone else is not this supply's evidence.
+    await expect(
+      parse(
+        "supply",
+        supply,
+        replace(supplyChanges(), 4, positionMint(USDT0.aToken, OTHER, ACCOUNT, 999_999n, 0n)),
+      ),
+    ).rejects.toThrow(`names caller ${OTHER}`);
+    // A supply only ever mints, so a Burn is a shape it cannot produce.
+    await expect(
+      parse(
+        "supply",
+        supply,
+        replace(supplyChanges(), 4, positionBurn(USDT0.aToken, ACCOUNT, ACCOUNT, 999_999n, 0n)),
+      ),
+    ).rejects.toThrow("expected a position Mint, saw Burn");
+    // BorrowLogic mints the debt with the account receiving the asset as
+    // caller, which is the Borrow event's own user.
+    await expect(
+      parse(
+        "borrow",
+        usdc,
+        replace(
+          borrowChanges(),
+          1,
+          positionMint(USDC.variableDebtToken, OTHER, ACCOUNT, 1_000_001n, 0n),
+        ),
+      ),
+    ).rejects.toThrow(`names caller ${OTHER}`);
+    // aToken.burn's target is the account that receives the underlying, which
+    // is the Withdraw event's own `to`.
+    await expect(
+      parse(
+        "withdraw",
+        usdc,
+        replace(withdrawChanges(), 2, positionBurn(USDC.aToken, ACCOUNT, OTHER, 996_381n, 3_619n)),
+      ),
+    ).rejects.toThrow(`names target ${OTHER}`);
+    // VariableDebtToken.burn passes a zero target: clearing debt delivers no
+    // underlying to anybody.
+    await expect(
+      parse(
+        "repay",
+        { asset: USDC.underlying, amount: "0.001" },
+        replace(
+          repayChanges(),
+          1,
+          positionBurn(USDC.variableDebtToken, ACCOUNT, ACCOUNT, 999n, 1n),
+        ),
+      ),
+    ).rejects.toThrow(`names target ${ACCOUNT}`);
   });
 
   it("refuses a collateral flag on a borrow or a repay", async () => {
