@@ -61,6 +61,20 @@ function changeOf(entry: ReceiptResult["changes"][number] | undefined): Change {
   throw new Error("expected a flat ReceiptChange or a single-Change nested Receipt");
 }
 
+// Pulls the native MON Changes back out of a Receipt. A live test can then name
+// the endpoints the parser bound instead of trusting that it bound anything.
+function nativeTransfersOf(
+  changes: readonly ReceiptResult["changes"][number][] | undefined,
+): Extract<Change, { kind: "nativeTransfer" }>[] {
+  if (!changes) throw new Error("expected Receipt changes");
+  return changes
+    .map((entry) => changeOf(entry))
+    .filter(
+      (change): change is Extract<Change, { kind: "nativeTransfer" }> =>
+        change.kind === "nativeTransfer",
+    );
+}
+
 function depositEvent(
   sender: `0x${string}`,
   owner: `0x${string}`,
@@ -308,6 +322,53 @@ describe("FastLane shMONAD staking", () => {
     );
   });
 
+  it("rejects stake (deposit) Receipt when someone else paid the staked MON", async () => {
+    const capability = await registry.action("fastlane", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Right amount, right destination, wrong payer. Checking the destination
+    // alone accepts another account's MON as proof that this one staked, so the
+    // Receipt binds both ends of the transfer.
+    const native = {
+      kind: "nativeTransfer",
+      from: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      to: FASTLANE_STAKING_ADDRESS,
+      value: "1000000000000000000",
+    } satisfies Change;
+
+    const deposited = depositEvent(ACCOUNT, ACCOUNT, 10n ** 18n, 10n ** 18n);
+
+    expect(() => registry.parseReceipt(capability, [native, deposited])).toThrow(
+      "FastLane deposit Receipt requires the staked MON to move from the Deposit sender to FastLane",
+    );
+  });
+
+  it("rejects stake (deposit) Receipt when assets !== native value", async () => {
+    const capability = await registry.action("fastlane", "deposit", ACCOUNT, {
+      amount: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Right endpoints, wrong amount: the Deposit event claims 1 MON and 1 wei
+    // moved.
+    const native = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: FASTLANE_STAKING_ADDRESS,
+      value: "1",
+    } satisfies Change;
+
+    const deposited = depositEvent(ACCOUNT, ACCOUNT, 10n ** 18n, 10n ** 18n);
+
+    expect(() => registry.parseReceipt(capability, [native, deposited])).toThrow(
+      "FastLane deposit Receipt requires matching Deposit and native Changes",
+    );
+  });
+
   it("builds atomic redeem transaction with shares, receiver, owner", async () => {
     const capability = await registry.action("fastlane", "redeem", ACCOUNT, {
       shares: "1",
@@ -417,6 +478,35 @@ describe("FastLane shMONAD staking", () => {
     );
   });
 
+  it("rejects atomic redeem Receipt when the MON payout does not come from the vault", async () => {
+    const capability = await registry.action("fastlane", "redeem", ACCOUNT, {
+      shares: "1",
+      receiver: ACCOUNT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // The right MON reaching the right receiver from somewhere other than the
+    // vault does not prove the vault paid it out.
+    const native = {
+      kind: "nativeTransfer",
+      from: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      to: ACCOUNT,
+      value: "990000000000000000",
+    } satisfies Change;
+
+    const withdrawn = withdrawEvent(
+      ACCOUNT,
+      ACCOUNT,
+      ACCOUNT,
+      990_000_000_000_000_000n,
+      10n ** 18n,
+    );
+
+    expect(() => registry.parseReceipt(capability, [withdrawn, native])).toThrow(
+      "FastLane redeem Receipt requires the MON payout to move from FastLane to the Withdraw receiver",
+    );
+  });
+
   it("parses requestUnstake Changes with exact identity, length, and order", async () => {
     const capability = await registry.action("fastlane", "requestUnstake", ACCOUNT, {
       shares: "1",
@@ -482,6 +572,44 @@ describe("FastLane shMONAD staking", () => {
 
     expect(() => registry.parseReceipt(capability, [completeEvent, native])).toThrow(
       "FastLane completeUnstake Receipt requires the MON payout to move from FastLane to the CompleteUnstake owner",
+    );
+  });
+
+  it("rejects completeUnstake Receipt when the MON payout does not come from the vault", async () => {
+    const capability = await registry.action("fastlane", "completeUnstake", ACCOUNT, {});
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // Same amount, same owner, wrong source. A completion is the vault paying
+    // out, so MON arriving from anywhere else is not evidence of one.
+    const native = {
+      kind: "nativeTransfer",
+      from: getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+      to: ACCOUNT,
+      value: "990000000000000000",
+    } satisfies Change;
+
+    const completeEvent = completeUnstakeEvent(ACCOUNT, 990_000_000_000_000_000n);
+
+    expect(() => registry.parseReceipt(capability, [completeEvent, native])).toThrow(
+      "FastLane completeUnstake Receipt requires the MON payout to move from FastLane to the CompleteUnstake owner",
+    );
+  });
+
+  it("rejects completeUnstake Receipt when amountMon !== native value", async () => {
+    const capability = await registry.action("fastlane", "completeUnstake", ACCOUNT, {});
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    const native = {
+      kind: "nativeTransfer",
+      from: FASTLANE_STAKING_ADDRESS,
+      to: ACCOUNT,
+      value: "1",
+    } satisfies Change;
+
+    const completeEvent = completeUnstakeEvent(ACCOUNT, 990_000_000_000_000_000n);
+
+    expect(() => registry.parseReceipt(capability, [completeEvent, native])).toThrow(
+      "FastLane completeUnstake Receipt requires matching CompleteUnstake and native Changes",
     );
   });
 
@@ -622,6 +750,31 @@ describe("FastLane shMONAD staking", () => {
     expect(() =>
       registry.parseReceipt(capability, [transferEvent(ACCOUNT, BURN, 5n * 10n ** 17n)]),
     ).toThrow("FastLane boostYield Receipt requires exactly one FastLane BoostYield event");
+  });
+
+  it("rejects boostYield Receipt when the burn is another token's Transfer", async () => {
+    const yieldOriginator = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("fastlane", "boostYield", ACCOUNT, {
+      shares: "1",
+      yieldOriginator,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    // A burn of some other token, from the right account for the right amount,
+    // is not the shMON the boost spent. It is preserved as an ERC-20 Change and
+    // never counts as a boostYield candidate, so the Receipt fails closed for
+    // want of the shMON Transfer.
+    const foreign = transferEvent(
+      ACCOUNT,
+      BURN,
+      5n * 10n ** 17n,
+      getAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
+    );
+    const boosted = boostYieldEvent(ACCOUNT, yieldOriginator, 798_909_778_210_594_794n);
+
+    expect(() => registry.parseReceipt(capability, [foreign, boosted])).toThrow(
+      "FastLane boostYield Receipt requires exactly one FastLane shMON Transfer",
+    );
   });
 
   it("rejects boostYield Receipt when the burn does not come from the BoostYield sender", async () => {
@@ -962,6 +1115,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
     expect(outcome.halted).toBeDefined();
     expect(outcome.halted?.transactionIndex).toBe(2);
     expect(outcome.results[2]?.reverted).toBe(true);
+    // The halt has to be the chain rejecting the call, not our own Receipt
+    // failing to parse. A RECEIPT_FAILED halt also lands at index 2, so pin the
+    // warning code rather than accepting any halt here.
+    expect(outcome.results[2]?.warnings.map((warning) => warning.code)).toEqual(["REVERTED"]);
   });
 
   // Closes the stake (deposit) -> redeem (atomic) loop with exhaustive Receipt
@@ -1021,9 +1178,16 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
     };
     expect(BigInt(stakeOutcome.assets)).toBe(10n ** 18n);
     expect(BigInt(stakeOutcome.shares)).toBeGreaterThan(0n);
-    // depositReceipt cross-checks Deposit.assets === nativeTransfer.value
-    // internally; verify both Changes are present (event + native transfer).
-    expect(stakeReceipt?.changes.length).toBeGreaterThanOrEqual(2);
+    // Mainnet reports three Changes for a stake: the native MON in, the Deposit
+    // event and the shMON mint Transfer. Pin the count instead of a lower bound,
+    // and name the endpoints the parser bound so the live proof does not rest on
+    // the parser agreeing with itself.
+    expect(stakeReceipt?.changes).toHaveLength(3);
+    const stakeNatives = nativeTransfersOf(stakeReceipt?.changes);
+    expect(stakeNatives).toHaveLength(1);
+    expect(stakeNatives[0]?.value).toBe(stakeOutcome.assets);
+    expect(stakeNatives[0]?.from.toLowerCase()).toBe(ACCOUNT.toLowerCase());
+    expect(stakeNatives[0]?.to.toLowerCase()).toBe(FASTLANE_STAKING_ADDRESS.toLowerCase());
 
     // Redeem leg: full Withdraw Receipt payload.
     const redeemReceipt = outcome.results[1]?.receipt;
@@ -1039,9 +1203,15 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
     };
     expect(BigInt(redeemOutcome.shares)).toBeGreaterThan(0n);
     expect(BigInt(redeemOutcome.assets)).toBeGreaterThan(0n);
-    // redeemReceipt cross-checks Withdraw.assets === nativeTransfer.value
-    // internally; verify both Changes are present.
-    expect(redeemReceipt?.changes.length).toBeGreaterThanOrEqual(2);
+    // Three Changes again: the Withdraw event, the shMON burn Transfer and the
+    // native MON out. The payout has to leave the vault and land on the receiver
+    // the Withdraw event names.
+    expect(redeemReceipt?.changes).toHaveLength(3);
+    const redeemNatives = nativeTransfersOf(redeemReceipt?.changes);
+    expect(redeemNatives).toHaveLength(1);
+    expect(redeemNatives[0]?.value).toBe(redeemOutcome.assets);
+    expect(redeemNatives[0]?.from.toLowerCase()).toBe(FASTLANE_STAKING_ADDRESS.toLowerCase());
+    expect(redeemNatives[0]?.to.toLowerCase()).toBe(ACCOUNT.toLowerCase());
 
     // Loop-closure invariant: redeemed shares must not exceed minted shares.
     // In a well-formed vault with positive yield, redeemed shares are strictly
@@ -1108,7 +1278,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("FastLane mainnet", () => {
       validatorId: string;
     };
     expect(BigInt(boosted.amount)).toBeGreaterThan(0n);
-    expect(boosted.validatorId).toMatch(/^\d+$/);
+    // The originator in this test is not registered against a validator, so the
+    // vault reports validator 0. A digit-shaped assertion could not fail:
+    // validatorId is always a stringified bigint.
+    expect(boosted.validatorId).toBe("0");
     expect(outcome.results[1]?.receipt?.changes).toHaveLength(2);
   });
 });
