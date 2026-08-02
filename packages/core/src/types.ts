@@ -22,7 +22,7 @@ export type Verb = (typeof VERBS)[number];
 export const CATEGORIES = ["dex", "lending", "staking", "rewards", "token", "nft"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
-export const RISK_LABELS = ["fundOut", "approval", "priceImpact"] as const;
+export const RISK_LABELS = ["fundOut", "approval", "priceImpact", "debt"] as const;
 export type RiskLabel = (typeof RISK_LABELS)[number];
 
 export const NATIVE = "native" as const;

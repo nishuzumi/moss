@@ -11,6 +11,7 @@ import {
   Receipt,
   type ReceiptResult,
   Registry,
+  type RiskLabel,
   type SelfRef,
   type TransactionNode,
   tokenMetadata,
@@ -45,6 +46,10 @@ new Registry(runtime, {
   trustedTokens: [{ address: "not-an-address", label: "Token" }],
 });
 
+const debtRisk: RiskLabel = "debt";
+// @ts-expect-error RiskLabel remains a closed set.
+const invalidRisk: RiskLabel = "not-a-risk";
+
 const metadataResult = tokenMetadata(
   { kind: "metadata" as const, decimals: 18 as const },
   { address: ADDRESS, symbol: "TOKEN", name: "Token" },
@@ -60,6 +65,8 @@ tokenMetadata("metadata", { address: ADDRESS });
 
 void LabeledFixture;
 void InvalidLabeledFixture;
+void debtRisk;
+void invalidRisk;
 void metadataKind;
 void metadataDecimals;
 
