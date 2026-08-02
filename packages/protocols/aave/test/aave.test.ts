@@ -334,6 +334,9 @@ describe("Aave", () => {
       type: { description: expect.stringContaining("20-byte EVM address") },
     });
     expect(borrow).toMatchObject({ verb: "borrow" });
+    // A borrow adds an obligation and moves nothing out, so it is `debt`, the
+    // label Core defines for exactly that (#119), never `fundOut`.
+    expect(borrow?.risk).toEqual(["debt"]);
     // Aave takes an interestRateMode; the adapter deliberately does not, so an
     // Agent cannot pass the stable mode this deployment removed.
     expect(Object.keys(borrow?.params ?? {})).toEqual(["asset", "amount"]);

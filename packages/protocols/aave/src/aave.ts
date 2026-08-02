@@ -21,14 +21,10 @@
  *     the transaction itself, and withdraw burns the aToken position. All
  *     three are current-transaction asset outflow, which is what the label
  *     means.
- *   - `approval` - supply and repay grant the Pool exactly the amount moved.
- *
- * `borrow` is the one that does not fit. Nothing leaves the account: it takes
- * on a future repayment obligation, which the `fundOut` boundary explicitly
- * excludes. The closed set has no word for that yet, and Registry requires at
- * least one label, so `borrow` carries `fundOut` as a placeholder and names
- * `debt` in its tags. It should become `risk: ["debt"]` as soon as that label
- * exists in Core.
+ *   - `approval` - supply and repay grant the Pool an allowance.
+ *   - `debt`     - borrow adds a repayment obligation. Nothing leaves the
+ *     account in the transaction, which is the boundary `fundOut` draws and
+ *     `debt` sits on the other side of.
  */
 import {
   type ActionCtx,
@@ -242,9 +238,9 @@ export class Aave {
     verb: "borrow",
     params: borrowParams,
     receipt: "borrowReceipt",
-    // Placeholder: nothing leaves the account here, so this should be `debt`
-    // once Core has that label. See the risk note at the top of this file.
-    risk: ["fundOut"],
+    // Nothing leaves the account here: the cost is the obligation, not an
+    // outflow, so this is `debt` rather than `fundOut`.
+    risk: ["debt"],
     tags: ["lending", "aave-v3", "debt"],
   })
   async borrow(params: BorrowParams, ctx: ActionCtx): Promise<CapabilityResult> {
