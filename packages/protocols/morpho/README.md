@@ -23,9 +23,12 @@ AUSD vault means one AUSD, not one share. The vault's own share token has 18
 decimals regardless of the asset. `mint` and `redeem`, the share-denominated
 pair, are out of scope in v1.
 
-Risk labels (closed set, ADR 0003): `supply` is `["fundOut", "approval"]`
-because it grants the vault an allowance and then sends the asset;
-`withdraw` is `["fundOut"]` because it burns the caller's shares.
+Risk labels come from Core's closed set. `fundOut` means assets leave the
+account in this transaction, so `supply` is `["fundOut", "approval"]` (it grants
+the vault an allowance and then sends the asset) and `withdraw` is `["fundOut"]`
+(it burns the caller's shares). Neither carries `debt`: a vault depositor lends.
+The vault borrows in Morpho Blue markets on its own behalf, never on the
+depositor's, so no repayment obligation is created.
 
 ## Vault identity
 
@@ -117,6 +120,15 @@ deposits.
 - `supply` and `withdraw` only. Share-denominated `mint` and `redeem`, the
   public allocator, reward claims and Morpho Vaults V2 are all out of scope.
 - Vault events are bound to whichever address emitted the ERC-4626 event and
-  the MetaMorpho bookkeeping events together; Morpho Blue and IRM events are
-  bound to their fixed deployments. A market running a non-canonical IRM would
-  therefore fail the Receipt loudly rather than be accepted unexplained.
+  the MetaMorpho bookkeeping events together. Morpho Blue and IRM events are
+  bound to their fixed deployments as well as to the flow itself: a market event
+  has to be the direction the operation produces and has to name the vault as
+  its participant, so market activity belonging to another account fails the
+  Receipt instead of being reported as this operation's evidence. A market
+  running a non-canonical IRM fails it too, loudly, rather than being accepted
+  unexplained.
+- The ERC-4626 caller has to be the share owner, which is the only shape
+  `supply` and `withdraw` build. OpenZeppelin v5 spends a share allowance
+  without emitting anything, so a third-party caller leaves nothing in the log
+  to check it against. A receiver that is not the owner is fine on withdraw
+  because the asset transfer proves it, and the Outcome names it.

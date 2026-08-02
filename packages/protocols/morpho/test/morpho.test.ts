@@ -6,6 +6,7 @@ import {
   type MossRuntime,
   Protocol,
   Registry,
+  RISK_LABELS,
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
@@ -32,6 +33,7 @@ import {
 } from "../src/index.js";
 
 const OWNER = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+const OTHER = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
 const VAULT = getAddress("0x32841A8511D5c2c5b253f45668780B99139e476D");
 const ASSET = getAddress("0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a");
 const NOT_A_VAULT = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
@@ -153,13 +155,7 @@ function supplyChanges(): Change[] {
       avgBorrowRate: 1_928_436_063n,
       rateAtTarget: 1_081_100_606n,
     }),
-    event(MorphoBlueAbi, MORPHO_BLUE_ADDRESS, "Supply", {
-      id: MARKET_ID,
-      caller: VAULT,
-      onBehalf: VAULT,
-      assets: ASSETS,
-      shares: 977_598_996_901n,
-    }),
+    marketEvent("Supply", { caller: VAULT, onBehalf: VAULT }),
     transfer(ASSET, VAULT, MORPHO_BLUE_ADDRESS, ASSETS),
   ];
 }
@@ -178,14 +174,7 @@ function withdrawChanges(): Change[] {
       assets: ASSETS,
       shares: SHARES,
     }),
-    event(MorphoBlueAbi, MORPHO_BLUE_ADDRESS, "Withdraw", {
-      id: MARKET_ID,
-      caller: VAULT,
-      onBehalf: VAULT,
-      receiver: VAULT,
-      assets: ASSETS,
-      shares: 977_598_996_901n,
-    }),
+    marketEvent("Withdraw", { caller: VAULT, onBehalf: VAULT, receiver: VAULT }),
     transfer(ASSET, MORPHO_BLUE_ADDRESS, VAULT, ASSETS),
     transfer(ASSET, VAULT, OWNER, ASSETS),
   ];
@@ -209,6 +198,25 @@ async function buildSupply(registry = offlineRegistry()) {
   });
   if (capability.kind !== "capability") throw new Error("expected a Capability");
   return { registry, capability };
+}
+
+async function buildWithdraw(registry = offlineRegistry()) {
+  const capability = await registry.action("morpho", "withdraw", OWNER, {
+    vault: VAULT,
+    amount: "1",
+  });
+  if (capability.kind !== "capability") throw new Error("expected a Capability");
+  return { registry, capability };
+}
+
+/** A Morpho Blue market event with the fixture's market and amounts. */
+function marketEvent(name: "Supply" | "Withdraw", args: Record<string, unknown>): Change {
+  return event(MorphoBlueAbi, MORPHO_BLUE_ADDRESS, name, {
+    id: MARKET_ID,
+    assets: ASSETS,
+    shares: 977_598_996_901n,
+    ...args,
+  });
 }
 
 // ── Vault provenance ─────────────────────────────────────────────────────
@@ -364,10 +372,24 @@ describe("Morpho registry metadata", () => {
     expect(found.every((entry) => entry.category === "lending")).toBe(true);
   });
 
+  it("labels both Capabilities from Core's closed risk set and neither with debt", () => {
+    const loaded = offlineRegistry().load([
+      { protocol: "morpho", method: "supply" },
+      { protocol: "morpho", method: "withdraw" },
+    ]);
+    expect(loaded.map((entry) => entry.risk)).toEqual([["fundOut", "approval"], ["fundOut"]]);
+    for (const entry of loaded) {
+      for (const label of entry.risk) expect(RISK_LABELS).toContain(label);
+      // `debt` names a Capability that adds a repayment obligation. A vault
+      // depositor lends: the vault borrows in Morpho Blue markets on its own
+      // behalf, never on the depositor's, so neither Capability carries it.
+      expect(entry.risk).not.toContain("debt");
+    }
+  });
+
   it("keeps the reusable type description separate from the field purpose", () => {
     const [supply] = offlineRegistry().load([{ protocol: "morpho", method: "supply" }]);
     if (!supply) throw new Error("supply was not registered");
-    expect(supply.risk).toEqual(["fundOut", "approval"]);
     const vault = supply.params.vault;
     expect(vault?.description).toContain("canonical Morpho factory");
     expect(JSON.stringify(vault?.type)).toContain("20-byte EVM address");
@@ -442,7 +464,44 @@ describe("Morpho supply Receipt", () => {
         ? { ...change, address: NOT_A_VAULT }
         : change,
     );
-    expect(() => registry.parseReceipt(capability, forged)).toThrow();
+    expect(() => registry.parseReceipt(capability, forged)).toThrow("Unexpected Change");
+  });
+
+  it("rejects market evidence that names another participant", async () => {
+    const { registry, capability } = await buildSupply();
+    const changes = supplyChanges().map((change, index) =>
+      index === 9 ? marketEvent("Supply", { caller: VAULT, onBehalf: OTHER }) : change,
+    );
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      "Supply.onBehalf to name vault",
+    );
+  });
+
+  it("rejects market evidence for the opposite direction", async () => {
+    const { registry, capability } = await buildSupply();
+    const changes = supplyChanges().map((change, index) =>
+      index === 9
+        ? marketEvent("Withdraw", { caller: VAULT, onBehalf: VAULT, receiver: VAULT })
+        : change,
+    );
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      "received a Morpho Blue Withdraw",
+    );
+  });
+
+  it("rejects a Deposit whose caller is not the account credited with shares", async () => {
+    const { registry, capability } = await buildSupply();
+    const changes = supplyChanges().map((change, index) =>
+      index === 4
+        ? event(MetaMorphoV1_1Abi, VAULT, "Deposit", {
+            sender: OTHER,
+            owner: OWNER,
+            assets: ASSETS,
+            shares: SHARES,
+          })
+        : change,
+    );
+    expect(() => registry.parseReceipt(capability, changes)).toThrow("to be the share owner");
   });
 
   it("rejects vault bookkeeping events from a second address", async () => {
@@ -518,12 +577,7 @@ describe("Morpho supply Receipt", () => {
 
 describe("Morpho withdraw Receipt", () => {
   it("covers every Change in order and reports the evidenced outcome", async () => {
-    const registry = offlineRegistry();
-    const capability = await registry.action("morpho", "withdraw", OWNER, {
-      vault: VAULT,
-      amount: "1",
-    });
-    if (capability.kind !== "capability") throw new Error("expected a Capability");
+    const { registry, capability } = await buildWithdraw();
     const changes = withdrawChanges();
     const receipt = registry.parseReceipt(capability, changes);
 
@@ -537,6 +591,70 @@ describe("Morpho withdraw Receipt", () => {
       assets: ASSETS.toString(),
       shares: SHARES.toString(),
     });
+  });
+
+  it("rejects market evidence that returns the asset to another address", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const changes = withdrawChanges().map((change, index) =>
+      index === 4
+        ? marketEvent("Withdraw", { caller: VAULT, onBehalf: VAULT, receiver: OTHER })
+        : change,
+    );
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      "Withdraw.receiver to name vault",
+    );
+  });
+
+  it("rejects a Withdraw whose caller does not own the shares it burned", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const changes = withdrawChanges().map((change, index) =>
+      index === 3
+        ? event(MetaMorphoV1_1Abi, VAULT, "Withdraw", {
+            sender: OTHER,
+            receiver: OWNER,
+            owner: OWNER,
+            assets: ASSETS,
+            shares: SHARES,
+          })
+        : change,
+    );
+    expect(() => registry.parseReceipt(capability, changes)).toThrow("to be the share owner");
+  });
+
+  it("rejects a receiver no asset transfer confirms", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const changes = withdrawChanges().map((change, index) =>
+      index === 3
+        ? event(MetaMorphoV1_1Abi, VAULT, "Withdraw", {
+            sender: OWNER,
+            receiver: OTHER,
+            owner: OWNER,
+            assets: ASSETS,
+            shares: SHARES,
+          })
+        : change,
+    );
+    expect(() => registry.parseReceipt(capability, changes)).toThrow("asset transfer out of");
+  });
+
+  // The receiver is free where the transfer proves it, because the Outcome
+  // names it. Only identity the logs cannot confirm is refused.
+  it("reports a receiver other than the owner when the transfer proves it", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const changes = withdrawChanges().map((change, index) => {
+      if (index === 3) {
+        return event(MetaMorphoV1_1Abi, VAULT, "Withdraw", {
+          sender: OWNER,
+          receiver: OTHER,
+          owner: OWNER,
+          assets: ASSETS,
+          shares: SHARES,
+        });
+      }
+      return index === 6 ? transfer(ASSET, VAULT, OTHER, ASSETS) : change;
+    });
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.outcome).toMatchObject({ owner: OWNER, receiver: OTHER });
   });
 });
 
@@ -604,8 +722,13 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Morpho mainnet", () => {
     // Receipt evidence keeps the trace's own casing; Moss never rewrites it.
     expect(facts?.vault.toLowerCase()).toBe(GROVE_STEAKHOUSE_AUSD_VAULT.toLowerCase());
     expect(facts?.owner.toLowerCase()).toBe(supplier.toLowerCase());
-    // Exact coverage: every Change the trace produced is in the Receipt.
-    expect(leafChanges(deposit?.receipt).length).toBe(deposit?.changes?.length);
+    // Exact coverage: every Change the trace produced is in the Receipt. The
+    // floor keeps that from passing on an empty trace: a live deposit emits the
+    // vault's bookkeeping, the share mint, the ERC-4626 Deposit, both asset
+    // transfers and at least one Morpho Blue market event.
+    const covered = leafChanges(deposit?.receipt).length;
+    expect(covered).toBe(deposit?.changes?.length);
+    expect(covered).toBeGreaterThanOrEqual(7);
   });
 
   it("reads a live position and the vault's terms", { timeout: 60_000 }, async () => {

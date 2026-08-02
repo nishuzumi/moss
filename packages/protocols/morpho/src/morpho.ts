@@ -24,10 +24,13 @@
  *     surface, per-market IRM rates and Morpho's WAD share math, which is its
  *     own change with its own numeric verification.
  *
- * Risk model (closed set, ADR 0003):
- *   - `fundOut`: the asset leaves the account on supply, and shares are burned
- *     on withdraw.
+ * Risk model (Core's closed set, ADR 0003):
+ *   - `fundOut`, meaning assets leave the account in this transaction: the
+ *     asset goes out on supply. The vault's shares are burned on withdraw.
  *   - `approval`: supply grants the vault an allowance first.
+ *   - not `debt`. A vault depositor lends; the vault borrows on its own behalf
+ *     in Morpho Blue markets, never on the depositor's, so neither Capability
+ *     adds a repayment obligation.
  */
 import {
   type ActionCtx,
@@ -139,10 +142,37 @@ interface FlowFact {
   vault: AddressValue;
   owner: AddressValue;
   receiver: AddressValue;
-  counterparty: AddressValue;
+  caller: AddressValue;
   assets: bigint;
   shares: bigint;
 }
+
+/** One Morpho Blue market event, held until the vault it belongs to is known. */
+interface MarketFact {
+  event: string;
+  args: unknown;
+  vaultFields: readonly string[];
+}
+
+/**
+ * The only Morpho Blue events a vault flow can produce, and the event fields
+ * that have to name the vault itself.
+ *
+ * MetaMorpho V1.1 supplies through `MORPHO.supply(marketParams, toSupply, 0,
+ * address(this), hex"")` and takes back through `MORPHO.withdraw(marketParams,
+ * toWithdraw, 0, address(this), address(this))` (`_supplyMorpho` and
+ * `_withdrawMorpho` in MetaMorphoV1_1.sol, at the commit pinned in
+ * contracts/SOURCES.json). Morpho Blue emits `Supply(id, msg.sender, onBehalf,
+ * ...)` and `Withdraw(id, msg.sender, onBehalf, receiver, ...)` (Morpho.sol).
+ * So the vault is every participant in its own market events. A deposit only
+ * supplies, a withdrawal only withdraws and interest accrual names no address
+ * at all. Market evidence for anyone else or for the other direction belongs
+ * to some other operation.
+ */
+const MARKET_EVENTS: Record<"supply" | "withdraw", Record<string, readonly string[]>> = {
+  supply: { Supply: ["caller", "onBehalf"], AccrueInterest: [] },
+  withdraw: { Withdraw: ["caller", "onBehalf", "receiver"], AccrueInterest: [] },
+};
 
 const same = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
 
@@ -326,6 +356,15 @@ export class Morpho {
    * Blue and IRM events are bound to their fixed deployments, so evidence from
    * some other emitter cannot be read as Morpho market activity. Every amount
    * in the Outcome is cross-checked against a matching ERC-20 transfer.
+   *
+   * Market evidence is bound to this flow, not only to its emitter: a Morpho
+   * Blue event has to be the direction the operation produces and has to name
+   * the vault as its participant, so a market event belonging to another
+   * account is refused instead of being reported as this operation's evidence.
+   * The ERC-4626 caller has to be the share owner too, which is the only shape
+   * either Capability builds. OpenZeppelin v5 spends a share allowance without
+   * emitting anything (`ERC20._spendAllowance` passes `emitEvent: false`), so a
+   * third-party caller leaves nothing in the log to check it against.
    */
   #flowReceipt(
     operation: "supply" | "withdraw",
@@ -333,6 +372,7 @@ export class Morpho {
   ): ReceiptResult<MorphoVaultFlowOutcome> {
     const expected = operation === "supply" ? "Deposit" : "Withdraw";
     const transfers: TransferFact[] = [];
+    const markets: MarketFact[] = [];
     const bookkeepers = new Set<string>();
     let flow: FlowFact | undefined;
 
@@ -346,6 +386,14 @@ export class Morpho {
 
       if (same(change.address, MORPHO_BLUE_ADDRESS)) {
         const decoded = decodeEventLog({ abi: MorphoBlueAbi, topics, data: change.data });
+        const vaultFields = MARKET_EVENTS[operation][decoded.eventName];
+        if (!vaultFields) {
+          throw new Error(
+            `Unexpected Change: Morpho ${operation} received a Morpho Blue ` +
+              `${decoded.eventName}, which a vault ${operation} does not produce`,
+          );
+        }
+        markets.push({ event: decoded.eventName, args: decoded.args, vaultFields });
         return {
           kind: "change" as const,
           change,
@@ -388,11 +436,19 @@ export class Morpho {
         }
         if (flow) throw new Error(`Morpho ${operation} emitted multiple ${expected} events`);
         const args = vaultEvent.args as Record<string, unknown>;
+        const owner = args.owner as AddressValue;
+        const caller = args.sender as AddressValue;
+        if (!same(caller, owner)) {
+          throw new Error(
+            `Morpho ${operation} Receipt requires the ${expected} caller ${caller} to be the ` +
+              `share owner ${owner}; moving another account's shares is not this shape`,
+          );
+        }
         flow = {
           vault: change.address,
-          owner: args.owner as AddressValue,
-          receiver: (args.receiver ?? args.owner) as AddressValue,
-          counterparty: args.sender as AddressValue,
+          owner,
+          receiver: (args.receiver ?? owner) as AddressValue,
+          caller,
           assets: args.assets as bigint,
           shares: args.shares as bigint,
         };
@@ -432,6 +488,18 @@ export class Morpho {
       );
     }
 
+    for (const market of markets) {
+      for (const field of market.vaultFields) {
+        const participant = addressField(market.args, field);
+        if (!participant || !same(participant, confirmed.vault)) {
+          throw new Error(
+            `Morpho ${operation} Receipt requires Morpho Blue ${market.event}.${field} to name ` +
+              `vault ${confirmed.vault}, got ${participant ?? "no address"}`,
+          );
+        }
+      }
+    }
+
     const shareMove = transfers.find(
       (transfer) =>
         same(transfer.token, confirmed.vault) &&
@@ -450,7 +518,7 @@ export class Morpho {
       operation === "supply"
         ? !same(transfer.token, confirmed.vault) &&
           same(transfer.to, confirmed.vault) &&
-          same(transfer.from, confirmed.counterparty) &&
+          same(transfer.from, confirmed.caller) &&
           transfer.value === confirmed.assets
         : !same(transfer.token, confirmed.vault) &&
           same(transfer.from, confirmed.vault) &&
@@ -505,4 +573,11 @@ function describeArgs(args: unknown): string {
   return Object.entries(args)
     .map(([key, value]) => `${key}=${String(value)}`)
     .join(", ");
+}
+
+/** One address-valued field of a decoded event, or nothing if it carries none. */
+function addressField(args: unknown, field: string): string | undefined {
+  if (typeof args !== "object" || args === null) return undefined;
+  const value = (args as Record<string, unknown>)[field];
+  return typeof value === "string" ? value : undefined;
 }
