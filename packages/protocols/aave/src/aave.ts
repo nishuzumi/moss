@@ -158,6 +158,19 @@ type OperationEvent<TName extends PoolEventName> = Extract<AavePoolEvent, { even
 type PositionSide = "aToken" | "variableDebtToken";
 /** Whether the underlying moves before or after the position token changes. */
 type FlowOrder = "underlyingFirst" | "positionFirst";
+/** Which way a collateral flag went. */
+type CollateralDirection = "enabled" | "disabled";
+
+/**
+ * A collateral flag the Pool emitted, with the pair it named. Both indexed
+ * arguments are kept: a flag for another reserve or another account is not
+ * evidence about this operation.
+ */
+interface CollateralFlag {
+  direction: CollateralDirection;
+  reserve: AddressValue;
+  user: AddressValue;
+}
 
 interface IndexedTransfer {
   outcome: Extract<ERC20Outcome, { operation: "transfer" }>;
@@ -175,7 +188,7 @@ interface Evidence {
   positionOwner: AddressValue;
   positionIndex: number;
   transfers: readonly IndexedTransfer[];
-  collateral: "enabled" | "disabled" | null;
+  collateral: CollateralFlag | null;
 }
 
 interface Collected<TName extends PoolEventName> extends Evidence {
@@ -345,6 +358,9 @@ export class Aave {
       amount: args.amount,
       order: "underlyingFirst",
     });
+    // A first supply of this reserve switches it on as collateral for the
+    // account being credited, and no other flag belongs to a supply.
+    const collateral = requireCollateral(found, { direction: "enabled", user: args.onBehalfOf });
     const outcome: AaveSupplyOutcome = {
       operation: "supply",
       protocol: "aave",
@@ -354,7 +370,7 @@ export class Aave {
       user: getAddress(args.user),
       onBehalfOf: getAddress(args.onBehalfOf),
       position: found.position,
-      collateral: found.collateral === "enabled" ? "enabled" : null,
+      collateral,
     };
     return {
       kind: "receipt",
@@ -375,6 +391,9 @@ export class Aave {
       amount: args.amount,
       order: "positionFirst",
     });
+    // Emptying the position switches the reserve off as collateral for the
+    // withdrawing account, and no other flag belongs to a withdraw.
+    const collateral = requireCollateral(found, { direction: "disabled", user: args.user });
     const outcome: AaveWithdrawOutcome = {
       operation: "withdraw",
       protocol: "aave",
@@ -384,7 +403,7 @@ export class Aave {
       user: getAddress(args.user),
       to: getAddress(args.to),
       position: found.position,
-      collateral: found.collateral === "disabled" ? "disabled" : null,
+      collateral,
     };
     return {
       kind: "receipt",
@@ -404,6 +423,7 @@ export class Aave {
       );
     }
     requirePosition(found, { owner: args.onBehalfOf, event: "Mint" });
+    refuseCollateral(found);
     requireUnderlyingFlow(found, {
       from: found.reserve.aToken,
       to: args.user,
@@ -438,6 +458,7 @@ export class Aave {
       throw new Error("Aave repay Receipt saw an aToken repayment; this Capability pays in kind");
     }
     requirePosition(found, { owner: args.user });
+    refuseCollateral(found);
     requireUnderlyingFlow(found, {
       from: args.repayer,
       to: found.reserve.aToken,
@@ -479,7 +500,7 @@ export class Aave {
     let operationEvent:
       | { event: OperationEvent<TName>; reserve: AddressValue; changeIndex: number }
       | undefined;
-    let collateral: "enabled" | "disabled" | null = null;
+    let collateral: CollateralFlag | null = null;
     const positions: { data: AavePositionChange; owner: AddressValue; changeIndex: number }[] = [];
     const transfers: IndexedTransfer[] = [];
     const tokensTouched = new Set<string>();
@@ -536,13 +557,17 @@ export class Aave {
           if (collateral) {
             throw new Error(`Aave ${operation} toggled collateral use more than once`);
           }
-          collateral =
-            event.eventName === "ReserveUsedAsCollateralEnabled" ? "enabled" : "disabled";
+          collateral = {
+            direction:
+              event.eventName === "ReserveUsedAsCollateralEnabled" ? "enabled" : "disabled",
+            reserve: getAddress(event.args.reserve),
+            user: getAddress(event.args.user),
+          };
           return {
             kind: "change",
             change,
             data,
-            text: `Aave Collateral ${collateral}: ${event.args.reserve} for ${event.args.user}`,
+            text: `Aave Collateral ${collateral.direction}: ${collateral.reserve} for ${collateral.user}`,
           };
         }
         throw new Error(
@@ -725,6 +750,54 @@ function requirePosition(found: Evidence, expected: { owner: string; event?: "Mi
   }
   if (found.positionIndex >= found.eventIndex) {
     throw new Error(`Aave ${found.operation} Receipt saw its position event after the Pool event`);
+  }
+}
+
+/**
+ * The one collateral flag this operation is allowed to carry, bound to the
+ * reserve and the account the Pool named. Aave emits the flag from the same
+ * logic library that emits the operation event, so the pair is fixed:
+ * `SupplyLogic.executeSupply` switches the reserve on for `onBehalfOf` on a
+ * first supply, and `executeWithdraw` switches it off for the withdrawing
+ * `user` once the position empties. A flag naming another reserve or another
+ * account describes something else that happened in the same transaction, so
+ * it cannot stand as this operation's collateral evidence. Absent is fine; the
+ * wrong direction, reserve or account is not.
+ */
+function requireCollateral<TDirection extends CollateralDirection>(
+  found: Evidence,
+  expected: { direction: TDirection; user: string },
+): TDirection | null {
+  const flag = found.collateral;
+  if (!flag) return null;
+  if (flag.direction !== expected.direction) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw collateral ${flag.direction}, which a ${found.operation} does not do`,
+    );
+  }
+  if (!sameAddress(flag.reserve, found.reserve.underlying)) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw a collateral flag for reserve ${flag.reserve}, not ${found.reserve.symbol}`,
+    );
+  }
+  if (!sameAddress(flag.user, expected.user)) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw a collateral flag for ${flag.user}, not ${expected.user}`,
+    );
+  }
+  return expected.direction;
+}
+
+/**
+ * A borrow never changes collateral use, and a repay only does so inside the
+ * `useATokens` branch this Capability refuses, so for these two shapes any
+ * flag at all is a Change the Receipt cannot account for.
+ */
+function refuseCollateral(found: Evidence): void {
+  if (found.collateral) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw collateral ${found.collateral.direction}, which a ${found.operation} does not do`,
+    );
   }
 }
 

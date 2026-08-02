@@ -298,6 +298,22 @@ function repayChanges(useATokens = false): Change[] {
   ];
 }
 
+/** A supply trace carries its collateral flag at index 5. */
+function supplyWithFlag(flag: Change): Change[] {
+  return supplyChanges().map((change, index) => (index === 5 ? flag : change));
+}
+
+/**
+ * A full withdraw disables the reserve as collateral. Aave moved that emission
+ * from before the aToken burn to after it between v3.3 and v3.6, so the parser
+ * binds the flag's reserve and account rather than its position in the trace;
+ * this fixture puts it last, just before the Pool event.
+ */
+function withdrawWithFlag(flag: Change): Change[] {
+  const changes = withdrawChanges();
+  return [...changes.slice(0, 4), flag, ...changes.slice(4)];
+}
+
 function firstChange(entry: ReceiptResult["changes"][number]): Change {
   if (entry.kind === "change") return entry.change;
   const [child] = entry.changes;
@@ -506,6 +522,76 @@ describe("Aave", () => {
     ];
     const receipt = await parse("withdraw", { asset: USDC.underlying, amount: "0.001" }, changes);
     expect(receipt.outcome).toMatchObject({ position: { event: "Mint", balanceIncrease: "1500" } });
+  });
+
+  it("reads the collateral flag a full withdraw emits", async () => {
+    const changes = withdrawWithFlag(poolCollateral(USDC, ACCOUNT, false));
+    const receipt = await parse("withdraw", { asset: USDC.underlying, amount: "1" }, changes);
+    expect(receipt.outcome).toMatchObject({ collateral: "disabled" });
+    expect(receipt.changes.map(firstChange)).toEqual(changes);
+  });
+
+  it("binds a collateral flag to the operation's own reserve and account", async () => {
+    const supplyCases: [string, Change[], string][] = [
+      [
+        // Reported on #157: a flag from another reserve for another account
+        // used to parse as this supply's own collateral evidence.
+        "another reserve and another account",
+        supplyWithFlag(poolCollateral(USDC, OTHER, true)),
+        "collateral flag for reserve",
+      ],
+      ["another reserve", supplyWithFlag(poolCollateral(USDC, ACCOUNT, true)), "not USDT0"],
+      ["another account", supplyWithFlag(poolCollateral(USDT0, OTHER, true)), `not ${ACCOUNT}`],
+      [
+        "a supply that disabled collateral",
+        supplyWithFlag(poolCollateral(USDT0, ACCOUNT, false)),
+        "saw collateral disabled",
+      ],
+    ];
+    for (const [name, changes, message] of supplyCases) {
+      await expect(
+        parse("supply", { asset: USDT0.underlying, amount: "1" }, changes),
+        name,
+      ).rejects.toThrow(message);
+    }
+
+    const withdrawCases: [string, Change[], string][] = [
+      ["another reserve", withdrawWithFlag(poolCollateral(USDT0, ACCOUNT, false)), "not USDC"],
+      ["another account", withdrawWithFlag(poolCollateral(USDC, OTHER, false)), `not ${ACCOUNT}`],
+      [
+        "a withdraw that enabled collateral",
+        withdrawWithFlag(poolCollateral(USDC, ACCOUNT, true)),
+        "saw collateral enabled",
+      ],
+    ];
+    for (const [name, changes, message] of withdrawCases) {
+      await expect(
+        parse("withdraw", { asset: USDC.underlying, amount: "1" }, changes),
+        name,
+      ).rejects.toThrow(message);
+    }
+  });
+
+  it("refuses a collateral flag on a borrow or a repay", async () => {
+    // Aave changes collateral use on a borrow never, and on a repay only in
+    // the aToken branch this Capability refuses.
+    const borrow = borrowChanges();
+    await expect(
+      parse("borrow", { asset: USDC.underlying, amount: "1" }, [
+        ...borrow.slice(0, 4),
+        poolCollateral(USDC, ACCOUNT, true),
+        ...borrow.slice(4),
+      ]),
+    ).rejects.toThrow("saw collateral enabled, which a borrow does not do");
+
+    const repay = repayChanges();
+    await expect(
+      parse("repay", { asset: USDC.underlying, amount: "0.001" }, [
+        ...repay.slice(0, 4),
+        poolCollateral(USDC, ACCOUNT, false),
+        ...repay.slice(4),
+      ]),
+    ).rejects.toThrow("saw collateral disabled, which a repay does not do");
   });
 
   it("refuses evidence that is missing, duplicated, misattributed or reordered", async () => {
