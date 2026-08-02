@@ -85,8 +85,6 @@ If the fork command fails, confirm that Foundry was installed with:
 foundryup --network monad
 ```
 
-
 ## Reset the fork
 
 The fork is disposable local state. Stop it with `pkill anvil`; the next `fork` command starts from the current Monad mainnet tip and funds the development account again.
-
