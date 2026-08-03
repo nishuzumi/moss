@@ -109,6 +109,26 @@ class InvalidPerpsFixture {
   }
 }
 
+@Protocol({
+  name: "explained-fixture",
+  category: "token",
+  description: "Compile-time revert-explanation fixture.",
+  contracts: {},
+  customErrorMessages: { SomeError: "what went wrong" },
+  stringRevertMessages: { LOK: "the pool is locked" },
+})
+class ExplainedFixture {}
+
+@Protocol({
+  name: "invalid-explained-fixture",
+  category: "token",
+  description: "Compile-time invalid revert-explanation fixture.",
+  contracts: {},
+  // @ts-expect-error An explanation is text, not a nested object.
+  customErrorMessages: { SomeError: { message: "what went wrong" } },
+})
+class InvalidExplainedFixture {}
+
 const runtime = null as unknown as MossRuntime;
 new Registry(runtime, { trustedTokens: [{ address: ADDRESS, label: "Token" }] });
 new Registry(runtime, {
@@ -140,5 +160,7 @@ void InvalidCategoryFixture;
 void InvalidPerpsFixture;
 void debtRisk;
 void invalidRisk;
+void ExplainedFixture;
+void InvalidExplainedFixture;
 void metadataKind;
 void metadataDecimals;

@@ -151,9 +151,7 @@ type PendleQuoteParams = Omit<ResolvedPendleQuoteParams, "slippageBps"> & {
     router: { abi: PendleRouterContractAbi, addr: PENDLE_ROUTER_ADDRESS },
     routerStatic: { abi: PendleRouterStaticAbi, addr: PENDLE_ROUTER_STATIC_ADDRESS },
   },
-  errorMessages: {
-    MarketZeroNetLPFee: MARKET_ZERO_NET_LP_FEE_MESSAGE,
-  },
+  customErrorMessages: { MarketZeroNetLPFee: MARKET_ZERO_NET_LP_FEE_MESSAGE },
   labels: {
     MarketFactory: PENDLE_MARKET_FACTORY_ADDRESS,
     Router: PENDLE_ROUTER_ADDRESS,

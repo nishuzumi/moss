@@ -31,8 +31,25 @@ export interface ProtocolConfig<Dependencies extends ProtocolDependencies = Reco
   category: Category;
   description: string;
   contracts: Record<string, ContractConfig>;
-  /** Human explanations for selected ABI-declared custom errors, keyed by error name. */
-  errorMessages?: Readonly<Record<string, string>>;
+  /**
+   * Human explanations for custom errors declared by any of this Protocol's contract ABIs, keyed by
+   * error name. `{argName}` reads that argument's decoded value; since the rendered identity already
+   * lists every argument, prefer framing a value over restating it.
+   *
+   * Scoped by name only: two deployments declaring the same error name share one explanation even
+   * where their signatures differ.
+   */
+  customErrorMessages?: Readonly<Record<string, string>>;
+  /**
+   * Human explanations for `require(cond, "...")` reverts, keyed by the exact message emitted.
+   * Protocols that compile those down to a few characters — Uniswap V3's `LOK`, `AS`, `T` — are the
+   * reason this exists, since the message is all that identifies which check failed.
+   *
+   * Unlike a custom error name, a payload appears in no ABI, so Registry can only require it to be
+   * text. A Protocol declaring one owns a test proving the literal appears in its pinned vendored
+   * source.
+   */
+  stringRevertMessages?: Readonly<Record<string, string>>;
   labels?: Record<string, Address>;
   protocols?: Dependencies;
 }

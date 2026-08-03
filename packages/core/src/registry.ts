@@ -70,7 +70,10 @@ export interface QueryResult {
 
 export interface ResolvedProtocolContract {
   abi: Abi;
-  errorMessages: Readonly<Record<string, string>>;
+  /** Explanations for ABI-declared custom errors, by error name. */
+  customErrorMessages: Readonly<Record<string, string>>;
+  /** Explanations for `require` reverts, by the exact emitted message. */
+  stringRevertMessages: Readonly<Record<string, string>>;
 }
 
 interface Registered {
@@ -234,7 +237,7 @@ export class Registry {
     if (!CATEGORIES.includes(config.category)) {
       throw new Error(`protocol "${config.name}" has an invalid category`);
     }
-    for (const [errorName, message] of Object.entries(config.errorMessages ?? {})) {
+    for (const [errorName, message] of Object.entries(config.customErrorMessages ?? {})) {
       requireMetadataText(errorName, `protocol "${config.name}" error name`);
       requireMetadataText(message, `protocol "${config.name}" error "${errorName}" message`);
       if (
@@ -246,6 +249,12 @@ export class Registry {
           `protocol "${config.name}" error "${errorName}" is not declared by a contract ABI`,
         );
       }
+    }
+    // A revert message appears in no ABI, so this is all Registry can check. The Protocol owns
+    // proving the literal against its own pinned vendored source.
+    for (const [reason, message] of Object.entries(config.stringRevertMessages ?? {})) {
+      requireMetadataText(reason, `protocol "${config.name}" revert reason`);
+      requireMetadataText(message, `protocol "${config.name}" revert "${reason}" message`);
     }
     const existing = this.#protocols.get(config.name);
     if (existing?.ctor === ctor) return;
@@ -367,9 +376,13 @@ export class Registry {
       ({ addr }) => addr.toLowerCase() === target.toLowerCase(),
     );
     if (matches.length === 0) return undefined;
+    // The ABI is what the target decides; the explanations belong to the Protocol and travel with
+    // every one of its targets. An entry only ever renders when the matched ABI decodes an error of
+    // that name, so a target missing it simply never looks it up.
     return {
       abi: matches.flatMap(({ abi }) => abi) as Abi,
-      errorMessages: registered.config.errorMessages ?? {},
+      customErrorMessages: registered.config.customErrorMessages ?? {},
+      stringRevertMessages: registered.config.stringRevertMessages ?? {},
     };
   }
 

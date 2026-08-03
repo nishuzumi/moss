@@ -270,9 +270,10 @@ describe("Capability simulation", () => {
           protocol === "fixture" && target === B
             ? {
                 abi: RevertAbi,
-                errorMessages: {
+                customErrorMessages: {
                   MarketZeroNetLPFee: "swap amount too small: this market's LP fee rounds to zero",
                 },
+                stringRevertMessages: {},
               }
             : undefined,
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
@@ -300,7 +301,11 @@ describe("Capability simulation", () => {
     const outcome = await createTraceSimulator(
       runtimeWithFrames([{ type: "CALL", from: A, to: B, error: "execution reverted", output }]),
       {
-        resolveContract: () => ({ abi: RevertAbi, errorMessages: {} }),
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
       },
     ).simulate(capability("fixture", B));
@@ -322,7 +327,9 @@ describe("Capability simulation", () => {
       ]),
       {
         resolveContract: (_, target) =>
-          target === B ? { abi: RevertAbi, errorMessages: {} } : undefined,
+          target === B
+            ? { abi: RevertAbi, customErrorMessages: {}, stringRevertMessages: {} }
+            : undefined,
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
       },
     ).simulate(capability("fixture", C));
@@ -349,7 +356,11 @@ describe("Capability simulation", () => {
         },
       ]),
       {
-        resolveContract: () => ({ abi: RevertAbi, errorMessages: {} }),
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
       },
     ).simulate(capability("fixture", B));
@@ -370,7 +381,11 @@ describe("Capability simulation", () => {
         },
       ]),
       {
-        resolveContract: () => ({ abi: RevertAbi, errorMessages: {} }),
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
         receipt: (node, changes) => coveringReceipt(node.protocol, changes),
       },
     ).simulate(capability("fixture", B));
@@ -522,5 +537,130 @@ describe("Capability simulation", () => {
 
     expect(outcome.halted).toBeDefined();
     expect(outcome.syntheticState).toEqual([B]);
+  });
+
+  it("explains a terse require message by its exact payload", async () => {
+    // Protocols that compile their messages down to a few characters are the reason the payload is
+    // the key: every one of them decodes as `Error`, so an error name cannot address one.
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          output: encodeErrorResult({
+            abi: parseAbi(["error Error(string)"]),
+            errorName: "Error",
+            args: ["LOK"],
+          }),
+        },
+      ]),
+      {
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: { LOK: "the pool is locked by a call already in progress" },
+        }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe(
+      "LOK: the pool is locked by a call already in progress",
+    );
+  });
+
+  it("leaves an unexplained require message exactly as the contract emitted it", async () => {
+    // The node already decoded this one. Re-rendering it as `Error(message="...")` would bury a
+    // readable sentence inside Solidity's envelope.
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          revertReason: "PancakeRouter: EXPIRED",
+          output: encodeErrorResult({
+            abi: parseAbi(["error Error(string)"]),
+            errorName: "Error",
+            args: ["PancakeRouter: EXPIRED"],
+          }),
+        },
+      ]),
+      {
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe("PancakeRouter: EXPIRED");
+  });
+
+  it("falls back to the trace reason for an empty require message", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          output: encodeErrorResult({
+            abi: parseAbi(["error Error(string)"]),
+            errorName: "Error",
+            args: [""],
+          }),
+        },
+      ]),
+      {
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.results[0]?.revertReason).toBe("execution reverted");
+  });
+
+  it("reads decoded arguments into an explanation, and leaves an unknown placeholder written", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          output: encodeErrorResult({
+            abi: RevertAbi,
+            errorName: "AmountTooLarge",
+            args: [A, 42n],
+          }),
+        },
+      ]),
+      {
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {
+            AmountTooLarge: "{amount} is more than {account} may move, and {nosuch} is not a field",
+          },
+          stringRevertMessages: {},
+        }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    // The identity keeps every argument; the explanation frames the ones it names, and an
+    // unrecognised placeholder survives so a bad template is visible rather than silently blank.
+    expect(outcome.results[0]?.revertReason).toBe(
+      `AmountTooLarge(account="${A}", amount=42): 42 is more than "${A}" may move, and {nosuch} is not a field`,
+    );
   });
 });

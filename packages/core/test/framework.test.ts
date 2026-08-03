@@ -29,6 +29,8 @@ const VaultAbi = parseAbi([
   "error VaultLimit(address account, uint256 amount)",
 ]);
 const VAULT = "0x1111111111111111111111111111111111111111" as const;
+const SIDECAR_ABI = parseAbi(["error SidecarOnly(uint256 code)"]);
+const SIDECAR = "0x4444444444444444444444444444444444444444" as const;
 const ACCOUNT = "0x2222222222222222222222222222222222222222" as const;
 
 const wrapParams = {
@@ -42,8 +44,14 @@ const wrapParams = {
   name: "testvault",
   category: "token",
   description: "Test-only vault.",
-  contracts: { vault: { abi: VaultAbi, addr: VAULT } },
-  errorMessages: { VaultLimit: "vault limit exceeded" },
+  contracts: {
+    vault: { abi: VaultAbi, addr: VAULT },
+    sidecar: { abi: SIDECAR_ABI, addr: SIDECAR },
+  },
+  // SidecarOnly is declared by the second contract only: an explanation is Protocol metadata, so
+  // any one of the declared ABIs satisfies it.
+  customErrorMessages: { VaultLimit: "vault limit exceeded", SidecarOnly: "sidecar refused" },
+  stringRevertMessages: { "vault: paused": "the vault is paused" },
 })
 class TestVault {
   declare vault: Handle<typeof VaultAbi>;
@@ -143,7 +151,7 @@ class DebtProtocol {
   category: "token",
   description: "Fixture with an error explanation absent from its ABI.",
   contracts: { vault: { abi: VaultAbi, addr: VAULT } },
-  errorMessages: { MissingError: "this name is not ABI-derived" },
+  customErrorMessages: { MissingError: "this name is not ABI-derived" },
 })
 class BadErrorMessageProtocol {
   @Query({ intent: "Inspect the fixture", params: noParams })
@@ -401,10 +409,14 @@ describe("framework core seam", () => {
       ],
     });
     expect(registry.parseReceipt(capability, []).outcome).toEqual({ operation: "wrap" });
+    // Explanations are Protocol metadata, so both reach either target; the ABI is the target's own.
+    // An entry the matched ABI cannot decode is simply never looked up.
     expect(registry.resolveContract("testvault", VAULT)).toEqual({
       abi: VaultAbi,
-      errorMessages: { VaultLimit: "vault limit exceeded" },
+      customErrorMessages: { VaultLimit: "vault limit exceeded", SidecarOnly: "sidecar refused" },
+      stringRevertMessages: { "vault: paused": "the vault is paused" },
     });
+    expect(registry.resolveContract("testvault", SIDECAR)?.abi).toEqual(SIDECAR_ABI);
     expect(
       registry.resolveContract("testvault", "0x3333333333333333333333333333333333333333"),
     ).toBeUndefined();

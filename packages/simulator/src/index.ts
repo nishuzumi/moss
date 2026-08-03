@@ -104,9 +104,28 @@ function decodeRevertReason(contract: ResolvedProtocolContract, data: Hex): stri
       const rendered = printableRevertValue(value);
       return name ? `${name}=${rendered}` : rendered;
     });
+    // viem resolves Solidity's built-in `Error(string)` against any ABI, so a `require` message
+    // decodes here too, under the name "Error" for every one of them.
+    if (decoded.errorName === "Error" && typeof args[0] === "string") {
+      const reason = args[0];
+      // Nothing to say and nothing to look up; the trace reason is more useful than an empty line.
+      if (reason.length === 0) return undefined;
+      const explanation = contract.stringRevertMessages[reason];
+      return explanation ? `${reason}: ${explanation}` : reason;
+    }
     const identity = `${decoded.errorName}(${renderedArgs.join(", ")})`;
-    const explanation = contract.errorMessages[decoded.errorName];
-    return explanation ? `${identity}: ${explanation}` : identity;
+    // Keyed on the name alone, never the arguments, so one entry covers every occurrence.
+    const template = contract.customErrorMessages[decoded.errorName];
+    if (!template) return identity;
+    // An unrecognised name is left as written, because a silently blank sentence hides the mistake.
+    const explanation = template.replace(/\{(\w+)\}/g, (whole, name: string) => {
+      const index =
+        "inputs" in decoded.abiItem
+          ? decoded.abiItem.inputs.findIndex((input) => input?.name === name)
+          : -1;
+      return index >= 0 ? printableRevertValue(args[index]) : whole;
+    });
+    return `${identity}: ${explanation}`;
   } catch {
     return undefined;
   }

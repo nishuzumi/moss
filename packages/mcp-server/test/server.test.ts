@@ -77,7 +77,7 @@ describe("moss MCP server", () => {
     expect(contract?.abi).toContainEqual(
       expect.objectContaining({ type: "error", name: "MarketZeroNetLPFee" }),
     );
-    expect(contract?.errorMessages.MarketZeroNetLPFee).toContain("LP fee rounds to zero");
+    expect(contract?.customErrorMessages.MarketZeroNetLPFee).toContain("LP fee rounds to zero");
   });
 
   it("discovers and loads the Protocols selected by the default CLI composition", async () => {
