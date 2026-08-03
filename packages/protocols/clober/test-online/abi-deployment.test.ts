@@ -28,7 +28,7 @@
  */
 import { readFileSync } from "node:fs";
 import { ERC1967_IMPLEMENTATION_SLOT, erc1967ImplementationAddress } from "@themoss/abi-tools";
-import { monadRuntime } from "@themoss/system";
+import { createRuntime } from "@themoss/core";
 import {
   type Abi,
   type AbiEvent,
@@ -94,7 +94,7 @@ describe("Clober ABI deployment evidence", () => {
   it("pins non-empty runtime code and the manually verified required surface", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const controllerCode = await requireRuntimeCode(
       runtime,
       manifest.controller.address,
@@ -158,7 +158,7 @@ describe("Clober ABI deployment evidence", () => {
   it("BookViewer still uses the recorded deployed implementation", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const slot = await runtime.client.getStorageAt({
       address: manifest.bookViewer.proxy,
       slot: ERC1967_IMPLEMENTATION_SLOT,
@@ -176,7 +176,7 @@ describe("Clober ABI deployment evidence", () => {
   it("Controller and BookViewer still point to the recorded BookManager", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const [controllerBookManager, viewerBookManager] = await Promise.all([
       runtime.client.readContract({
         address: manifest.controller.address,
@@ -195,7 +195,7 @@ describe("Clober ABI deployment evidence", () => {
 });
 
 async function requireRuntimeCode(
-  runtime: Awaited<ReturnType<typeof monadRuntime>>,
+  runtime: Awaited<ReturnType<typeof createRuntime>>,
   address: Address,
   expectedKeccak256: Hex,
 ): Promise<Hex> {
