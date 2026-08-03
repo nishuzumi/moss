@@ -135,6 +135,30 @@ describe("moss MCP server", () => {
     expect(unstakeLoaded[0]?.params.controller).toMatchObject({
       description: expect.stringContaining("controller"),
     });
+
+    const beetsSwap = parseText(
+      await client.callTool({
+        name: "discover",
+        arguments: { protocol: "beets", verb: "swap" },
+      }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(beetsSwap).toEqual([
+      expect.objectContaining({ protocol: "beets", method: "swap", kind: "capability" }),
+    ]);
+    const beets = parseText(
+      await client.callTool({ name: "discover", arguments: { protocol: "beets" } }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(beets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "beets", method: "quote", kind: "query" }),
+        expect.objectContaining({ protocol: "beets", method: "addLiquidity", kind: "capability" }),
+        expect.objectContaining({
+          protocol: "beets",
+          method: "removeLiquidity",
+          kind: "capability",
+        }),
+      ]),
+    );
   });
 
   it("round-trips a Capability tree through action JSON", async () => {
