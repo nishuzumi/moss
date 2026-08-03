@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod/v4";
 import {
   type AddressValue,
   CATEGORIES,
@@ -9,6 +8,7 @@ import {
   type ReceiptResult as MossReceipt,
   type MossRuntime,
   type ParamsSpec,
+  PositionSide,
   PositiveDecimalString,
   Protocol,
   Receipt,
@@ -21,10 +21,8 @@ import {
 const MARKET = "0x3333333333333333333333333333333333333333" as const;
 const ACCOUNT = "0x2222222222222222222222222222222222222222" as const;
 
-const Side = z.enum(["long", "short"]).describe('One of the literals "long" or "short".');
-
 const openParams = {
-  side: { type: Side, description: "Direction of the position this Capability opens." },
+  side: { type: PositionSide, description: "Direction of the position this Capability opens." },
   collateral: {
     type: PositiveDecimalString,
     description: "Collateral posted against the position, in the margin asset's display units.",
@@ -111,7 +109,14 @@ describe("capability vocabulary", () => {
       "close",
     ]);
     expect(CATEGORIES).toEqual(["dex", "perps", "lending", "staking", "rewards", "token", "nft"]);
-    expect(RISK_LABELS).toEqual(["fundOut", "approval", "priceImpact", "leverage", "liquidation"]);
+    expect(RISK_LABELS).toEqual([
+      "fundOut",
+      "approval",
+      "priceImpact",
+      "debt",
+      "leverage",
+      "liquidation",
+    ]);
   });
 
   it("discovers position-lifecycle Capabilities by their perps category and verbs", async () => {

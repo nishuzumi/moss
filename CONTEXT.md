@@ -43,7 +43,7 @@ A reusable, context-free value contract carrying validation, transformation, def
 A Capability or Query input field pairing a Parameter type with a separate description of that field's specific role.
 
 **Risk label**:
-A Core-defined closed-set category of danger declared by a Capability, from a closed set (`fundOut`, `approval`, `priceImpact`, `debt`, `leverage`, `liquidation`). `fundOut` means assets leave the account in the current transaction and does not include future repayment obligations. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. It is authoring metadata, not runtime evidence.
+A Core-defined category of danger from a closed set, declared by a Capability (`fundOut`, `approval`, `priceImpact`, `debt`, `leverage`, `liquidation`). `fundOut` means assets leave the account in the current transaction and does not include future repayment obligations. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. It is authoring metadata, not runtime evidence.
 _Avoid_: warning, flag
 
 **Protocol trust boundary**:
@@ -105,7 +105,7 @@ The user-perspective write semantic of a Capability, from a small closed set (`s
 _Avoid_: action type, operation
 
 **Position lifecycle verb**:
-`open` and `close`, the two writes that create and unwind a persistent position carrying its own liquidation surface. Direction is a Capability parameter, never a verb, and the collateral backing the position moves under `supply` and `withdraw`.
+`open` and `close`, the two writes that create and unwind a persistent position carrying its own liquidation surface. Direction rides the closed `PositionSide` parameter (`"long"` or `"short"`), never a verb, and the collateral backing the position moves under `supply` and `withdraw`.
 _Avoid_: long, short, marginAdd, marginRemove
 
 **Category**:
