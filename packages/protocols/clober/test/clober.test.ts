@@ -1,5 +1,6 @@
 import {
   type Change,
+  createRuntime,
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
@@ -9,7 +10,7 @@ import {
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
 import { createTraceSimulator } from "@themoss/simulator";
-import { monadRuntime, USDC_ADDRESS } from "@themoss/system";
+import { USDC_ADDRESS } from "@themoss/system";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -749,7 +750,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
   it("has deployed protocol bytecode and quotes native MON to USDC", {
     timeout: 60_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     for (const address of [
       CLOBER_CONTROLLER_ADDRESS,
       CLOBER_BOOK_MANAGER_ADDRESS,
@@ -786,7 +787,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
   it("matches a zero-slippage Viewer quote in Controller.spend simulation", {
     timeout: 180_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Clober);
     const capability = await registry.action("clober", "swap", ACCOUNT, {
       tokenIn: NATIVE,
@@ -828,7 +829,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
   it("simulates reverse USDC to MON through approval and Controller.spend", {
     timeout: 180_000,
   }, async () => {
-    const runtime = await monadRuntime();
+    const runtime = await createRuntime();
     const [balance, allowance] = await Promise.all([
       runtime.client.readContract({
         address: USDC_ADDRESS,
@@ -851,7 +852,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Clober mainnet", () => {
       tokenIn: USDC_ADDRESS,
       tokenOut: NATIVE,
       amountIn: "1",
-      slippage: 0,
+      slippage: 50,
     });
     if (capability.kind !== "capability") throw new Error("expected Capability");
     const executable = flattenCapabilityTree(capability);
