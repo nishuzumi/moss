@@ -97,6 +97,14 @@ describe("moss MCP server", () => {
         expect.objectContaining({ protocol: "apriori", method: "stake", kind: "capability" }),
       ]),
     );
+    const supplies = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "supply" } }),
+    ) as { protocol: string; method: string }[];
+    expect(supplies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "morpho", method: "supply", kind: "capability" }),
+      ]),
+    );
     const loaded = parseText(
       await client.callTool({
         name: "load",
@@ -134,6 +142,20 @@ describe("moss MCP server", () => {
     ) as { params: Record<string, { description: string }> }[];
     expect(unstakeLoaded[0]?.params.controller).toMatchObject({
       description: expect.stringContaining("controller"),
+    });
+
+    const supplyLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "morpho", method: "supply" }] },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(supplyLoaded[0]?.params.amount).toMatchObject({
+      type: { description: expect.stringContaining("positive base-10 decimal string") },
+      description: expect.stringContaining("to supply"),
+    });
+    expect(supplyLoaded[0]?.params.vault).toMatchObject({
+      description: expect.stringContaining("Morpho factory created it"),
     });
   });
 
