@@ -304,6 +304,25 @@ function replace(changes: Change[], index: number, change: Change): Change[] {
   return changes.map((original, at) => (at === index ? change : original));
 }
 
+/** One extra Change spliced into a fixture trace, pushing the rest along. */
+function insert(changes: Change[], index: number, change: Change): Change[] {
+  return [...changes.slice(0, index), change, ...changes.slice(index)];
+}
+
+/** One Change dropped out of a fixture trace. */
+function drop(changes: Change[], index: number): Change[] {
+  return changes.filter((_, at) => at !== index);
+}
+
+/** Two Changes exchanged, for an order a real trace can only have one way. */
+function swap(changes: Change[], left: number, right: number): Change[] {
+  return changes.map((change, at) => {
+    if (at === left) return changes[right] as Change;
+    if (at === right) return changes[left] as Change;
+    return change;
+  });
+}
+
 /** A supply trace carries its collateral flag at index 5. */
 function supplyWithFlag(flag: Change): Change[] {
   return replace(supplyChanges(), 5, flag);
@@ -756,6 +775,7 @@ describe("Aave", () => {
         "the mint before the funding transfer",
         [
           supplyChanges()[0] as Change,
+          supplyChanges()[3] as Change,
           supplyChanges()[4] as Change,
           supplyChanges()[1] as Change,
           supplyChanges()[6] as Change,
@@ -770,6 +790,185 @@ describe("Aave", () => {
     ];
     for (const [name, changes, message] of cases) {
       await expect(parse("supply", supplyParams, changes), name).rejects.toThrow(message);
+    }
+  });
+
+  it("binds a position-token mint to the account it credits", async () => {
+    // Reported on the sibling Morpho adapter in #156: a Receipt that takes the
+    // first ABI-compatible Transfer for a role accepts a decoy placed in front
+    // of the real one. The position token's own mint and burn Transfer is the
+    // movement that shape applies to here, so candidates are counted per role
+    // and bound to the scaled event they belong to, in both directions.
+    const supply = { asset: USDT0.underlying, amount: "1" };
+    const cases: [string, Change[], string][] = [
+      [
+        "a duplicated aToken mint",
+        insert(supplyChanges(), 3, erc20Transfer(USDT0.aToken, ZERO, ACCOUNT, 999_999n)),
+        "saw 2 USDT0 aToken transfers; exactly one belongs to this operation",
+      ],
+      [
+        "a decoy aToken mint credited elsewhere, ahead of the real one",
+        insert(supplyChanges(), 3, erc20Transfer(USDT0.aToken, ZERO, OTHER, 999_999n)),
+        "saw 2 USDT0 aToken transfers",
+      ],
+      [
+        "the only aToken mint credited elsewhere",
+        replace(supplyChanges(), 3, erc20Transfer(USDT0.aToken, ZERO, OTHER, 999_999n)),
+        `requires one USDT0 aToken transfer of 999999 from ${ZERO} to ${ACCOUNT}`,
+      ],
+      [
+        "an aToken mint for a value the position event did not report",
+        replace(supplyChanges(), 3, erc20Transfer(USDT0.aToken, ZERO, ACCOUNT, 999_998n)),
+        "requires one USDT0 aToken transfer of 999999",
+      ],
+      ["no aToken movement at all", drop(supplyChanges(), 3), "saw 0 USDT0 aToken transfers"],
+      [
+        "the aToken mint after its own Mint event",
+        swap(supplyChanges(), 3, 4),
+        "saw its aToken transfer after the position event",
+      ],
+    ];
+    for (const [name, changes, message] of cases) {
+      await expect(parse("supply", supply, changes), name).rejects.toThrow(message);
+    }
+
+    const usdc = { asset: USDC.underlying, amount: "1" };
+    const debtMint = erc20Transfer(USDC.variableDebtToken, ZERO, ACCOUNT, 1_000_001n);
+    await expect(parse("borrow", usdc, insert(borrowChanges(), 0, debtMint))).rejects.toThrow(
+      "saw 2 USDC variableDebtToken transfers",
+    );
+    await expect(
+      parse(
+        "borrow",
+        usdc,
+        replace(borrowChanges(), 0, erc20Transfer(USDC.variableDebtToken, ZERO, OTHER, 1_000_001n)),
+      ),
+    ).rejects.toThrow(`requires one USDC variableDebtToken transfer of 1000001 from ${ZERO}`);
+  });
+
+  it("binds a position-token burn to the account it debits", async () => {
+    const usdc = { asset: USDC.underlying, amount: "1" };
+    const cases: [string, Change[], string][] = [
+      [
+        "a duplicated aToken burn",
+        insert(withdrawChanges(), 1, erc20Transfer(USDC.aToken, ACCOUNT, ZERO, 996_381n)),
+        "saw 2 USDC aToken transfers",
+      ],
+      [
+        "a decoy aToken burn debited elsewhere, ahead of the real one",
+        insert(withdrawChanges(), 1, erc20Transfer(USDC.aToken, OTHER, ZERO, 996_381n)),
+        "saw 2 USDC aToken transfers",
+      ],
+      [
+        "the only aToken burn debited elsewhere",
+        replace(withdrawChanges(), 1, erc20Transfer(USDC.aToken, OTHER, ZERO, 996_381n)),
+        `requires one USDC aToken transfer of 996381 from ${ACCOUNT} to ${ZERO}`,
+      ],
+      [
+        "a duplicated payout of the underlying",
+        insert(
+          withdrawChanges(),
+          3,
+          erc20Transfer(USDC.underlying, USDC.aToken, ACCOUNT, 1_000_000n),
+        ),
+        "saw 2 USDC transfers",
+      ],
+      [
+        "a decoy payout of the underlying to somebody else",
+        insert(
+          withdrawChanges(),
+          3,
+          erc20Transfer(USDC.underlying, USDC.aToken, OTHER, 1_000_000n),
+        ),
+        "saw 2 USDC transfers",
+      ],
+      [
+        "a foreign token leaving alongside the payout",
+        insert(withdrawChanges(), 3, erc20Transfer(USDT0.underlying, USDC.aToken, OTHER, 1n)),
+        "which is neither USDC nor its aToken",
+      ],
+    ];
+    for (const [name, changes, message] of cases) {
+      await expect(parse("withdraw", usdc, changes), name).rejects.toThrow(message);
+    }
+
+    const repay = { asset: USDC.underlying, amount: "0.001" };
+    const debtBurn = erc20Transfer(USDC.variableDebtToken, ACCOUNT, ZERO, 999n);
+    await expect(parse("repay", repay, insert(repayChanges(), 0, debtBurn))).rejects.toThrow(
+      "saw 2 USDC variableDebtToken transfers",
+    );
+    await expect(
+      parse(
+        "repay",
+        repay,
+        replace(repayChanges(), 0, erc20Transfer(USDC.variableDebtToken, OTHER, ZERO, 999n)),
+      ),
+    ).rejects.toThrow(`requires one USDC variableDebtToken transfer of 999 from ${ACCOUNT}`);
+  });
+
+  it("refuses an allowance and a rates update that belong to something else", async () => {
+    const supply = { asset: USDT0.underlying, amount: "1" };
+    const spent = erc20Approval(USDT0.underlying, ACCOUNT, AAVE_POOL_ADDRESS, 0n);
+    const cases: [string, "supply" | "withdraw", Record<string, unknown>, Change[], string][] = [
+      [
+        // The only allowance a supply can leave behind is the one the Pool
+        // itself just spent, so a second spender riding along in the same
+        // transaction is an allowance the Receipt cannot account for.
+        "an allowance granted to somebody else",
+        "supply",
+        supply,
+        replace(
+          supplyChanges(),
+          2,
+          erc20Approval(USDT0.underlying, ACCOUNT, OTHER, 2n ** 256n - 1n),
+        ),
+        `saw ${ACCOUNT} approve ${OTHER}`,
+      ],
+      [
+        "an allowance granted by somebody else",
+        "supply",
+        supply,
+        replace(supplyChanges(), 2, erc20Approval(USDT0.underlying, OTHER, AAVE_POOL_ADDRESS, 0n)),
+        `saw ${OTHER} approve ${AAVE_POOL_ADDRESS}`,
+      ],
+      [
+        "an allowance on the position token",
+        "supply",
+        supply,
+        replace(supplyChanges(), 2, erc20Approval(USDT0.aToken, ACCOUNT, AAVE_POOL_ADDRESS, 0n)),
+        `on ${USDT0.aToken}`,
+      ],
+      ["two allowances", "supply", supply, insert(supplyChanges(), 2, spent), "saw 2 allowance"],
+      [
+        // A withdraw hands the underlying out with a plain transfer, so it
+        // spends no allowance and grants none.
+        "an allowance inside a withdraw",
+        "withdraw",
+        { asset: USDC.underlying, amount: "1" },
+        insert(
+          withdrawChanges(),
+          3,
+          erc20Approval(USDC.underlying, ACCOUNT, AAVE_POOL_ADDRESS, 0n),
+        ),
+        "which a withdraw does not do",
+      ],
+      [
+        "a rates update for another reserve",
+        "supply",
+        supply,
+        replace(supplyChanges(), 0, poolRatesUpdated(USDC)),
+        "rates update for reserve",
+      ],
+      [
+        "two rates updates",
+        "supply",
+        supply,
+        insert(supplyChanges(), 0, poolRatesUpdated(USDT0)),
+        "saw 2 reserve rate updates",
+      ],
+    ];
+    for (const [name, method, params, changes, message] of cases) {
+      await expect(parse(method, params, changes), name).rejects.toThrow(message);
     }
   });
 

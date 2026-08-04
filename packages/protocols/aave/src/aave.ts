@@ -89,11 +89,14 @@ const VARIABLE_INTEREST_RATE_MODE = 2n;
 /** Aave takes no referral fee; the code has been inert since v2. */
 const NO_REFERRAL_CODE = 0;
 
+/** ERC-20 mints come out of the zero address and burns go back into it. */
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 /**
  * `VariableDebtToken.burn` passes `address(0)` as the scaled-balance `Burn`
  * target: clearing debt moves no underlying, so there is no receiver.
  */
-const NO_UNDERLYING_RECEIVER = "0x0000000000000000000000000000000000000000";
+const NO_UNDERLYING_RECEIVER = ZERO_ADDRESS;
 
 /** Aave's year for interest maths (`MathUtils.SECONDS_PER_YEAR`, 365 days). */
 const SECONDS_PER_YEAR = 31_536_000;
@@ -199,17 +202,25 @@ interface IndexedTransfer {
   changeIndex: number;
 }
 
+interface IndexedApproval {
+  outcome: Extract<ERC20Outcome, { operation: "approve" }>;
+  changeIndex: number;
+}
+
 /** The evidence the shared checks need, whichever operation produced it. */
 interface Evidence {
   parsed: (ReceiptChange | ReceiptResult)[];
   reserve: AaveReserve;
   operation: AaveOperation;
+  /** Which of the reserve's two position tokens this operation moves. */
+  side: PositionSide;
   eventIndex: number;
   position: AavePositionChange;
   /** Both indexed accounts the position event named. */
   parties: PositionParties;
   positionIndex: number;
   transfers: readonly IndexedTransfer[];
+  approvals: readonly IndexedApproval[];
   collateral: CollateralFlag | null;
 }
 
@@ -385,6 +396,9 @@ export class Aave {
       amount: args.amount,
       order: "underlyingFirst",
     });
+    // The Pool spent the allowance the nested approval granted it, and this
+    // supply grants nothing else.
+    requireSpentAllowance(found, { owner: args.user });
     // A first supply of this reserve switches it on as collateral for the
     // account being credited, and no other flag belongs to a supply.
     const collateral = requireCollateral(found, { direction: "enabled", user: args.onBehalfOf });
@@ -421,6 +435,7 @@ export class Aave {
       amount: args.amount,
       order: "positionFirst",
     });
+    refuseAllowance(found);
     // Emptying the position switches the reserve off as collateral for the
     // withdrawing account, and no other flag belongs to a withdraw.
     const collateral = requireCollateral(found, { direction: "disabled", user: args.user });
@@ -460,6 +475,7 @@ export class Aave {
       amount: args.amount,
       order: "positionFirst",
     });
+    refuseAllowance(found);
     const outcome: AaveBorrowOutcome = {
       operation: "borrow",
       protocol: "aave",
@@ -498,6 +514,7 @@ export class Aave {
       amount: args.amount,
       order: "positionFirst",
     });
+    requireSpentAllowance(found, { owner: args.repayer });
     const outcome: AaveRepayOutcome = {
       operation: "repay",
       protocol: "aave",
@@ -522,7 +539,13 @@ export class Aave {
    * and keeps the original object, then the collected records are checked:
    * exactly one Pool event of the expected kind emitted by the Pool itself,
    * exactly one scaled-balance event emitted by that reserve's own position
-   * token, and no token movements outside the reserve's two tokens.
+   * token, at most one rates update and only for the reserve the Pool named,
+   * and no token movements outside the reserve's two tokens.
+   *
+   * Records are collected rather than resolved as they arrive, so every check
+   * below sees the whole candidate set for its role and can fail closed on an
+   * ambiguous one instead of trusting whichever candidate the trace lists
+   * first. Nothing an operation cannot account for is allowed to ride along.
    */
   #collect<TName extends PoolEventName>(
     operation: AaveOperation,
@@ -536,7 +559,9 @@ export class Aave {
     let collateral: CollateralFlag | null = null;
     const positions: { data: AavePositionChange; parties: PositionParties; changeIndex: number }[] =
       [];
+    const rateUpdates: AddressValue[] = [];
     const transfers: IndexedTransfer[] = [];
+    const approvals: IndexedApproval[] = [];
     const tokensTouched = new Set<string>();
 
     const parsed = changes.map((change, changeIndex): ReceiptChange | ReceiptResult => {
@@ -577,6 +602,7 @@ export class Aave {
           };
         }
         if (event.eventName === "ReserveDataUpdated") {
+          rateUpdates.push(getAddress(event.args.reserve));
           return {
             kind: "change",
             change,
@@ -644,10 +670,12 @@ export class Aave {
 
       const receipt = this.erc20.changesReceipt([change]);
       for (const outcome of receipt.outcome) {
-        if (outcome.token !== "native") tokensTouched.add(outcome.token.toLowerCase());
-        if (outcome.operation === "transfer" && outcome.token !== "native") {
-          transfers.push({ outcome, changeIndex });
-        }
+        // A native movement threw at the top of this pass; the guard is what
+        // narrows the delegated Outcome to a token address.
+        if (outcome.token === "native") continue;
+        tokensTouched.add(outcome.token.toLowerCase());
+        if (outcome.operation === "transfer") transfers.push({ outcome, changeIndex });
+        else approvals.push({ outcome, changeIndex });
       }
       return receipt;
     });
@@ -660,6 +688,21 @@ export class Aave {
       throw new Error(
         `Aave ${operation} Receipt names reserve ${operationEvent.reserve}, which this package does not list`,
       );
+    }
+    // The Pool updates the rates of exactly the reserve it acted on, so a
+    // second update, or one naming another reserve, describes something else
+    // that happened in the same transaction.
+    if (rateUpdates.length > 1) {
+      throw new Error(
+        `Aave ${operation} Receipt saw ${rateUpdates.length} reserve rate updates; an operation updates one reserve`,
+      );
+    }
+    for (const updated of rateUpdates) {
+      if (!sameAddress(updated, reserve.underlying)) {
+        throw new Error(
+          `Aave ${operation} Receipt saw a rates update for reserve ${updated}, not ${reserve.symbol}`,
+        );
+      }
     }
     const [position] = positions;
     if (!position || positions.length !== 1) {
@@ -684,12 +727,14 @@ export class Aave {
     return {
       parsed,
       reserve,
+      side,
       event: operationEvent.event,
       eventIndex: operationEvent.changeIndex,
       position: position.data,
       parties: position.parties,
       positionIndex: position.changeIndex,
       transfers,
+      approvals,
       collateral,
       operation,
     } satisfies Collected<TName>;
@@ -728,9 +773,41 @@ function annualPercentageYield(ratePerYearRay: bigint): string {
 }
 
 /**
+ * The one movement of a role's token this operation is allowed to make. Every
+ * transfer of that token is collected first and exactly one has to exist, so a
+ * duplicate or a decoy fails closed rather than resolving to whichever
+ * ABI-compatible Transfer the trace happens to list first. The single candidate
+ * then has to name both ends and the exact amount the operation's own evidence
+ * reported.
+ */
+function requireOneTransfer(
+  found: Evidence,
+  role: { what: string; token: AddressValue; from: string; to: string; amount: bigint },
+): IndexedTransfer {
+  const candidates = found.transfers.filter(({ outcome }) =>
+    sameAddress(outcome.token, role.token),
+  );
+  const [only] = candidates;
+  if (!only || candidates.length !== 1) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw ${candidates.length} ${role.what} transfers; exactly one belongs to this operation`,
+    );
+  }
+  if (
+    !sameAddress(only.outcome.from, role.from) ||
+    !sameAddress(only.outcome.to, role.to) ||
+    only.outcome.amount !== role.amount.toString()
+  ) {
+    throw new Error(
+      `Aave ${found.operation} Receipt requires one ${role.what} transfer of ${role.amount} from ${role.from} to ${role.to}`,
+    );
+  }
+  return only;
+}
+
+/**
  * The one underlying movement this operation is allowed to make, matched on
- * token, both ends and the exact amount the Pool reported. A second transfer of
- * the same reserve is a Change the Receipt cannot explain, so it fails.
+ * token, both ends and the exact amount the Pool reported.
  *
  * Aave's logic libraries also fix the order: a supply transfers the underlying
  * in before minting the aToken, while a withdraw, a borrow and a repay change
@@ -741,25 +818,13 @@ function requireUnderlyingFlow(
   found: Evidence,
   expected: { from: string; to: string; amount: bigint; order: FlowOrder },
 ): void {
-  const underlying = found.transfers.filter(({ outcome }) =>
-    sameAddress(outcome.token, found.reserve.underlying),
-  );
-  const [matched] = underlying.filter(
-    ({ outcome }) =>
-      sameAddress(outcome.from, expected.from) &&
-      sameAddress(outcome.to, expected.to) &&
-      outcome.amount === expected.amount.toString(),
-  );
-  if (!matched) {
-    throw new Error(
-      `Aave ${found.operation} Receipt requires one ${found.reserve.symbol} transfer of ${expected.amount} from ${expected.from} to ${expected.to}`,
-    );
-  }
-  if (underlying.length !== 1) {
-    throw new Error(
-      `Aave ${found.operation} Receipt saw ${underlying.length} ${found.reserve.symbol} transfers; exactly one belongs to this operation`,
-    );
-  }
+  const matched = requireOneTransfer(found, {
+    what: found.reserve.symbol,
+    token: found.reserve.underlying,
+    from: expected.from,
+    to: expected.to,
+    amount: expected.amount,
+  });
   if (matched.changeIndex >= found.eventIndex) {
     throw new Error(
       `Aave ${found.operation} Receipt saw its ${found.reserve.symbol} transfer after the Pool event`,
@@ -798,6 +863,10 @@ function requireUnderlyingFlow(
  * withdraw and a repay normally burn, but `_burnScaled` mints the difference
  * when accrued interest exceeds the amount removed, and that mint names the
  * same account twice.
+ *
+ * Both scaled paths also emit the position token's own ERC-20 Transfer, so that
+ * movement is bound to the scaled event it belongs to instead of being accepted
+ * for merely sitting on a token this operation is allowed to touch.
  */
 function requirePosition(found: Evidence, expected: ExpectedParties): void {
   const { parties } = found;
@@ -824,6 +893,23 @@ function requirePosition(found: Evidence, expected: ExpectedParties): void {
   }
   if (found.positionIndex >= found.eventIndex) {
     throw new Error(`Aave ${found.operation} Receipt saw its position event after the Pool event`);
+  }
+  // `_mintScaled` and `_burnScaled` emit the position token's own ERC-20
+  // Transfer next to the scaled event, for the same value and about the same
+  // account: a mint credits `onBehalfOf` out of the zero address, and a burn
+  // debits `from` back into it. Aave's `target` is where the underlying went,
+  // not where the position went, so it is not this movement's receiver.
+  const moved = requireOneTransfer(found, {
+    what: `${found.reserve.symbol} ${found.side}`,
+    token: found.position.token,
+    from: parties.event === "Mint" ? ZERO_ADDRESS : parties.from,
+    to: parties.event === "Mint" ? parties.onBehalfOf : ZERO_ADDRESS,
+    amount: BigInt(found.position.amount),
+  });
+  if (moved.changeIndex >= found.positionIndex) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw its ${found.side} transfer after the position event`,
+    );
   }
 }
 
@@ -871,6 +957,47 @@ function refuseCollateral(found: Evidence): void {
   if (found.collateral) {
     throw new Error(
       `Aave ${found.operation} Receipt saw collateral ${found.collateral.direction}, which a ${found.operation} does not do`,
+    );
+  }
+}
+
+/**
+ * The one allowance record a pulling operation can carry. The Pool takes the
+ * underlying with `transferFrom`, so a token that reports a spent allowance
+ * leaves an `Approval` behind naming the account that paid and the Pool that
+ * spent it. Nothing else in these paths touches an allowance, so any other
+ * owner, spender or token is an allowance this Receipt cannot account for.
+ * Absent is fine: whether the record appears at all is the token's choice.
+ */
+function requireSpentAllowance(found: Evidence, expected: { owner: string }): void {
+  for (const { outcome } of found.approvals) {
+    if (
+      !sameAddress(outcome.token, found.reserve.underlying) ||
+      !sameAddress(outcome.owner, expected.owner) ||
+      !sameAddress(outcome.spender, AAVE_POOL_ADDRESS)
+    ) {
+      throw new Error(
+        `Aave ${found.operation} Receipt saw ${outcome.owner} approve ${outcome.spender} on ${outcome.token}, which this ${found.operation} does not do`,
+      );
+    }
+  }
+  if (found.approvals.length > 1) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw ${found.approvals.length} allowance records; the Pool spends one`,
+    );
+  }
+}
+
+/**
+ * A withdraw and a borrow hand out the underlying with a plain `transfer` from
+ * the aToken, so neither spends an allowance and any `Approval` at all is a
+ * Change the Receipt cannot explain.
+ */
+function refuseAllowance(found: Evidence): void {
+  const [approval] = found.approvals;
+  if (approval) {
+    throw new Error(
+      `Aave ${found.operation} Receipt saw ${approval.outcome.owner} approve ${approval.outcome.spender} on ${approval.outcome.token}, which a ${found.operation} does not do`,
     );
   }
 }

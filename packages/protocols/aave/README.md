@@ -123,16 +123,25 @@ One Receipt parser per Capability, each pure and each anchored on the Pool's own
 event. A parser accepts only:
 
 - exactly one `Supply`, `Withdraw`, `Borrow` or `Repay` emitted by the Pool
-  itself, plus `ReserveDataUpdated` and at most one collateral flag;
+  itself, at most one `ReserveDataUpdated` and only for the reserve the Pool
+  named, and at most one collateral flag;
 - exactly one scaled-balance `Mint` or `Burn` emitted by that reserve's own
   aToken or variable debt token, naming on both indexed arguments the accounts
   the Pool named;
 - exactly one underlying transfer, matched on both ends and on the exact amount
   the Pool reported, in the order Aave's logic libraries produce it;
-- ERC-20 `Transfer` and `Approval` records, delegated to `@themoss/erc`, and
-  only on the reserve's two tokens.
+- exactly one movement of the position token, the one `_mintScaled` and
+  `_burnScaled` emit next to the scaled event, for the same value and about the
+  same account: a mint credits `onBehalfOf` out of the zero address and a burn
+  debits `from` back into it;
+- at most one `Approval`, and only the allowance the Pool just spent: on the
+  underlying, from the account that paid, to the Pool. A withdraw and a borrow
+  hand the underlying out with a plain transfer, so they accept none.
 
-Anything else fails the Receipt, which halts simulation with a Warning.
+Anything else fails the Receipt, which halts simulation with a Warning. Every
+role collects its candidates and counts them before reading anything out of one,
+so a duplicate or a decoy fails closed rather than resolving to whichever
+ABI-compatible Transfer the trace happens to list first.
 
 Both optional shapes are bound to the operation rather than merely recognised. A
 supply accepts a collateral flag only as `Enabled` for its own reserve and its
