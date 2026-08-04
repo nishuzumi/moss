@@ -24,12 +24,12 @@
   "dependencies": {
     "@themoss/core": "workspace:*",
     "@themoss/erc": "workspace:*",
+    "@themoss/system": "workspace:*",
     "viem": "^2.54.3"
   },
   "devDependencies": {
     "@themoss/abi-tools": "workspace:*",
     "@themoss/simulator": "workspace:*",
-    "@themoss/system": "workspace:*",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "~5.9.0",
