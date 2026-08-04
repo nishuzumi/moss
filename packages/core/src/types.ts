@@ -16,13 +16,30 @@ export const VERBS = [
   "mint",
   "transfer",
   "approve",
+  "open",
+  "close",
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
-export const CATEGORIES = ["dex", "lending", "staking", "rewards", "token", "nft"] as const;
+export const CATEGORIES = [
+  "dex",
+  "perps",
+  "lending",
+  "staking",
+  "rewards",
+  "token",
+  "nft",
+] as const;
 export type Category = (typeof CATEGORIES)[number];
 
-export const RISK_LABELS = ["fundOut", "approval", "priceImpact", "debt"] as const;
+export const RISK_LABELS = [
+  "fundOut",
+  "approval",
+  "priceImpact",
+  "debt",
+  "leverage",
+  "liquidation",
+] as const;
 export type RiskLabel = (typeof RISK_LABELS)[number];
 
 export const NATIVE = "native" as const;

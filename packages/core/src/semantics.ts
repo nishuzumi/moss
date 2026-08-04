@@ -53,6 +53,10 @@ export const BasisPoints = z
 
 export const BooleanFlag = z.boolean().describe("A JSON boolean: true or false.");
 
+export const PositionSide = z
+  .enum(["long", "short"])
+  .describe('One of the literals "long" or "short".');
+
 export async function parseParams<S extends ParamsSpec>(
   spec: S,
   raw: Record<string, unknown>,
