@@ -16,7 +16,7 @@ all of it, because Moss requires exact ordered coverage of every Change.
 | Capability | `supply` | `supply` | Approve the vault, then deposit assets and receive shares. |
 | Capability | `withdraw` | `withdraw` | Burn shares and take the asset back out. |
 | Query | `position` | | An owner's shares, their current asset value and what is withdrawable now. |
-| Query | `vaultInfo` | | Asset, size, performance fee, deposit capacity and the curation roles. |
+| Query | `vaultInfo` | | Asset, size, performance fee, the account-scoped deposit capacity and the curation roles. |
 
 Amounts are the vault's **underlying asset** in display units, so `"1"` on an
 AUSD vault means one AUSD, not one share. The vault's own share token has 18
@@ -132,3 +132,15 @@ deposits.
   without emitting anything, so a third-party caller leaves nothing in the log
   to check it against. A receiver that is not the owner is fine on withdraw
   because the asset transfer proves it, and the Outcome names it.
+- ERC-20 evidence is correlated by candidate set rather than by first match. The
+  parser collects every Transfer that fits the operation's share shape and every
+  Transfer that fits its asset shape, then requires exactly one of each. A
+  Receipt parser cannot read the vault's `asset()`, and vault assets are
+  permissionless, so a Transfer with the right endpoints and amount does not
+  prove which token moved. A decoy token or a duplicated movement makes the set
+  ambiguous. The Receipt then fails closed and names the candidates it found
+  instead of attributing the operation to one of them. Transfers that fit
+  neither shape stay ordinary ERC-20 evidence through the dependency Receipt.
+- `vaultInfo` reports `depositCapacityForAccount` next to
+  `depositCapacityAccount`. ERC-4626 scopes `maxDeposit` to a receiver, so that
+  number is one account's ceiling and not a vault-global cap.

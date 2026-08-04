@@ -37,6 +37,8 @@ const OTHER = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
 const VAULT = getAddress("0x32841A8511D5c2c5b253f45668780B99139e476D");
 const ASSET = getAddress("0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a");
 const NOT_A_VAULT = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
+/** An ERC-20 that is not the vault's asset: the decoy in the ambiguity fixtures. */
+const DECOY_TOKEN = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 const ZERO = "0x0000000000000000000000000000000000000000" as const;
 const MARKET_ID = "0x2127fa3d2cfb96224b742395311b26b0e428539d335ba1bd63f763b12fdbe287" as const;
 
@@ -121,6 +123,14 @@ interface AbiInput {
 
 const transfer = (token: string, from: string, to: string, value: bigint) =>
   event(ERC20Abi, token, "Transfer", { from, to, value });
+
+/** The same Changes with `extra` spliced in immediately before `index`. */
+const insertBefore = (changes: Change[], index: number, extra: Change): Change[] =>
+  changes.flatMap((change, at) => (at === index ? [extra, change] : [change]));
+
+/** The same Changes with the one at `index` repeated straight after itself. */
+const repeatAt = (changes: Change[], index: number): Change[] =>
+  changes.flatMap((change, at) => (at === index ? [change, { ...change }] : [change]));
 
 /** The Change list a real 1 AUSD deposit produces, in trace order. */
 function supplyChanges(): Change[] {
@@ -356,6 +366,18 @@ describe("Morpho queries", () => {
       timelockSeconds: "1209600",
     });
   });
+
+  // maxDeposit is receiver-scoped under ERC-4626, so the capacity is reported
+  // against the account it was read for rather than as a vault-global cap.
+  it("names the account its deposit capacity was read for", async () => {
+    const result = await offlineRegistry().action("morpho", "vaultInfo", OWNER, { vault: VAULT });
+    if (result.kind !== "query") throw new Error("expected a Query");
+    expect(result.data).toMatchObject({
+      depositCapacityAccount: OWNER,
+      depositCapacityForAccount: (10n ** 24n).toString(),
+    });
+    expect(result.data).not.toHaveProperty("depositCapacity");
+  });
 });
 
 // ── Registry metadata ────────────────────────────────────────────────────
@@ -531,6 +553,39 @@ describe("Morpho supply Receipt", () => {
     expect(() => registry.parseReceipt(capability, changes)).toThrow("asset transfer into");
   });
 
+  // A vault's asset is a permissionless parameter, so a Transfer with the right
+  // endpoints and amount is not proof of which token moved. The parser collects
+  // every candidate and refuses an ambiguous set instead of reporting the first
+  // one it happens to see. Change 6 is the asset moving in, 3 the share mint.
+  it("rejects a decoy token that matches the asset transfer shape", async () => {
+    const { registry, capability } = await buildSupply();
+    const changes = insertBefore(supplyChanges(), 6, transfer(DECOY_TOKEN, OWNER, VAULT, ASSETS));
+    expect(() => registry.parseReceipt(capability, changes)).toThrow("exactly one asset movement");
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(DECOY_TOKEN);
+  });
+
+  it("rejects a duplicated asset transfer", async () => {
+    const { registry, capability } = await buildSupply();
+    expect(() => registry.parseReceipt(capability, repeatAt(supplyChanges(), 6))).toThrow(
+      "exactly one asset movement",
+    );
+  });
+
+  it("rejects a duplicated share mint", async () => {
+    const { registry, capability } = await buildSupply();
+    expect(() => registry.parseReceipt(capability, repeatAt(supplyChanges(), 3))).toThrow(
+      "exactly one vault share movement",
+    );
+  });
+
+  it("keeps a transfer that matches no candidate shape as ERC-20 evidence", async () => {
+    const { registry, capability } = await buildSupply();
+    const changes = [...supplyChanges(), transfer(DECOY_TOKEN, OTHER, VAULT, ASSETS)];
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.outcome).toMatchObject({ asset: ASSET });
+    expect(leafChanges(receipt)).toEqual(changes);
+  });
+
   it("rejects a missing ERC-4626 Deposit event", async () => {
     const { registry, capability } = await buildSupply();
     const changes = supplyChanges().filter((_, index) => index !== 4);
@@ -655,6 +710,29 @@ describe("Morpho withdraw Receipt", () => {
     });
     const receipt = registry.parseReceipt(capability, changes);
     expect(receipt.outcome).toMatchObject({ owner: OWNER, receiver: OTHER });
+  });
+
+  // The same candidate rule in the other direction. Change 6 is the asset
+  // leaving the vault, 2 the share burn.
+  it("rejects a decoy token that matches the asset transfer shape", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const changes = insertBefore(withdrawChanges(), 6, transfer(DECOY_TOKEN, VAULT, OWNER, ASSETS));
+    expect(() => registry.parseReceipt(capability, changes)).toThrow("exactly one asset movement");
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(DECOY_TOKEN);
+  });
+
+  it("rejects a duplicated asset transfer", async () => {
+    const { registry, capability } = await buildWithdraw();
+    expect(() => registry.parseReceipt(capability, repeatAt(withdrawChanges(), 6))).toThrow(
+      "exactly one asset movement",
+    );
+  });
+
+  it("rejects a duplicated share burn", async () => {
+    const { registry, capability } = await buildWithdraw();
+    expect(() => registry.parseReceipt(capability, repeatAt(withdrawChanges(), 2))).toThrow(
+      "exactly one vault share movement",
+    );
   });
 });
 

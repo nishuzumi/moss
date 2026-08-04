@@ -333,7 +333,11 @@ export class Morpho {
       curator,
       guardian,
       timelockSeconds: timelock.toString(),
-      depositCapacity: capacity.toString(),
+      // ERC-4626 scopes maxDeposit to one receiver, so this ceiling belongs to
+      // the account it was read for. It is not a vault-global cap. The field
+      // names that account so a caller cannot read it as one.
+      depositCapacityAccount: ctx.account,
+      depositCapacityForAccount: capacity.toString(),
     };
   }
 
@@ -354,8 +358,18 @@ export class Morpho {
    * address emitted the ERC-4626 event, and it is only accepted as a vault if
    * the same address also emitted MetaMorpho's own bookkeeping events. Morpho
    * Blue and IRM events are bound to their fixed deployments, so evidence from
-   * some other emitter cannot be read as Morpho market activity. Every amount
-   * in the Outcome is cross-checked against a matching ERC-20 transfer.
+   * some other emitter cannot be read as Morpho market activity.
+   *
+   * The ERC-20 side is correlated by candidate set, not by first match. The
+   * parser collects every Transfer that fits the operation's share shape and
+   * every Transfer that fits its asset shape, then requires exactly one of
+   * each. A vault's asset is a permissionless parameter and the parser cannot
+   * read `asset()` here, so an ABI-compatible Transfer with the right endpoints
+   * and amount is not proof of the token's identity. Two candidates mean either
+   * that the evidence cannot say which token the operation moved or that two
+   * movements would collapse into one Outcome. Both fail closed. Transfers that
+   * fit neither shape stay ordinary ERC-20 evidence through the dependency
+   * Receipt.
    *
    * Market evidence is bound to this flow, not only to its emitter: a Morpho
    * Blue event has to be the direction the operation produces and has to name
@@ -500,21 +514,31 @@ export class Morpho {
       }
     }
 
-    const shareMove = transfers.find(
+    const moved = operation === "supply" ? "minted to" : "burned from";
+    const shareMoves = transfers.filter(
       (transfer) =>
         same(transfer.token, confirmed.vault) &&
         transfer.value === confirmed.shares &&
         same(operation === "supply" ? transfer.from : transfer.to, ZERO_ADDRESS) &&
         same(operation === "supply" ? transfer.to : transfer.from, confirmed.owner),
     );
+    const [shareMove, ...extraShareMoves] = shareMoves;
     if (!shareMove) {
       throw new Error(
         `Morpho ${operation} Receipt requires ${confirmed.shares} shares ` +
-          `${operation === "supply" ? "minted to" : "burned from"} ${confirmed.owner}`,
+          `${moved} ${confirmed.owner}`,
+      );
+    }
+    if (extraShareMoves.length > 0) {
+      throw new Error(
+        `Morpho ${operation} Receipt requires exactly one vault share movement, got ` +
+          `${shareMoves.length} Transfers of ${confirmed.shares} shares ${moved} ` +
+          `${confirmed.owner}`,
       );
     }
 
-    const assetMove = transfers.find((transfer) =>
+    const direction = operation === "supply" ? "into" : "out of";
+    const assetMoves = transfers.filter((transfer) =>
       operation === "supply"
         ? !same(transfer.token, confirmed.vault) &&
           same(transfer.to, confirmed.vault) &&
@@ -525,10 +549,19 @@ export class Morpho {
           same(transfer.to, confirmed.receiver) &&
           transfer.value === confirmed.assets,
     );
+    const [assetMove, ...extraAssetMoves] = assetMoves;
     if (!assetMove) {
       throw new Error(
         `Morpho ${operation} Receipt requires a ${confirmed.assets} asset transfer ` +
-          `${operation === "supply" ? "into" : "out of"} ${confirmed.vault}`,
+          `${direction} ${confirmed.vault}`,
+      );
+    }
+    if (extraAssetMoves.length > 0) {
+      throw new Error(
+        `Morpho ${operation} Receipt requires exactly one asset movement, got ` +
+          `${assetMoves.length} candidate Transfers of ${confirmed.assets} ${direction} vault ` +
+          `${confirmed.vault}, from tokens ${assetMoves.map((move) => move.token).join(", ")}. ` +
+          `A vault's asset is permissionless, so no matching Transfer can be assumed canonical`,
       );
     }
 
@@ -541,7 +574,6 @@ export class Morpho {
       assets: confirmed.assets.toString(),
       shares: confirmed.shares.toString(),
     };
-    const direction = operation === "supply" ? "into" : "out of";
     return {
       kind: "receipt",
       outcome,
