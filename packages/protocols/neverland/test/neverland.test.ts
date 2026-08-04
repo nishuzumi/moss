@@ -342,6 +342,7 @@ describe("Neverland", () => {
       protocol: "neverland",
       asset: USDC,
       amount: "1000000",
+      user: ACCOUNT,
       onBehalfOf: ACCOUNT,
       priceObservations: [
         {
@@ -470,6 +471,7 @@ describe("Neverland", () => {
       protocol: "neverland",
       asset: USDC,
       amount: "1000000",
+      user: ACCOUNT,
       onBehalfOf: ACCOUNT,
       priceObservations: [],
       rewardObservations: [],
@@ -697,6 +699,7 @@ describe("Neverland", () => {
       supplyEvent(1_000_000n),
       erc20Transfer(USDC, ACCOUNT, NUSDC, 1_000_000n),
       priceObserved(NUSDC, USDC, 1),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
       eventChange(
         NeverlandRewardsAbi,
         NEVERLAND_REWARDS_CONTROLLER,
@@ -774,6 +777,7 @@ describe("Neverland", () => {
     const changes = [
       supplyEvent(1_000_000n),
       priceObserved(NUSDC, USDC, 1),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
       eventChange(
         NeverlandRewardsAbi,
         NEVERLAND_REWARDS_CONTROLLER,
@@ -816,6 +820,207 @@ describe("Neverland", () => {
     expect(() => registry.parseReceipt(capability, changes)).toThrow(
       /reserve-token Mint does not involve operation actor/,
     );
+  });
+
+  it("rejects a reserve-token Mint emitted by a foreign contract", async () => {
+    const registry = offlineRegistry();
+    const FOREIGN = getAddress("0xffffffffffffffffffffffffffffffffffffffff");
+    const capability = await registry.action("neverland", "supply", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      supplyEvent(1_000_000n),
+      priceObserved(NUSDC, USDC, 1),
+      eventChange(
+        NeverlandATokenAbi,
+        FOREIGN,
+        "Mint",
+        { caller: NEVERLAND_POOL_ADDRESS, onBehalfOf: ACCOUNT },
+        [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+        [1_000_000n, 0n, 10n ** 27n],
+      ),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
+    ] as const;
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      /reserve-token Mint emitted by .* is not the operation's reserve token/,
+    );
+  });
+
+  it("rejects a PriceObserved emitted by a foreign contract", async () => {
+    const registry = offlineRegistry();
+    const FOREIGN = getAddress("0xffffffffffffffffffffffffffffffffffffffff");
+    const capability = await registry.action("neverland", "supply", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      supplyEvent(1_000_000n),
+      priceObserved(FOREIGN, USDC, 1),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
+    ] as const;
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      /PriceObserved emitted by .* is not the operation's reserve token/,
+    );
+  });
+
+  it("rejects a collateral toggle for an unrelated reserve", async () => {
+    const registry = offlineRegistry();
+    const capability = await registry.action("neverland", "supply", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      supplyEvent(1_000_000n),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
+      eventChange(
+        NeverlandPoolAbi,
+        NEVERLAND_POOL_ADDRESS,
+        "ReserveUsedAsCollateralEnabled",
+        { reserve: WMON_ADDRESS, user: ACCOUNT },
+        [],
+        [],
+      ),
+    ] as const;
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      "Neverland supply ReserveUsedAsCollateralEnabled for unrelated reserve",
+    );
+  });
+
+  it("rejects a collateral toggle for an unrelated user", async () => {
+    const registry = offlineRegistry();
+    const ALICE = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const capability = await registry.action("neverland", "supply", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      supplyEvent(1_000_000n),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
+      eventChange(
+        NeverlandPoolAbi,
+        NEVERLAND_POOL_ADDRESS,
+        "ReserveUsedAsCollateralEnabled",
+        { reserve: USDC, user: ALICE },
+        [],
+        [],
+      ),
+    ] as const;
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      "Neverland supply ReserveUsedAsCollateralEnabled user",
+    );
+  });
+
+  it("rejects Accrued reward evidence for an unrelated reserve", async () => {
+    const registry = offlineRegistry();
+    const capability = await registry.action("neverland", "supply", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      supplyEvent(1_000_000n),
+      erc20Transfer(NUSDC, ZERO, ACCOUNT, 1_000_000n),
+      eventChange(
+        NeverlandRewardsAbi,
+        NEVERLAND_REWARDS_CONTROLLER,
+        "Accrued",
+        { asset: WMON_ADDRESS, reward: USDC, user: ACCOUNT },
+        [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+        [1n, 1n, 1500n],
+      ),
+    ] as const;
+    expect(() => registry.parseReceipt(capability, changes)).toThrow(
+      "Neverland supply Accrued asset",
+    );
+  });
+
+  it("preserves the user and onBehalfOf on a borrow with differing roles", async () => {
+    const registry = offlineRegistry();
+    const ALICE = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const capability = await registry.action("neverland", "borrow", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      erc20Transfer(DEBT_USDC, ZERO, ALICE, 1_000_000n),
+      erc20Transfer(USDC, NUSDC, ALICE, 1_000_000n),
+      eventChange(
+        NeverlandPoolAbi,
+        NEVERLAND_POOL_ADDRESS,
+        "Borrow",
+        { reserve: USDC, onBehalfOf: ALICE, referralCode: 0 },
+        [{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+        [ACCOUNT, 1_000_000n, 2n, 1n],
+      ),
+    ] as const;
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.outcome).toMatchObject({
+      operation: "borrow",
+      user: ACCOUNT,
+      onBehalfOf: ALICE,
+    });
+  });
+
+  it("preserves the user and receiver on a withdraw with differing roles", async () => {
+    const registry = offlineRegistry();
+    const ALICE = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const capability = await registry.action("neverland", "withdraw", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      erc20Transfer(NUSDC, ACCOUNT, ZERO, 1_000_000n),
+      priceObserved(NUSDC, USDC, 7, ALICE),
+      erc20Transfer(USDC, NUSDC, ALICE, 1_000_000n),
+      eventChange(
+        NeverlandPoolAbi,
+        NEVERLAND_POOL_ADDRESS,
+        "Withdraw",
+        { reserve: USDC, user: ACCOUNT, to: ALICE },
+        [{ type: "uint256" }],
+        [1_000_000n],
+      ),
+    ] as const;
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.outcome).toMatchObject({
+      operation: "withdraw",
+      user: ACCOUNT,
+      to: ALICE,
+    });
+  });
+
+  it("preserves the debtor and repayer on a repay with differing roles", async () => {
+    const registry = offlineRegistry();
+    const ALICE = getAddress("0x1111111111111111111111111111111111111111");
+    const capability = await registry.action("neverland", "repay", ACCOUNT, {
+      asset: USDC,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [
+      erc20Transfer(DEBT_USDC, ALICE, ZERO, 1_000_000n),
+      eventChange(
+        NeverlandPoolAbi,
+        NEVERLAND_POOL_ADDRESS,
+        "Repay",
+        { reserve: USDC, user: ALICE, repayer: ACCOUNT, useATokens: false },
+        [{ type: "uint256" }, { type: "bool" }],
+        [1_000_000n, false],
+      ),
+    ] as const;
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.outcome).toMatchObject({
+      operation: "repay",
+      user: ALICE,
+      repayer: ACCOUNT,
+    });
   });
 });
 

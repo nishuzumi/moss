@@ -16,7 +16,7 @@ import {
   Receipt,
   type ReceiptResult,
 } from "@themoss/core";
-import { ERC20, WETH9Abi } from "@themoss/erc";
+import { ERC20, ERC20Abi, WETH9Abi } from "@themoss/erc";
 import { WMON_ADDRESS } from "@themoss/system";
 import { decodeEventLog, parseUnits } from "viem";
 import {
@@ -42,6 +42,19 @@ export const NEVERLAND_GATEWAY_ADDRESS = "0x800409dBd7157813BB76501c30e04596Cc47
 // Canonical source: Neverland-Money/neverland-tokenomics
 //   deployments/mainnet/addresses.json (DustRewardsController proxy).
 export const NEVERLAND_REWARDS_CONTROLLER = "0x57ea245cCbfab074babb9d01d1f0c60525e52cec" as const;
+
+// Zero address doubles as the "burn/mint" marker on ERC-20 Transfers: a token
+// contract moving units to/from zero (or through the pool/gateway) for an
+// operation actor at the operation amount is, within the pure Receipt boundary,
+// the operation's own reserve token. Mint/Burn debiting of that token therefore
+// carries its identity.
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
+
+// aToken/interest-index scaling can make a minted nToken or debt-token unit
+// amount differ from the Pool event amount by a few wei (observed: 1 wei on a
+// live Monad supply). Reserve-token identity tolerates that rounding, while an
+// attacker's fabricated transfer of an unrelated magnitude still fails closed.
+const RESERVE_TOKEN_ROUNDING_TOLERANCE = 2n;
 
 // Auxiliary decode helper for the reserve tokens (nToken / variable-debt token)
 // that the Pool mints/burns atomically with each operation. These are Aave V3
@@ -208,18 +221,22 @@ type BaseNeverlandOutcome = {
 export type NeverlandOutcome =
   | (BaseNeverlandOutcome & {
       operation: "supply" | "supplyNative";
+      user: AddressValue;
       onBehalfOf: AddressValue;
     })
   | (BaseNeverlandOutcome & {
       operation: "withdraw" | "withdrawNative";
+      user: AddressValue;
       to: AddressValue;
     })
   | (BaseNeverlandOutcome & {
       operation: "borrow";
+      user: AddressValue;
       onBehalfOf: AddressValue;
     })
   | (BaseNeverlandOutcome & {
       operation: "repay";
+      user: AddressValue;
       repayer: AddressValue;
     });
 
@@ -536,7 +553,23 @@ export class Neverland {
     const reserveUpdates: ReserveUpdate[] = [];
     const reserveTokenEvents: Array<{
       eventName: "Mint" | "Burn";
+      emitter: AddressValue;
       args: Record<string, unknown>;
+    }> = [];
+    const collateralToggles: Array<{
+      event: "ReserveUsedAsCollateralEnabled" | "ReserveUsedAsCollateralDisabled";
+      reserve: AddressValue;
+      user: AddressValue;
+    }> = [];
+    // Every ERC-20 Transfer in the trace, kept for reserve-token identity.
+    // The operation-specific nToken/debt-token address is the one that moves a
+    // non-asset token while involving an operation actor; evidence emitters
+    // (PriceObserved, Mint/Burn) must come from it, not from foreign contracts.
+    const transfers: Array<{
+      emitter: AddressValue;
+      from: AddressValue;
+      to: AddressValue;
+      value: string;
     }> = [];
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") return this.erc20.changesReceipt([change]);
@@ -563,16 +596,23 @@ export class Neverland {
         }
         // Collateral toggles are emitted by the Pool as auxiliary accounting
         // (e.g. the first supply auto-enables the reserve as collateral). They
-        // are accepted as evidence without standing in for the operation event.
+        // are bound to the operation's reserve and involved account and their
+        // reserve/user facts are kept in the projection.
         if (
           event.eventName === "ReserveUsedAsCollateralEnabled" ||
           event.eventName === "ReserveUsedAsCollateralDisabled"
         ) {
+          const toggle = {
+            event: event.eventName,
+            reserve: event.args.reserve,
+            user: event.args.user,
+          } as const;
+          collateralToggles.push(toggle);
           return {
             kind: "change" as const,
             change,
-            data: { event: event.eventName, emitter: change.address },
-            text: `Neverland ${event.eventName}: ${change.address}`,
+            data: { ...toggle, emitter: change.address },
+            text: `Neverland ${toggle.event}: reserve ${toggle.reserve} for user ${toggle.user}`,
           };
         }
         if (event.eventName !== expectedEvent) {
@@ -672,6 +712,7 @@ export class Neverland {
       ) {
         reserveTokenEvents.push({
           eventName: reserveToken.eventName,
+          emitter: change.address,
           args: reserveToken.args as Record<string, unknown>,
         });
         return {
@@ -682,17 +723,63 @@ export class Neverland {
         };
       }
 
+      const transfer = tryDecode(ERC20Abi, change);
+      if (transfer && transfer.eventName === "Transfer") {
+        transfers.push({
+          emitter: change.address,
+          from: transfer.args.from,
+          to: transfer.args.to,
+          value: transfer.args.value.toString(),
+        });
+      }
+
       return this.erc20.changesReceipt([change]);
     });
 
     if (!poolEvent)
       throw new Error(`Neverland ${operation} Receipt requires a ${expectedEvent} event`);
-    const actor =
+
+    // The two sides of an operation: the initiating user and the per-shape
+    // counterparty (onBehalfOf for supply/borrow, to for withdraw, repayer for
+    // repay). Auxiliary evidence must be attributable to one of them.
+    const counterparty =
       "onBehalfOf" in poolEvent
         ? poolEvent.onBehalfOf
         : "to" in poolEvent
           ? poolEvent.to
           : poolEvent.repayer;
+    const actors = [poolEvent.user, counterparty];
+
+    // Reserve-token identity within the pure Receipt boundary: the nToken or
+    // variable-debt token is the address that moved the operation's units
+    // into/out of an operation actor — a Transfer from/to zero (mint/burn) or
+    // through the pool/gateway. The reserve asset's own transfers are never
+    // reserve-token evidence. The minted units may round by a few wei against
+    // the aToken liquidity index, so the amount is compared within a tolerance.
+    const reserveTokens = new Set<string>();
+    for (const transfer of transfers) {
+      if (sameAddress(transfer.emitter, poolEvent.asset)) continue;
+      const delta = BigInt(transfer.value) - BigInt(poolEvent.amount);
+      if (delta < -RESERVE_TOKEN_ROUNDING_TOLERANCE || delta > RESERVE_TOKEN_ROUNDING_TOLERANCE)
+        continue;
+      const fromSpecial = isProtocolAddress(transfer.from);
+      const toSpecial = isProtocolAddress(transfer.to);
+      const fromActor = actors.some((actor) => sameAddress(transfer.from, actor));
+      const toActor = actors.some((actor) => sameAddress(transfer.to, actor));
+      if ((fromSpecial && toActor) || (toSpecial && fromActor)) {
+        reserveTokens.add(transfer.emitter.toLowerCase());
+      }
+    }
+    // Per-shape role PriceObserved must name: the holder of the minted/burned
+    // reserve token (onBehalfOf for supply/borrow, `to` for withdraw, `user`
+    // for repay).
+    const observedRole =
+      "to" in poolEvent
+        ? poolEvent.to
+        : "repayer" in poolEvent
+          ? poolEvent.user
+          : poolEvent.onBehalfOf;
+
     for (const update of reserveUpdates) {
       if (!sameAddress(update.reserve, poolEvent.asset)) {
         throw new Error(
@@ -700,26 +787,61 @@ export class Neverland {
         );
       }
     }
+    if (
+      (priceObservations.length > 0 || reserveTokenEvents.length > 0) &&
+      reserveTokens.size === 0
+    ) {
+      throw new Error(
+        `Neverland ${operation} could not establish the operation's reserve-token identity`,
+      );
+    }
     for (const obs of priceObservations) {
       if (!sameAddress(obs.asset, poolEvent.asset)) {
         throw new Error(
           `Neverland ${operation} PriceObserved asset ${obs.asset} does not match operation reserve ${poolEvent.asset}`,
         );
       }
-      if (!sameAddress(obs.user, actor)) {
+      if (!reserveTokens.has(obs.emitter.toLowerCase())) {
         throw new Error(
-          `Neverland ${operation} PriceObserved user ${obs.user} does not match operation actor ${actor}`,
+          `Neverland ${operation} PriceObserved emitted by ${obs.emitter} is not the operation's reserve token`,
+        );
+      }
+      if (!sameAddress(obs.user, observedRole)) {
+        throw new Error(
+          `Neverland ${operation} PriceObserved user ${obs.user} does not match operation actor ${observedRole}`,
         );
       }
     }
     for (const obs of rewardObservations) {
-      if (!sameAddress(obs.user, actor)) {
+      if (!sameAddress(obs.asset, poolEvent.asset) && !reserveTokens.has(obs.asset.toLowerCase())) {
         throw new Error(
-          `Neverland ${operation} Accrued user ${obs.user} does not match operation actor ${actor}`,
+          `Neverland ${operation} Accrued asset ${obs.asset} does not match the operation's reserve`,
+        );
+      }
+      if (!actors.some((actor) => sameAddress(obs.user, actor))) {
+        throw new Error(
+          `Neverland ${operation} Accrued user ${obs.user} does not match operation actor`,
+        );
+      }
+    }
+    for (const toggle of collateralToggles) {
+      if (!sameAddress(toggle.reserve, poolEvent.asset)) {
+        throw new Error(
+          `Neverland ${operation} ${toggle.event} for unrelated reserve ${toggle.reserve}`,
+        );
+      }
+      if (!actors.some((actor) => sameAddress(toggle.user, actor))) {
+        throw new Error(
+          `Neverland ${operation} ${toggle.event} user ${toggle.user} does not match operation actor`,
         );
       }
     }
     for (const token of reserveTokenEvents) {
+      if (!reserveTokens.has(token.emitter.toLowerCase())) {
+        throw new Error(
+          `Neverland ${operation} reserve-token ${token.eventName} emitted by ${token.emitter} is not the operation's reserve token`,
+        );
+      }
       const participants = [
         token.args.caller,
         token.args.onBehalfOf,
@@ -728,9 +850,11 @@ export class Neverland {
         token.args.from,
         token.args.target,
       ].filter((value): value is string => typeof value === "string");
-      if (!participants.some((participant) => sameAddress(participant, actor))) {
+      if (
+        !participants.some((participant) => actors.some((actor) => sameAddress(participant, actor)))
+      ) {
         throw new Error(
-          `Neverland ${operation} reserve-token ${token.eventName} does not involve operation actor ${actor}`,
+          `Neverland ${operation} reserve-token ${token.eventName} does not involve operation actor`,
         );
       }
     }
@@ -744,6 +868,14 @@ export class Neverland {
   }
 }
 
+function isProtocolAddress(address: string): boolean {
+  return (
+    sameAddress(address, ZERO_ADDRESS) ||
+    sameAddress(address, NEVERLAND_POOL_ADDRESS) ||
+    sameAddress(address, NEVERLAND_GATEWAY_ADDRESS)
+  );
+}
+
 type PoolEvent = ReturnType<typeof decodePoolEvent>;
 
 function poolOutcome(operation: NeverlandOperation, event: PoolEvent): NeverlandOutcome {
@@ -753,6 +885,7 @@ function poolOutcome(operation: NeverlandOperation, event: PoolEvent): Neverland
       protocol: "neverland",
       asset: event.args.reserve,
       amount: event.args.amount.toString(),
+      user: event.args.user,
       onBehalfOf: event.args.onBehalfOf,
       priceObservations: [],
       rewardObservations: [],
@@ -764,6 +897,7 @@ function poolOutcome(operation: NeverlandOperation, event: PoolEvent): Neverland
       protocol: "neverland",
       asset: event.args.reserve,
       amount: event.args.amount.toString(),
+      user: event.args.user,
       to: event.args.to,
       priceObservations: [],
       rewardObservations: [],
@@ -775,6 +909,7 @@ function poolOutcome(operation: NeverlandOperation, event: PoolEvent): Neverland
       protocol: "neverland",
       asset: event.args.reserve,
       amount: event.args.amount.toString(),
+      user: event.args.user,
       onBehalfOf: event.args.onBehalfOf,
       priceObservations: [],
       rewardObservations: [],
@@ -786,6 +921,7 @@ function poolOutcome(operation: NeverlandOperation, event: PoolEvent): Neverland
       protocol: "neverland",
       asset: event.args.reserve,
       amount: event.args.amount.toString(),
+      user: event.args.user,
       repayer: event.args.repayer,
       priceObservations: [],
       rewardObservations: [],
@@ -825,6 +961,7 @@ function tryDecode<
     | typeof NeverlandRewardsAbi
     | typeof PriceObservedAbi
     | typeof WETH9Abi
+    | typeof ERC20Abi
     | typeof NeverlandReserveTokenAbi,
 >(abi: TAbi, change: Extract<Change, { kind: "event" }>) {
   try {
