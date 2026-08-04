@@ -1,4 +1,5 @@
 import {
+  type CapabilityNode,
   type Change,
   createRuntime,
   flattenCapabilityTree,
@@ -8,12 +9,13 @@ import {
   Registry,
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
-import { createTraceSimulator } from "@themoss/simulator";
+import { createTraceSimulator, type SimulateOutcome } from "@themoss/simulator";
 import {
   type Address,
   decodeFunctionData,
   encodeAbiParameters,
   encodeEventTopics,
+  formatUnits,
   getAddress,
   toEventSelector,
   toEventSignature,
@@ -28,6 +30,7 @@ import {
   AAVE_POOL_IMPLEMENTATION_ADDRESS,
   AAVE_RESERVES,
   Aave,
+  type AaveAccountData,
   type AaveReserve,
 } from "../src/index.js";
 import { POOL_FUNCTIONS_USED, type PoolEventUsed } from "./surface.js";
@@ -36,20 +39,38 @@ const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const OTHER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
 const ZERO = getAddress("0x0000000000000000000000000000000000000000");
 const UNLISTED = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+const STUB_TREASURY = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
 /**
- * Two Monad mainnet accounts with the live Aave positions the four happy paths
- * need. Simulation is read-only and Moss never signs, so naming a real account
- * costs nothing and needs no key; every live test asserts the position it
- * depends on first, so a drained account fails by name instead of by revert.
- *
- *  - `SUPPLIER` holds USDT0 and has borrowing power left against collateral in
- *    other reserves, which covers supply and borrow.
- *  - `REPAYER` holds aUSDC, owes variable-rate USDC and still holds USDC, which
- *    covers withdraw plus the one shape a self-repay needs.
+ * Seed accounts for the live role search below. Simulation is read-only and Moss
+ * never signs, so naming a real account costs nothing and needs no key, but no
+ * account we do not control keeps a position: the one the live withdraw was
+ * pinned to had its aUSDC drained to zero on chain between 2026-08-01 and
+ * 2026-08-04, which turned the suite red with no commit behind it and nothing in
+ * the repository to fix. So these are candidates a role search starts from
+ * rather than fixtures any test depends on. A role that outlives all of them
+ * fails by name rather than by revert.
  */
-const SUPPLIER = getAddress("0xa7b6296945906D190Fc0ddFDc0fa1Da03382B891");
-const REPAYER = getAddress("0xa6B08DacBc644EeEA9143EFc8a07fBcA9F0e4F72");
+const LIVE_CANDIDATES = [
+  getAddress("0xa7b6296945906D190Fc0ddFDc0fa1Da03382B891"),
+  getAddress("0xa6B08DacBc644EeEA9143EFc8a07fBcA9F0e4F72"),
+] as const;
+
+/**
+ * What every live role asks of a reserve: a thousand of its base units. That is
+ * a thousandth of a six-decimal reserve and dust in an eighteen-decimal one, so
+ * a role can be played by an account holding almost nothing, while staying well
+ * clear of the amount that rounds to zero.
+ */
+const ROLE_UNITS = 1_000n;
+
+/**
+ * Borrowing power the borrow role needs, in the market's eight-decimal base
+ * currency, so two dollars. `ROLE_UNITS` of the priciest reserve here is worth
+ * about one (a thousand cbBTC base units) and this adapter reads no oracle, so
+ * one headroom above that covers whichever reserve the search settles on.
+ */
+const ROLE_BORROW_HEADROOM_BASE = 200_000_000n;
 
 const USDC = reserveFor("USDC");
 const USDT0 = reserveFor("USDT0");
@@ -992,6 +1013,37 @@ describe("Aave", () => {
       parse("withdraw", { asset: USDC.underlying, amount: "0.001" }, changes),
     ).rejects.toThrow("which this package does not list");
   });
+
+  it("names the live role it cannot fill instead of asserting on one balance", async () => {
+    // The live suite pinned an account per role until one of them had its aUSDC
+    // drained to zero on chain, which failed on a bare balance assertion with no
+    // commit behind it. Roles are searched against chain state now, so a market
+    // where nothing qualifies has to report the role, the reserves it tried and
+    // what each of them lacked.
+    await expect(
+      resolveRoleOn(
+        stubRuntime(() => 0n),
+        "withdraw",
+        [USDC, USDT0],
+        holdsPosition,
+      ),
+    ).rejects.toThrow(
+      `no live account can play the Aave withdraw role: tried 3 candidates against 2 of the market's ${AAVE_RESERVES.length} reserves: USDC: the reserve has 0 USDC left to pay out, not 1000; USDT0: the reserve has 0 USDT0 left to pay out, not 1000`,
+    );
+
+    // And a search settles on whichever candidate does hold the position, with
+    // the amount in that reserve's own decimals rather than a fixed six.
+    const holder = LIVE_CANDIDATES[1] as Address;
+    const gho = reserveFor("GHO");
+    const funded = stubRuntime((owner) =>
+      owner === holder || owner === gho.aToken ? 10n ** 18n : 0n,
+    );
+    await expect(resolveRoleOn(funded, "withdraw", [gho], holdsPosition)).resolves.toMatchObject({
+      account: holder,
+      units: "1000",
+      amount: "0.000000000000001",
+    });
+  });
 });
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
@@ -1132,14 +1184,18 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
   it("reads account health and reserve rates", { timeout: 60_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
-    const account = await registry.action("aave", "accountData", SUPPLIER, { user: SUPPLIER });
-    if (account.kind !== "query") throw new Error("expected a Query");
-    expect(account.data).toMatchObject({
-      user: SUPPLIER,
+    const live = liveState(runtime, registry);
+    const { account } = await resolveRole(live, "account health", [USDC], holdsCollateral(live));
+    const data = await registry.action("aave", "accountData", account, { user: account });
+    if (data.kind !== "query") throw new Error("expected a Query");
+    expect(data.data).toMatchObject({
+      user: account,
       totalCollateralBase: expect.stringMatching(/^[1-9]\d*$/),
       ltv: expect.any(Number),
     });
-    const reserve = await registry.action("aave", "reserve", SUPPLIER, { asset: USDC.underlying });
+    // Rates are a property of the reserve rather than of any account, so this
+    // half stays on USDC and depends on nobody's balance.
+    const reserve = await registry.action("aave", "reserve", account, { asset: USDC.underlying });
     if (reserve.kind !== "query") throw new Error("expected a Query");
     const rates = reserve.data as { supplyApr: string; supplyApy: string };
     expect(Number(rates.supplyApr)).toBeGreaterThan(0);
@@ -1150,100 +1206,300 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
   it("simulates a supply into an exhaustive typed Receipt", { timeout: 180_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
-    await expectBalanceAtLeast(registry, USDT0.underlying, SUPPLIER, 1_000_000n, "USDT0 to supply");
-    const outcome = await simulate(runtime, registry, "supply", SUPPLIER, {
-      asset: USDT0.underlying,
-      amount: "1",
+    const live = liveState(runtime, registry);
+    const role = await resolveRole(
+      live,
+      "supply",
+      reservesPreferring("USDT0"),
+      holdsUnderlying(live),
+    );
+    const outcome = await simulate(runtime, registry, "supply", role.account, {
+      asset: role.reserve.underlying,
+      amount: role.amount,
     });
     expect(outcome).toMatchObject({
       operation: "supply",
       protocol: "aave",
-      asset: USDT0.underlying,
-      symbol: "USDT0",
-      amount: "1000000",
-      user: SUPPLIER,
-      onBehalfOf: SUPPLIER,
-      position: { event: "Mint", token: USDT0.aToken },
+      asset: role.reserve.underlying,
+      symbol: role.reserve.symbol,
+      amount: role.units,
+      user: role.account,
+      onBehalfOf: role.account,
+      position: { event: "Mint", token: role.reserve.aToken },
     });
   });
 
   it("simulates a withdraw into an exhaustive typed Receipt", { timeout: 180_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
-    await expectBalanceAtLeast(registry, USDC.aToken, REPAYER, 1_000_000n, "aUSDC to redeem");
-    const outcome = await simulate(runtime, registry, "withdraw", REPAYER, {
-      asset: USDC.underlying,
-      amount: "1",
+    const live = liveState(runtime, registry);
+    const role = await resolveRole(
+      live,
+      "withdraw",
+      reservesPreferring("USDC"),
+      holdsPosition(live),
+    );
+    const outcome = await simulate(runtime, registry, "withdraw", role.account, {
+      asset: role.reserve.underlying,
+      amount: role.amount,
     });
     expect(outcome).toMatchObject({
       operation: "withdraw",
-      asset: USDC.underlying,
-      amount: "1000000",
-      user: REPAYER,
-      to: REPAYER,
-      position: { token: USDC.aToken },
+      asset: role.reserve.underlying,
+      amount: role.units,
+      user: role.account,
+      to: role.account,
+      position: { token: role.reserve.aToken },
     });
   });
 
   it("simulates a borrow as a declared inflow with no outflow", { timeout: 180_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
-    const account = await registry.action("aave", "accountData", SUPPLIER, { user: SUPPLIER });
-    if (account.kind !== "query") throw new Error("expected a Query");
-    const { availableBorrowsBase } = account.data as { availableBorrowsBase: string };
-    // Base-currency units, so this is a couple of dollars of headroom.
-    expect(BigInt(availableBorrowsBase), `${SUPPLIER} has no borrowing power left`).toBeGreaterThan(
-      200_000_000n,
-    );
-    const outcome = await simulate(runtime, registry, "borrow", SUPPLIER, {
-      asset: USDC.underlying,
-      amount: "1",
+    const live = liveState(runtime, registry);
+    const role = await resolveRole(live, "borrow", reservesPreferring("USDC"), canBorrow(live));
+    const outcome = await simulate(runtime, registry, "borrow", role.account, {
+      asset: role.reserve.underlying,
+      amount: role.amount,
     });
     expect(outcome).toMatchObject({
       operation: "borrow",
-      asset: USDC.underlying,
-      amount: "1000000",
-      user: SUPPLIER,
+      asset: role.reserve.underlying,
+      amount: role.units,
+      user: role.account,
       interestRateMode: "variable",
-      position: { event: "Mint", token: USDC.variableDebtToken },
+      position: { event: "Mint", token: role.reserve.variableDebtToken },
     });
   });
 
-  it("simulates a repay into an exhaustive typed Receipt", { timeout: 180_000 }, async () => {
+  /**
+   * A repay needs one account that owes a reserve and still holds it. That is the
+   * pair nobody keeps: the account this test used to name held 0.001607 USDC
+   * against 0.048 owed, so one dust transfer would have taken the test with it.
+   * The borrow that funds the repay is part of the tree instead, chained through
+   * the simulator's state, so the repay clears a debt this run drew and spends
+   * the asset the same run received. It needs no position of its own.
+   */
+  it("simulates a repay of the debt the same run drew", { timeout: 240_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
-    await expectBalanceAtLeast(registry, USDC.underlying, REPAYER, 1_000n, "USDC to repay with");
-    await expectBalanceAtLeast(registry, USDC.variableDebtToken, REPAYER, 1_000n, "USDC debt");
-    const outcome = await simulate(runtime, registry, "repay", REPAYER, {
-      asset: USDC.underlying,
-      amount: "0.001",
+    const live = liveState(runtime, registry);
+    const role = await resolveRole(live, "repay", reservesPreferring("USDC"), canBorrow(live));
+    const params = { asset: role.reserve.underlying, amount: role.amount };
+    const [borrow, repay] = await Promise.all([
+      registry.action("aave", "borrow", role.account, params),
+      registry.action("aave", "repay", role.account, params),
+    ]);
+    if (borrow.kind !== "capability" || repay.kind !== "capability") {
+      throw new Error("expected Capabilities");
+    }
+    const outcome = await simulateTree(runtime, registry, {
+      ...repay,
+      children: [borrow, ...repay.children],
     });
-    expect(outcome).toMatchObject({
+    expect(outcome.results.map((result) => `${result.protocol}.${result.method}`)).toEqual([
+      "aave.borrow",
+      "erc20.approve",
+      "aave.repay",
+    ]);
+    expect(outcome.results.at(-1)?.receipt?.outcome).toMatchObject({
       operation: "repay",
-      asset: USDC.underlying,
-      amount: "1000",
-      user: REPAYER,
-      repayer: REPAYER,
+      asset: role.reserve.underlying,
+      amount: role.units,
+      user: role.account,
+      repayer: role.account,
       interestRateMode: "variable",
-      position: { token: USDC.variableDebtToken },
+      position: { token: role.reserve.variableDebtToken },
     });
   });
 });
 
-async function expectBalanceAtLeast(
-  registry: Registry,
-  token: Address,
-  owner: Address,
-  minimum: bigint,
-  what: string,
-) {
-  const result = await registry.action("erc20", "balanceOf", owner, { token, owner });
-  if (result.kind !== "query") throw new Error("expected a Query");
-  const { balance } = result.data as { balance: string };
-  expect(BigInt(balance), `${owner} no longer has enough ${what}`).toBeGreaterThanOrEqual(minimum);
+/** The live reads a role search makes, each answered once and remembered. */
+interface LiveState {
+  /** An ERC-20 balance, read through the Query an Agent would call for it. */
+  balance(token: Address, owner: Address): Promise<bigint>;
+  /** An account's collateral, debt and borrowing power in the market. */
+  account(user: Address): Promise<AaveAccountData>;
+  /** A reserve's treasury, read off its own aToken rather than pinned here. */
+  treasury(reserve: AaveReserve): Promise<Address>;
 }
 
-/** Builds the tree, simulates it and asserts the whole flow came back clean. */
+function liveState(runtime: MossRuntime, registry: Registry): LiveState {
+  const answers = new Map<string, Promise<unknown>>();
+  const once = <T>(key: string, read: () => Promise<T>): Promise<T> => {
+    const known = answers.get(key) as Promise<T> | undefined;
+    if (known) return known;
+    const pending = read();
+    answers.set(key, pending);
+    return pending;
+  };
+  return {
+    balance(token, owner) {
+      return once(`balance:${token}:${owner}`, async () => {
+        const result = await registry.action("erc20", "balanceOf", owner, { token, owner });
+        if (result.kind !== "query") throw new Error("expected a balanceOf Query");
+        return BigInt((result.data as { balance: string }).balance);
+      });
+    },
+    account(user) {
+      return once(`account:${user}`, async () => {
+        const result = await registry.action("aave", "accountData", user, { user });
+        if (result.kind !== "query") throw new Error("expected an accountData Query");
+        return result.data as AaveAccountData;
+      });
+    },
+    treasury(reserve) {
+      return once(`treasury:${reserve.aToken}`, async () =>
+        getAddress(
+          await runtime.client.readContract({
+            address: reserve.aToken,
+            abi: AaveScaledTokenAbi,
+            functionName: "RESERVE_TREASURY_ADDRESS",
+          }),
+        ),
+      );
+    },
+  };
+}
+
+/** A reserve and an account that can play one live role, with its amount. */
+interface LiveRole {
+  reserve: AaveReserve;
+  account: Address;
+  /** `ROLE_UNITS` as the decimal string a Capability parameter takes. */
+  amount: string;
+  /** The same amount in base units, the way a Receipt reports it. */
+  units: string;
+}
+
+/**
+ * The first reserve and account that can play a role, searched against chain
+ * state when the test runs instead of pinned in this file. Every reserve is
+ * tried against the reserve's own treasury and then the seed candidates. `need`
+ * answers with the reason a pair cannot play the role or with nothing when it
+ * can, so a role no pair can play fails naming the role, the reserves it tried
+ * and what each of them lacked rather than asserting on one balance.
+ *
+ * The treasury leads because protocol fees accrue to it, which makes it the one
+ * holder no stranger can move. `aToken.RESERVE_TREASURY_ADDRESS()` is a read
+ * rather than a constant, so nothing has to be committed on the day it fills up.
+ * It is empty for now: on 2026-08-04 every reserve reported a zero treasury
+ * balance while `getReserveData` reported 20784 USDC and 19107 USDT0 of
+ * `accruedToTreasury`. A reserve's fee claim only becomes an aToken balance once
+ * somebody calls the permissionless `mintToTreasury`, which Moss never does.
+ */
+async function resolveRole(
+  live: LiveState,
+  role: string,
+  over: readonly AaveReserve[],
+  need: (reserve: AaveReserve, account: Address) => Promise<string | undefined>,
+): Promise<LiveRole> {
+  const reasons: string[] = [];
+  for (const reserve of over) {
+    for (const account of [await live.treasury(reserve), ...LIVE_CANDIDATES]) {
+      const missing = await need(reserve, account);
+      if (!missing) {
+        return {
+          reserve,
+          account,
+          amount: formatUnits(ROLE_UNITS, reserve.decimals),
+          units: ROLE_UNITS.toString(),
+        };
+      }
+      const reason = `${reserve.symbol}: ${missing}`;
+      if (!reasons.includes(reason)) reasons.push(reason);
+    }
+  }
+  const shown = reasons.slice(0, 6).join("; ");
+  const rest = reasons.length > 6 ? ` (+${reasons.length - 6} more)` : "";
+  throw new Error(
+    `no live account can play the Aave ${role} role: tried ${LIVE_CANDIDATES.length + 1} candidates against ${over.length} of the market's ${AAVE_RESERVES.length} reserves: ${shown}${rest}`,
+  );
+}
+
+/** Every listed reserve, with the one a role would rather have tried first. */
+function reservesPreferring(symbol: string): AaveReserve[] {
+  return [...AAVE_RESERVES].sort(
+    (left, right) => Number(right.symbol === symbol) - Number(left.symbol === symbol),
+  );
+}
+
+/** A runtime whose reads come from one balance function, to search a role offline. */
+function stubRuntime(balance: (owner: Address) => bigint): MossRuntime {
+  const client = {
+    readContract: async ({
+      functionName,
+      args,
+    }: {
+      functionName: string;
+      args?: readonly unknown[];
+    }) => {
+      if (functionName === "RESERVE_TREASURY_ADDRESS") return STUB_TREASURY;
+      if (functionName === "balanceOf") return balance(getAddress(String(args?.[0])));
+      if (functionName === "decimals") return 18;
+      if (functionName === "symbol") return "STUB";
+      throw new Error(`unexpected read ${functionName}`);
+    },
+  } as unknown as MossRuntime["client"];
+  return { rpcUrl: "http://offline", client };
+}
+
+/** One role search against one runtime, live or stubbed. */
+function resolveRoleOn(
+  runtime: MossRuntime,
+  role: string,
+  over: readonly AaveReserve[],
+  need: (
+    live: LiveState,
+  ) => (reserve: AaveReserve, account: Address) => Promise<string | undefined>,
+): Promise<LiveRole> {
+  const live = liveState(runtime, new Registry(runtime).use(Aave));
+  return resolveRole(live, role, over, need(live));
+}
+
+/** Holds enough of the underlying to supply it. */
+const holdsUnderlying = (live: LiveState) => async (reserve: AaveReserve, account: Address) => {
+  const held = await live.balance(reserve.underlying, account);
+  return held >= ROLE_UNITS
+    ? undefined
+    : `${account} holds ${held} ${reserve.symbol}, not ${ROLE_UNITS}`;
+};
+
+/** Holds a position the reserve still has the liquidity to redeem. */
+const holdsPosition = (live: LiveState) => async (reserve: AaveReserve, account: Address) => {
+  const [position, liquidity] = await Promise.all([
+    live.balance(reserve.aToken, account),
+    live.balance(reserve.underlying, reserve.aToken),
+  ]);
+  if (liquidity < ROLE_UNITS) {
+    return `the reserve has ${liquidity} ${reserve.symbol} left to pay out, not ${ROLE_UNITS}`;
+  }
+  return position >= ROLE_UNITS
+    ? undefined
+    : `${account} holds ${position} a${reserve.symbol}, not ${ROLE_UNITS}`;
+};
+
+/** Can draw the reserve, which needs the liquidity to lend it. */
+const canBorrow = (live: LiveState) => async (reserve: AaveReserve, account: Address) => {
+  const liquidity = await live.balance(reserve.underlying, reserve.aToken);
+  if (liquidity < ROLE_UNITS) {
+    return `the reserve has ${liquidity} ${reserve.symbol} left to lend, not ${ROLE_UNITS}`;
+  }
+  const { availableBorrowsBase } = await live.account(account);
+  return BigInt(availableBorrowsBase) >= ROLE_BORROW_HEADROOM_BASE
+    ? undefined
+    : `${account} can draw ${availableBorrowsBase} more in base currency, not ${ROLE_BORROW_HEADROOM_BASE}`;
+};
+
+/** Holds collateral, which is what an account-health read has to find. */
+const holdsCollateral = (live: LiveState) => async (_reserve: AaveReserve, account: Address) => {
+  const { totalCollateralBase } = await live.account(account);
+  return BigInt(totalCollateralBase) > 0n
+    ? undefined
+    : `${account} holds no collateral in the market`;
+};
+
+/** Builds the tree, simulates it and returns the Outcome it ends on. */
 async function simulate(
   runtime: MossRuntime,
   registry: Registry,
@@ -1253,10 +1509,20 @@ async function simulate(
 ) {
   const capability = await registry.action("aave", method, account, params);
   if (capability.kind !== "capability") throw new Error("expected a Capability");
+  const outcome = await simulateTree(runtime, registry, capability);
+  return outcome.results.at(-1)?.receipt?.outcome;
+}
+
+/** Simulates a prepared tree and asserts the whole flow came back clean. */
+async function simulateTree(
+  runtime: MossRuntime,
+  registry: Registry,
+  root: CapabilityNode,
+): Promise<SimulateOutcome> {
   const outcome = await createTraceSimulator(runtime, {
     receipt: (node, changes) => registry.parseReceipt(node, changes),
-  }).simulate(capability);
+  }).simulate(root);
   expect(outcome.halted).toBeUndefined();
   for (const result of outcome.results) expect(result.warnings).toEqual([]);
-  return outcome.results.at(-1)?.receipt?.outcome;
+  return outcome;
 }
