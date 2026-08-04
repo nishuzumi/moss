@@ -43,10 +43,10 @@ const UNLISTED = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
  * costs nothing and needs no key; every live test asserts the position it
  * depends on first, so a drained account fails by name instead of by revert.
  *
- *  - `SUPPLIER` holds USDT0, holds aUSDC collateral and has borrowing power
- *    left, which covers supply, withdraw and borrow.
- *  - `REPAYER` owes variable-rate USDC and still holds USDC, the one shape a
- *    self-repay needs.
+ *  - `SUPPLIER` holds USDT0 and has borrowing power left against collateral in
+ *    other reserves, which covers supply and borrow.
+ *  - `REPAYER` holds aUSDC, owes variable-rate USDC and still holds USDC, which
+ *    covers withdraw plus the one shape a self-repay needs.
  */
 const SUPPLIER = getAddress("0xa7b6296945906D190Fc0ddFDc0fa1Da03382B891");
 const REPAYER = getAddress("0xa6B08DacBc644EeEA9143EFc8a07fBcA9F0e4F72");
@@ -971,8 +971,8 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
   it("simulates a withdraw into an exhaustive typed Receipt", { timeout: 180_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
-    await expectBalanceAtLeast(registry, USDC.aToken, SUPPLIER, 1_000_000n, "aUSDC to redeem");
-    const outcome = await simulate(runtime, registry, "withdraw", SUPPLIER, {
+    await expectBalanceAtLeast(registry, USDC.aToken, REPAYER, 1_000_000n, "aUSDC to redeem");
+    const outcome = await simulate(runtime, registry, "withdraw", REPAYER, {
       asset: USDC.underlying,
       amount: "1",
     });
@@ -980,8 +980,8 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
       operation: "withdraw",
       asset: USDC.underlying,
       amount: "1000000",
-      user: SUPPLIER,
-      to: SUPPLIER,
+      user: REPAYER,
+      to: REPAYER,
       position: { token: USDC.aToken },
     });
   });
