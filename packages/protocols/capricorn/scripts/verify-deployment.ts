@@ -33,8 +33,7 @@ const USDC = "0x754704Bc059F8C67012fEd69BC8A327a5aafb603";
  */
 const SELECTORS: { signature: string; contract: keyof typeof CONTRACTS }[] = [
   {
-    signature:
-      "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))",
+    signature: "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))",
     contract: "SwapRouter",
   },
   { signature: "WETH9()", contract: "SwapRouter" },
@@ -111,11 +110,7 @@ const derived = await client.readContract({
   functionName: "getPool",
   args: [WMON, USDC, 3000],
 });
-check(
-  "factory derives the same pool",
-  derived.toLowerCase() === TEST_POOL.toLowerCase(),
-  derived,
-);
+check("factory derives the same pool", derived.toLowerCase() === TEST_POOL.toLowerCase(), derived);
 
 console.log("\nquoter responds");
 // QuoterV2 is non-view in the Uniswap V3 periphery it derives from, so the

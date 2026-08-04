@@ -5,19 +5,8 @@
   "description": "Moss protocol adapter for Capricorn CLMM on Monad",
   "license": "MIT",
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
     "verify:deployment": "tsx scripts/verify-deployment.ts"
   },
   "dependencies": {
@@ -25,9 +14,7 @@
     "viem": "^2.54.3"
   },
   "devDependencies": {
-    "tsup": "^8.5.1",
-    "typescript": "~5.9.0",
-    "vitest": "^3.2.6",
-    "tsx": "^4.20.0"
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0"
   }
 }
