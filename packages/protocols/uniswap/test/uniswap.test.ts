@@ -40,6 +40,8 @@ import {
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const ZERO = getAddress("0x0000000000000000000000000000000000000000");
+/** An unrelated ERC-20 used to build movements a role predicate also accepts. */
+const DECOY_TOKEN = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
 const POOL_ID = "0x1111111111111111111111111111111111111111111111111111111111111111" as const;
 
 /** Mock exact-input quotes per fee tier; missing tiers revert like an
@@ -381,6 +383,70 @@ describe("Uniswap", () => {
         take,
       ]),
     ).toThrow("do not describe an exact-in swap");
+  });
+
+  it("fails closed on an ambiguous input or output movement", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await registry.action("uniswap", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+
+    const valueIn = nativeTransfer(ACCOUNT, UNISWAP_V4_ROUTER_ADDRESS, 10n ** 18n);
+    const swapEvent = poolManagerSwap(-(10n ** 18n), 20_000_000n, 500);
+    const settle = nativeTransfer(
+      UNISWAP_V4_ROUTER_ADDRESS,
+      UNISWAP_V4_POOL_MANAGER_ADDRESS,
+      10n ** 18n,
+    );
+    const take = erc20Transfer(USDC_ADDRESS, UNISWAP_V4_POOL_MANAGER_ADDRESS, ACCOUNT, 20_000_000n);
+    // Both decoys carry the real movement's endpoints and its exact amount, so
+    // each one reconciles against the Swap event as well as the real Change
+    // does. Selection cannot prefer either, in either order.
+    const decoyTake = erc20Transfer(
+      DECOY_TOKEN,
+      UNISWAP_V4_POOL_MANAGER_ADDRESS,
+      ACCOUNT,
+      20_000_000n,
+    );
+    const decoySettle = erc20Transfer(
+      DECOY_TOKEN,
+      ACCOUNT,
+      UNISWAP_V4_POOL_MANAGER_ADDRESS,
+      10n ** 18n,
+    );
+
+    for (const changes of [
+      [valueIn, swapEvent, settle, decoyTake, take],
+      [valueIn, swapEvent, settle, take, decoyTake],
+      [valueIn, swapEvent, settle, take, take],
+    ]) {
+      expect(() => registry.parseReceipt(capability, changes)).toThrow(
+        "took its output more than once",
+      );
+    }
+    for (const changes of [
+      [valueIn, swapEvent, decoySettle, settle, take],
+      [valueIn, swapEvent, settle, decoySettle, take],
+      [valueIn, swapEvent, settle, settle, take],
+    ]) {
+      expect(() => registry.parseReceipt(capability, changes)).toThrow(
+        "settled its input more than once",
+      );
+    }
+    // A Transfer with neither endpoint at the PoolManager is not a candidate
+    // for either role, so it cannot be mistaken for one.
+    expect(() =>
+      registry.parseReceipt(capability, [
+        valueIn,
+        swapEvent,
+        settle,
+        take,
+        erc20Transfer(USDC_ADDRESS, ACCOUNT, DECOY_TOKEN, 1n),
+      ]),
+    ).toThrow("does not touch the PoolManager");
   });
 
   it("parses the Permit2 approval Receipt and pins its spender", async () => {
