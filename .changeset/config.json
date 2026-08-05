@@ -12,6 +12,7 @@
       "@themoss/protocol-apriori",
       "@themoss/protocol-kuru",
       "@themoss/protocol-monad-cards",
+      "@themoss/protocol-nadfun",
       "@themoss/protocol-pancakeswap",
       "@themoss/mcp-server"
     ]

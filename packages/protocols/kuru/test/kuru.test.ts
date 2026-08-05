@@ -241,6 +241,153 @@ describe("Kuru", () => {
     expect(receipt.changes.map(firstChange)).toEqual(changes);
   });
 
+  it("represents FlipOrderUpdated before its market Trade", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const trade = tradeChange(MON_USDC, 7n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+    const changes = [flip, trade, router] as const;
+
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.changes[0]).toMatchObject({
+      kind: "change",
+      text: `Flip Order Updated: order 7 has size 30 emitted by ${MON_USDC}`,
+      data: {
+        event: "FlipOrderUpdated",
+        emitter: MON_USDC,
+        orderId: "7",
+        size: "30",
+      },
+    });
+    const first = receipt.changes[0];
+    if (!first) throw new Error("expected flip-order ReceiptChange");
+    expect(receipt.changes.map(firstChange)).toEqual(changes);
+    expect(firstChange(first)).toBe(flip);
+  });
+
+  it("represents FlippedOrderCreated before its market Trade", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flipped = flippedOrderCreatedChange(MON_USDC);
+    const trade = tradeChange(MON_USDC, 11n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+    const changes = [flipped, trade, router] as const;
+
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.changes[0]).toMatchObject({
+      kind: "change",
+      text: `Flipped Order Created: order ID 11, flipped ID 12, owner ${ACCOUNT}; size 30, price 40, flipped price 50, is buy true, emitted by ${MON_USDC}`,
+      data: {
+        event: "FlippedOrderCreated",
+        emitter: MON_USDC,
+        orderId: "11",
+        flippedId: "12",
+        owner: ACCOUNT,
+        size: "30",
+        price: "40",
+        flippedPrice: "50",
+        isBuy: true,
+      },
+    });
+    const first = receipt.changes[0];
+    if (!first) throw new Error("expected flipped-order ReceiptChange");
+    expect(receipt.changes.map(firstChange)).toEqual(changes);
+    expect(firstChange(first)).toBe(flipped);
+  });
+
+  it("accepts multiple adjacent flip-order and Trade pairs", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const firstFlip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const firstTrade = tradeChange(MON_USDC, 8n);
+    const secondFlip = flippedOrderCreatedChange(MON_AUSD);
+    const secondTrade = tradeChange(MON_AUSD, 11n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+    const changes = [firstFlip, firstTrade, secondFlip, secondTrade, router] as const;
+
+    const receipt = registry.parseReceipt(capability, changes);
+    expect(receipt.changes.map(firstChange)).toEqual([
+      firstFlip,
+      firstTrade,
+      secondFlip,
+      secondTrade,
+      router,
+    ]);
+  });
+
+  it("rejects a flip-order event followed by a Trade from another market", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const otherTrade = tradeChange(MON_AUSD, 7n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [flip, otherTrade, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects Trade before its flip-order event", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const trade = tradeChange(MON_USDC, 8n);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [trade, flip, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects an unrelated Change between a flip-order event and Trade", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const transfer = erc20Transfer(USDC_ADDRESS, ACCOUNT, KURU_ROUTER_ADDRESS, 1n);
+    const trade = tradeChange(MON_USDC, 8n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [flip, transfer, trade, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects an isolated flip-order event", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const flip = flippedOrderCreatedChange(MON_USDC);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() => registry.parseReceipt(capability, [flip, router])).toThrow(
+      "requires an immediately following Router Trade from the same market",
+    );
+  });
+
+  it("rejects crossed flip-order and Trade pairs", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const firstFlip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const secondTrade = tradeChange(MON_AUSD, 11n);
+    const secondFlip = flippedOrderCreatedChange(MON_AUSD);
+    const firstTrade = tradeChange(MON_USDC, 8n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+
+    expect(() =>
+      registry.parseReceipt(capability, [firstFlip, secondTrade, secondFlip, firstTrade, router]),
+    ).toThrow("requires an immediately following Router Trade from the same market");
+  });
+
+  it("continues to reject unrelated OrderBook events", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const order = orderCreatedChange(MON_USDC);
+
+    expect(() => registry.parseReceipt(capability, [order])).toThrow(
+      "Unexpected Change: Kuru market emitted OrderCreated",
+    );
+  });
+
   it("rejects API markets that the Router does not verify", async () => {
     const unverified = { ...MARKETS[0], verified: false } as MockMarket;
     const { registry } = offlineRegistry([unverified]);
@@ -447,6 +594,16 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Kuru mainnet", () => {
   });
 });
 
+async function swapCapability(registry: Registry) {
+  const capability = await registry.action("kuru", "swap", ACCOUNT, {
+    tokenIn: USDC_ADDRESS,
+    tokenOut: AUSD_ADDRESS,
+    amountIn: "1",
+  });
+  if (capability.kind !== "capability") throw new Error("expected capability");
+  return capability;
+}
+
 function offlineRegistry(
   markets: readonly MockMarket[] = MARKETS,
   fetchMock = marketDiscoveryFetch(markets),
@@ -637,6 +794,36 @@ function tradeChange(address: `0x${string}`, orderId: bigint): Change {
   );
 }
 
+function flipOrderUpdatedChange(address: `0x${string}`, orderId: bigint, size: bigint): Change {
+  return eventChange(
+    address,
+    KuruOrderbookAbi,
+    "FlipOrderUpdated",
+    [orderId, size],
+    ["uint40", "uint96"],
+  );
+}
+
+function flippedOrderCreatedChange(address: `0x${string}`): Change {
+  return eventChange(
+    address,
+    KuruOrderbookAbi,
+    "FlippedOrderCreated",
+    [11n, 12n, ACCOUNT, 30n, 40n, 50n, true],
+    ["uint40", "uint40", "address", "uint96", "uint32", "uint32", "bool"],
+  );
+}
+
+function orderCreatedChange(address: `0x${string}`): Change {
+  return eventChange(
+    address,
+    KuruOrderbookAbi,
+    "OrderCreated",
+    [11n, ACCOUNT, 30n, 40n, true],
+    ["uint40", "address", "uint96", "uint32", "bool"],
+  );
+}
+
 function routerSwapChange(
   sender: `0x${string}`,
   tokenIn: `0x${string}`,
@@ -674,7 +861,12 @@ function erc20Transfer(
 function eventChange(
   address: `0x${string}`,
   abi: typeof KuruRouterAbi | typeof KuruOrderbookAbi,
-  eventName: "Trade" | "KuruRouterSwap",
+  eventName:
+    | "Trade"
+    | "FlipOrderUpdated"
+    | "FlippedOrderCreated"
+    | "OrderCreated"
+    | "KuruRouterSwap",
   values: readonly unknown[],
   types: readonly string[],
 ): Change {

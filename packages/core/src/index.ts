@@ -41,6 +41,7 @@ export {
   type ParameterDeclaration,
   ParameterError,
   type ParamsSpec,
+  PositionSide,
   PositiveDecimalString,
   parseParams,
   TokenReference,

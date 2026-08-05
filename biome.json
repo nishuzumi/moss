@@ -11,8 +11,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/.changeset",
-      "!**/abis-src",
-      "!**/src/abis"
+      "!**/src/abis",
+      "!**/abis-src"
     ]
   },
   "formatter": {
