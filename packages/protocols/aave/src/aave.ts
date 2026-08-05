@@ -25,6 +25,14 @@
  *   - `debt`     - borrow adds a repayment obligation. Nothing leaves the
  *     account in the transaction, which is the boundary `fundOut` draws and
  *     `debt` sits on the other side of.
+ *   - `liquidation` - borrow and withdraw are the two writes that move account
+ *     health the wrong way. ADR 0003 defines the label as a third party being
+ *     able to seize the collateral without further user action, and adds that a
+ *     collateral withdrawal carries it too because it moves health. A borrow
+ *     creates that exposure and a withdraw removes the buffer against it, so
+ *     both declare it. Supply and repay only move health up, so neither does.
+ *     `leverage` stays off all four: Aave lends under the reserve's LTV, so no
+ *     single Capability here puts exposure above the collateral posted.
  */
 import {
   type ActionCtx,
@@ -271,7 +279,10 @@ export class Aave {
     verb: "withdraw",
     params: withdrawParams,
     receipt: "withdrawReceipt",
-    risk: ["fundOut"],
+    // Taking collateral back out lowers the health factor of an account that
+    // owes anything, which is the account-health move ADR 0003 puts under
+    // `liquidation`.
+    risk: ["fundOut", "liquidation"],
     tags: ["lending", "aave-v3"],
   })
   async withdraw(params: WithdrawParams, ctx: ActionCtx): Promise<CapabilityResult> {
@@ -285,8 +296,10 @@ export class Aave {
     params: borrowParams,
     receipt: "borrowReceipt",
     // Nothing leaves the account here: the cost is the obligation, not an
-    // outflow, so this is `debt` rather than `fundOut`.
-    risk: ["debt"],
+    // outflow, so this is `debt` rather than `fundOut`. The obligation is also
+    // what makes the account's collateral seizable by a liquidator with no
+    // further action from the user, which is `liquidation`.
+    risk: ["debt", "liquidation"],
     tags: ["lending", "aave-v3", "debt"],
   })
   async borrow(params: BorrowParams, ctx: ActionCtx): Promise<CapabilityResult> {

@@ -8,8 +8,8 @@ plus Queries for account health and reserve rates.
 | Capability | Verb | Transactions | Risk |
 | --- | --- | --- | --- |
 | `supply` | `supply` | nested ERC-20 approval, then `Pool.supply` | `fundOut`, `approval` |
-| `withdraw` | `withdraw` | `Pool.withdraw` | `fundOut` |
-| `borrow` | `borrow` | `Pool.borrow` | `debt` |
+| `withdraw` | `withdraw` | `Pool.withdraw` | `fundOut`, `liquidation` |
+| `borrow` | `borrow` | `Pool.borrow` | `debt`, `liquidation` |
 | `repay` | `repay` | nested ERC-20 approval, then `Pool.repay` | `fundOut`, `approval` |
 
 Every Capability owns exactly one direct transaction. `supply` and `repay` need
@@ -24,6 +24,15 @@ remainder standing. Nothing is signed or sent here.
 account in the current transaction, which is true of supply, repay and the
 aToken burn in withdraw. A borrow is the other side of that boundary: nothing
 leaves, an obligation is added.
+
+`borrow` and `withdraw` also carry `liquidation`. ADR 0003 gives that label to a
+write after which a third party can seize the collateral with no further action
+from the user. It covers collateral withdrawals for the same reason, since both
+move account health. Drawing debt creates the exposure and taking collateral
+back out removes the buffer against it. `supply` and `repay` move health the
+other way, so neither carries the label. None of the four carries `leverage`:
+Aave lends under the reserve's LTV, so no Capability here puts exposure above
+the collateral posted.
 
 `borrow` is inflow-only by design: the asset arrives and nothing leaves, because
 the cost is debt rather than an asset. Its Receipt proves the inflow and the

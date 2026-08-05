@@ -397,12 +397,38 @@ describe("Aave", () => {
     });
     expect(borrow).toMatchObject({ verb: "borrow" });
     // A borrow adds an obligation and moves nothing out, so it is `debt`, the
-    // label Core defines for exactly that (#119), never `fundOut`.
-    expect(borrow?.risk).toEqual(["debt"]);
+    // label Core defines for exactly that (#119), never `fundOut`. It also puts
+    // the account's collateral within a liquidator's reach.
+    expect(borrow?.risk).toEqual(["debt", "liquidation"]);
     // Aave takes an interestRateMode; the adapter deliberately does not, so an
     // Agent cannot pass the stable mode this deployment removed.
     expect(Object.keys(borrow?.params ?? {})).toEqual(["asset", "amount"]);
     expect(account?.kind).toBe("query");
+  });
+
+  /**
+   * ADR 0003's amendment (#139) put `leverage` and `liquidation` in the closed
+   * risk set, so the four writes are pinned as a set rather than one at a time.
+   * `liquidation` goes on the two that move account health the wrong way: a
+   * borrow creates the exposure a liquidator acts on and a withdraw removes the
+   * buffer against it. A supply and a repay only move health up.
+   */
+  it("declares liquidation risk on the two writes that move account health", () => {
+    const [supply, withdraw, borrow, repay] = offlineRegistry().load([
+      { protocol: "aave", method: "supply" },
+      { protocol: "aave", method: "withdraw" },
+      { protocol: "aave", method: "borrow" },
+      { protocol: "aave", method: "repay" },
+    ]);
+    expect(supply?.risk).toEqual(["fundOut", "approval"]);
+    expect(withdraw?.risk).toEqual(["fundOut", "liquidation"]);
+    expect(borrow?.risk).toEqual(["debt", "liquidation"]);
+    expect(repay?.risk).toEqual(["fundOut", "approval"]);
+    // Nothing here is leveraged: Aave lends under the reserve's LTV, so no
+    // Capability puts exposure above the collateral posted.
+    for (const loaded of [supply, withdraw, borrow, repay]) {
+      expect(loaded?.risk).not.toContain("leverage");
+    }
   });
 
   it("nests one exact-amount approval and owns one Pool supply transaction", async () => {
