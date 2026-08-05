@@ -1,0 +1,3941 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "IPRouterStatic",
+  "sourceName": "contracts/interfaces/IPRouterStatic.sol",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyUsed",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPtUsed",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquidityDualSyAndPt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenUsed",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPtUsed",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquidityDualTokenAndPt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPtIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquiditySinglePt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquiditySingleSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyMintPy",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquiditySingleSyKeepYt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquiditySingleToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyMintPy",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "AddLiquiditySingleTokenKeepYt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpIn",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "netPtFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netPtRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalSyOut",
+              "type": "uint256"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct ExitPostExpReturnParams",
+          "name": "params",
+          "type": "tuple"
+        }
+      ],
+      "name": "ExitPostExpToSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "totalTokenOut",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "netPtFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netPtRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalSyOut",
+              "type": "uint256"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct ExitPostExpReturnParams",
+          "name": "params",
+          "type": "tuple"
+        }
+      ],
+      "name": "ExitPostExpToToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpIn",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "netPtFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netPyRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netPtSwap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netYtSwap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromSwap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFee",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalSyOut",
+              "type": "uint256"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct ExitPreExpReturnParams",
+          "name": "params",
+          "type": "tuple"
+        }
+      ],
+      "name": "ExitPreExpToSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "totalTokenOut",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "netPtFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRemove",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netPyRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromRedeem",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netPtSwap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netYtSwap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFromSwap",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "netSyFee",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalSyOut",
+              "type": "uint256"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct ExitPreExpReturnParams",
+          "name": "params",
+          "type": "tuple"
+        }
+      ],
+      "name": "ExitPreExpToToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "MintPyFromSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPyOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "MintPyFromToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "SY",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "MintSyFromToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "OwnershipTransferred",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPyIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "RedeemPyToSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPyIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "RedeemPyToToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "SY",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "RedeemSyToToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "RemoveLiquidityDualSyAndPt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "RemoveLiquidityDualTokenAndPt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "RemoveLiquiditySinglePt",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "RemoveLiquiditySingleSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "RemoveLiquiditySingleToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes4",
+          "name": "selector",
+          "type": "bytes4"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "facet",
+          "type": "address"
+        }
+      ],
+      "name": "SelectorToFacetSet",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netPtToAccount",
+          "type": "int256"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netSyToAccount",
+          "type": "int256"
+        }
+      ],
+      "name": "SwapPtAndSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netPtToAccount",
+          "type": "int256"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netTokenToAccount",
+          "type": "int256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "SwapPtAndToken",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netYtToAccount",
+          "type": "int256"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netSyToAccount",
+          "type": "int256"
+        }
+      ],
+      "name": "SwapYtAndSy",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "receiver",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netYtToAccount",
+          "type": "int256"
+        },
+        {
+          "indexed": false,
+          "internalType": "int256",
+          "name": "netTokenToAccount",
+          "type": "int256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "netSyInterm",
+          "type": "uint256"
+        }
+      ],
+      "name": "SwapYtAndToken",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyDesired",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtDesired",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquidityDualSyAndPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyUsed",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtUsed",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netTokenDesired",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtDesired",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquidityDualTokenAndPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netTokenUsed",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtUsed",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyUsed",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyDesired",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquiditySinglePtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtToSwap",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFromSwap",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquiditySingleSyKeepYtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToPY",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquiditySingleSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtFromSwap",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToSwap",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquiditySingleTokenKeepYtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyMinted",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToPY",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "addLiquiditySingleTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netLpOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtFromSwap",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyMinted",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToSwap",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "int256",
+          "name": "netPtOut",
+          "type": "int256"
+        }
+      ],
+      "name": "calcPriceImpactPY",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "int256",
+          "name": "netPtOut",
+          "type": "int256"
+        }
+      ],
+      "name": "calcPriceImpactPt",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "int256",
+          "name": "netPtOut",
+          "type": "int256"
+        }
+      ],
+      "name": "calcPriceImpactYt",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "claimOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes4",
+          "name": "selector",
+          "type": "bytes4"
+        }
+      ],
+      "name": "facetAddress",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "SY",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "getAmountTokenToMintSy",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getDefaultApproxParams",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "guessMin",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessMax",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessOffchain",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "maxIteration",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "eps",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct ApproxParams",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getLpToAssetRate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getLpToSyRate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getMarketState",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "pt",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "yt",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "sy",
+          "type": "address"
+        },
+        {
+          "internalType": "int256",
+          "name": "impliedYield",
+          "type": "int256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "marketExchangeRateExcludeFee",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "totalPt",
+              "type": "int256"
+            },
+            {
+              "internalType": "int256",
+              "name": "totalSy",
+              "type": "int256"
+            },
+            {
+              "internalType": "int256",
+              "name": "totalLp",
+              "type": "int256"
+            },
+            {
+              "internalType": "address",
+              "name": "treasury",
+              "type": "address"
+            },
+            {
+              "internalType": "int256",
+              "name": "scalarRoot",
+              "type": "int256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "expiry",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lnFeeRateRoot",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "reserveFeePercent",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lastLnImpliedRate",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct MarketState",
+          "name": "state",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getOwnerAndPendingOwner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "_owner",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_pendingOwner",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "py",
+          "type": "address"
+        }
+      ],
+      "name": "getPY",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "pt",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "yt",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getPtToAssetRate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getPtToSyRate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        }
+      ],
+      "name": "getTokensInOut",
+      "outputs": [
+        {
+          "internalType": "address[]",
+          "name": "tokensIn",
+          "type": "address[]"
+        },
+        {
+          "internalType": "address[]",
+          "name": "tokensOut",
+          "type": "address[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "totalPt",
+              "type": "int256"
+            },
+            {
+              "internalType": "int256",
+              "name": "totalSy",
+              "type": "int256"
+            },
+            {
+              "internalType": "int256",
+              "name": "totalLp",
+              "type": "int256"
+            },
+            {
+              "internalType": "address",
+              "name": "treasury",
+              "type": "address"
+            },
+            {
+              "internalType": "int256",
+              "name": "scalarRoot",
+              "type": "int256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "expiry",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lnFeeRateRoot",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "reserveFeePercent",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lastLnImpliedRate",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct MarketState",
+          "name": "state",
+          "type": "tuple"
+        }
+      ],
+      "name": "getTradeExchangeRateExcludeFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "int256",
+          "name": "netPtOut",
+          "type": "int256"
+        }
+      ],
+      "name": "getTradeExchangeRateIncludeFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        }
+      ],
+      "name": "getUserMarketInfo",
+      "outputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "lpBalance",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "ptBalance",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "syBalance",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount[]",
+              "name": "unclaimedRewards",
+              "type": "tuple[]"
+            }
+          ],
+          "internalType": "struct IPActionInfoStatic.UserMarketInfo",
+          "name": "res",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "py",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        }
+      ],
+      "name": "getUserPYInfo",
+      "outputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "ptBalance",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "ytBalance",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "unclaimedInterest",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount[]",
+              "name": "unclaimedRewards",
+              "type": "tuple[]"
+            }
+          ],
+          "internalType": "struct IPActionInfoStatic.UserPYInfo",
+          "name": "res",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "sy",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        }
+      ],
+      "name": "getUserSYInfo",
+      "outputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount",
+              "name": "syBalance",
+              "type": "tuple"
+            },
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct IPActionInfoStatic.TokenAmount[]",
+              "name": "unclaimedRewards",
+              "type": "tuple[]"
+            }
+          ],
+          "internalType": "struct IPActionInfoStatic.UserSYInfo",
+          "name": "res",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getYieldTokenAndPtRate",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "yieldToken",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netYieldTokenOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getYieldTokenAndYtRate",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "yieldToken",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netYieldTokenOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getYtToAssetRate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "getYtToSyRate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        },
+        {
+          "internalType": "uint128",
+          "name": "additionalAmountToLock",
+          "type": "uint128"
+        },
+        {
+          "internalType": "uint128",
+          "name": "newExpiry",
+          "type": "uint128"
+        }
+      ],
+      "name": "increaseLockPositionStatic",
+      "outputs": [
+        {
+          "internalType": "uint128",
+          "name": "newVeBalance",
+          "type": "uint128"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToMint",
+          "type": "uint256"
+        }
+      ],
+      "name": "mintPyFromSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPYOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "mintPyFromTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPyOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "SY",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "mintSyFromTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "pyIndexCurrentViewMarket",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "yt",
+          "type": "address"
+        }
+      ],
+      "name": "pyIndexCurrentViewYt",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        }
+      ],
+      "name": "readMarketState",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "totalPt",
+              "type": "int256"
+            },
+            {
+              "internalType": "int256",
+              "name": "totalSy",
+              "type": "int256"
+            },
+            {
+              "internalType": "int256",
+              "name": "totalLp",
+              "type": "int256"
+            },
+            {
+              "internalType": "address",
+              "name": "treasury",
+              "type": "address"
+            },
+            {
+              "internalType": "int256",
+              "name": "scalarRoot",
+              "type": "int256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "expiry",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lnFeeRateRoot",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "reserveFeePercent",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lastLnImpliedRate",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct MarketState",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPYToRedeem",
+          "type": "uint256"
+        }
+      ],
+      "name": "redeemPyToSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "YT",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPYToRedeem",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        }
+      ],
+      "name": "redeemPyToTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "SY",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "redeemSyToTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeLiquidityDualSyAndPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        }
+      ],
+      "name": "removeLiquidityDualTokenAndPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToRedeem",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeLiquiditySinglePtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtFromSwap",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFromBurn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtFromBurn",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeLiquiditySingleSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFromBurn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtFromBurn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFromSwap",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netLpToRemove",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        }
+      ],
+      "name": "removeLiquiditySingleTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFromBurn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPtFromBurn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFromSwap",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "guessMin",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessMax",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessOffchain",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "maxIteration",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "eps",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct ApproxParams",
+          "name": "params",
+          "type": "tuple"
+        }
+      ],
+      "name": "setDefaultApproxParams",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "facet",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes4[]",
+              "name": "selectors",
+              "type": "bytes4[]"
+            }
+          ],
+          "internalType": "struct IPMiniDiamond.SelectorsToFacet[]",
+          "name": "arr",
+          "type": "tuple[]"
+        }
+      ],
+      "name": "setFacetForSelectors",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactPtIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactPtForSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactPtIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        }
+      ],
+      "name": "swapExactPtForTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyToRedeem",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactPtIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactPtForYtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "totalPtToSwap",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactSyIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactSyForPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactSyIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "slippage",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactSyForPtStaticAndGenerateApproxParams",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "guessMin",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessMax",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessOffchain",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "maxIteration",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "eps",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct ApproxParams",
+          "name": "approxParams",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactSyIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactSyForYtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amountTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactTokenForPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyMinted",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amountTokenIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "slippage",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactTokenForPtStaticAndGenerateApproxParams",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyMinted",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "guessMin",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessMax",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "guessOffchain",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "maxIteration",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "eps",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct ApproxParams",
+          "name": "approxParams",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amountTokenIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactTokenForYtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netYtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyMinted",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactYtIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactYtForPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "totalPtSwapped",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactYtIn",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapExactYtForSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyOwedInt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPYToRepaySyOwedInt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPYToRedeemSyOutInt",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactYtIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        }
+      ],
+      "name": "swapExactYtForTokenStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netTokenOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyOut",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyOwedInt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPYToRepaySyOwedInt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netPYToRedeemSyOutInt",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapPtForExactSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netPtIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactPtOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapSyForExactPtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactYtOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapSyForExactYtStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netSyIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyReceivedInt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "totalSyNeedInt",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "market",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exactSyOut",
+          "type": "uint256"
+        }
+      ],
+      "name": "swapYtForExactSyStatic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "netYtIn",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "netSyFee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priceImpact",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "exchangeRateAfter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "direct",
+          "type": "bool"
+        },
+        {
+          "internalType": "bool",
+          "name": "renounce",
+          "type": "bool"
+        }
+      ],
+      "name": "transferOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

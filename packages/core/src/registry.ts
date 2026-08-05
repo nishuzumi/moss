@@ -1,4 +1,4 @@
-import { isAddress } from "viem";
+import { type Abi, isAddress } from "viem";
 import {
   METHOD_META,
   type MethodMeta,
@@ -66,6 +66,14 @@ export interface QueryResult {
   protocol: string;
   method: string;
   data: JsonSafeValue;
+}
+
+export interface ResolvedProtocolContract {
+  abi: Abi;
+  /** Explanations for ABI-declared custom errors, by error name. */
+  customErrorMessages: Readonly<Record<string, string>>;
+  /** Explanations for `require` reverts, by the exact emitted message. */
+  stringRevertMessages: Readonly<Record<string, string>>;
 }
 
 interface Registered {
@@ -229,6 +237,25 @@ export class Registry {
     if (!CATEGORIES.includes(config.category)) {
       throw new Error(`protocol "${config.name}" has an invalid category`);
     }
+    for (const [errorName, message] of Object.entries(config.customErrorMessages ?? {})) {
+      requireMetadataText(errorName, `protocol "${config.name}" error name`);
+      requireMetadataText(message, `protocol "${config.name}" error "${errorName}" message`);
+      if (
+        !Object.values(config.contracts).some(({ abi }) =>
+          abi.some((item) => item.type === "error" && item.name === errorName),
+        )
+      ) {
+        throw new Error(
+          `protocol "${config.name}" error "${errorName}" is not declared by a contract ABI`,
+        );
+      }
+    }
+    // A revert message appears in no ABI, so this is all Registry can check. The Protocol owns
+    // proving the literal against its own pinned vendored source.
+    for (const [reason, message] of Object.entries(config.stringRevertMessages ?? {})) {
+      requireMetadataText(reason, `protocol "${config.name}" revert reason`);
+      requireMetadataText(message, `protocol "${config.name}" revert "${reason}" message`);
+    }
     const existing = this.#protocols.get(config.name);
     if (existing?.ctor === ctor) return;
     if (existing) throw new Error(`protocol "${config.name}" is already registered`);
@@ -336,6 +363,27 @@ export class Registry {
       }
     }
     return found;
+  }
+
+  /**
+   * Resolves only contracts declared by the Capability's own Protocol. Target scoping prevents an
+   * ABI or explanation from being attributed to the same selector emitted by another deployment.
+   */
+  resolveContract(protocol: string, target: Address): ResolvedProtocolContract | undefined {
+    const registered = this.#protocols.get(protocol);
+    if (!registered) return undefined;
+    const matches = Object.values(registered.config.contracts).filter(
+      ({ addr }) => addr.toLowerCase() === target.toLowerCase(),
+    );
+    if (matches.length === 0) return undefined;
+    // The ABI is what the target decides; the explanations belong to the Protocol and travel with
+    // every one of its targets. An entry only ever renders when the matched ABI decodes an error of
+    // that name, so a target missing it simply never looks it up.
+    return {
+      abi: matches.flatMap(({ abi }) => abi) as Abi,
+      customErrorMessages: registered.config.customErrorMessages ?? {},
+      stringRevertMessages: registered.config.stringRevertMessages ?? {},
+    };
   }
 
   load(coords: readonly { protocol: string; method: string }[]): Stub[] {
