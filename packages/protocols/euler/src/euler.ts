@@ -214,12 +214,11 @@ export class Euler {
     verb: "borrow",
     params: borrowParams,
     receipt: "borrowReceipt",
-    // Borrowing hands the debt vault control of this account's collateral. The
-    // risk label for that is `liquidation`, which enters the closed set with
-    // the perps vocabulary change; until then it rides as a tag (ADR 0003
-    // names tags as the pressure valve for exactly this).
-    risk: ["approval"],
-    tags: ["evk", "debt", "liquidation"],
+    // Borrowing records repayment obligations (`debt`) and hands the debt
+    // vault control of this account's collateral (`liquidation`), so an Agent
+    // sees both dangers in the closed risk set rather than as long-tail tags.
+    risk: ["approval", "debt", "liquidation"],
+    tags: ["evk"],
   })
   async borrow(
     params: InferParams<typeof borrowParams>,
@@ -590,8 +589,21 @@ export class Euler {
     const { vault, assets, transfers, shareTransfer } = observed;
     const matching = transfers.filter((transfer) => transfer.value === assets);
 
+    const unique = (candidates: readonly ObservedTransfer[], role: string) => {
+      if (candidates.length > 1) {
+        throw new Error(
+          `Euler ${operation} Receipt is ambiguous: ${candidates.length} ${role} match the reported ${assets} ` +
+            `(${candidates.map((transfer) => transfer.token).join(", ")})`,
+        );
+      }
+      return candidates[0];
+    };
+
     if (operation === "supply" || operation === "repay") {
-      const inflow = matching.find((transfer) => sameAddress(transfer.to, vault));
+      const inflow = unique(
+        matching.filter((transfer) => sameAddress(transfer.to, vault)),
+        "transfers into the vault",
+      );
       if (!inflow) {
         throw new Error(
           `Euler ${operation} Receipt requires an underlying transfer into the vault`,
@@ -601,7 +613,10 @@ export class Euler {
         if (!shareTransfer) throw new Error("Euler supply Receipt requires a vault share mint");
         return { asset: inflow.token, debtToken: undefined, payout: undefined };
       }
-      const debtBurn = matching.find((transfer) => sameAddress(transfer.to, zeroAddress));
+      const debtBurn = unique(
+        matching.filter((transfer) => sameAddress(transfer.to, zeroAddress)),
+        "debt-token burns",
+      );
       if (!debtBurn) {
         throw new Error(
           "Euler repay Receipt requires a debt-token burn matching the repaid amount",
@@ -610,7 +625,10 @@ export class Euler {
       return { asset: inflow.token, debtToken: debtBurn.token, payout: undefined };
     }
 
-    const payout = matching.find((transfer) => sameAddress(transfer.from, vault));
+    const payout = unique(
+      matching.filter((transfer) => sameAddress(transfer.from, vault)),
+      "transfers out of the vault",
+    );
     if (!payout) {
       throw new Error(
         `Euler ${operation} Receipt requires an underlying transfer out of the vault`,
@@ -620,7 +638,10 @@ export class Euler {
       if (!shareTransfer) throw new Error("Euler withdraw Receipt requires a vault share burn");
       return { asset: payout.token, debtToken: undefined, payout };
     }
-    const debtMint = matching.find((transfer) => sameAddress(transfer.from, zeroAddress));
+    const debtMint = unique(
+      matching.filter((transfer) => sameAddress(transfer.from, zeroAddress)),
+      "debt-token mints",
+    );
     if (!debtMint) {
       throw new Error(
         "Euler borrow Receipt requires a debt-token mint matching the borrowed amount",

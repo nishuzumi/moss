@@ -155,12 +155,10 @@ export class EulerVaultConnector {
     verb: "approve",
     params: vaultParams,
     receipt: "controllerReceipt",
-    // A controller may seize this account's collateral. `liquidation` is the
-    // risk label that says so; it enters the closed set with the perps
-    // vocabulary change, so until then it rides as a tag (ADR 0003 names tags
-    // as the pressure valve for exactly this).
-    risk: ["approval"],
-    tags: ["evk", "evc", "controller", "liquidation"],
+    // A controller may seize this account's collateral, so `liquidation` is a
+    // risk label, not a tag — the closed risk set is what an Agent inspects.
+    risk: ["approval", "liquidation"],
+    tags: ["evk", "evc", "controller"],
   })
   async enableController(params: InferParams<typeof vaultParams>, ctx: ActionCtx) {
     const vault = await resolveVault(this.runtime, ctx.account, params.vault);
