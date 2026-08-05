@@ -770,6 +770,15 @@ export class Neverland {
         reserveTokens.add(transfer.emitter.toLowerCase());
       }
     }
+    // The identity must be unambiguous: a foreign token moving the same units
+    // through the same actor must not piggyback on the derivation to
+    // authenticate its own evidence. A genuine operation trace contains
+    // exactly one such token (the reserve asset's own transfers are excluded).
+    if (reserveTokens.size > 1) {
+      throw new Error(
+        `Neverland ${operation} ambiguous reserve-token identity: candidates ${[...reserveTokens].join(", ")}`,
+      );
+    }
     // Per-shape role PriceObserved must name: the holder of the minted/burned
     // reserve token (onBehalfOf for supply/borrow, `to` for withdraw, `user`
     // for repay).
@@ -824,7 +833,18 @@ export class Neverland {
         );
       }
     }
+    const canonicalToggle =
+      operation === "supply" || operation === "supplyNative"
+        ? "ReserveUsedAsCollateralEnabled"
+        : operation === "withdraw" || operation === "withdrawNative"
+          ? "ReserveUsedAsCollateralDisabled"
+          : null;
     for (const toggle of collateralToggles) {
+      if (!canonicalToggle || toggle.event !== canonicalToggle) {
+        throw new Error(
+          `Neverland ${operation} ${toggle.event} is not collateral evidence for this operation`,
+        );
+      }
       if (!sameAddress(toggle.reserve, poolEvent.asset)) {
         throw new Error(
           `Neverland ${operation} ${toggle.event} for unrelated reserve ${toggle.reserve}`,
@@ -842,20 +862,49 @@ export class Neverland {
           `Neverland ${operation} reserve-token ${token.eventName} emitted by ${token.emitter} is not the operation's reserve token`,
         );
       }
-      const participants = [
-        token.args.caller,
-        token.args.onBehalfOf,
-        token.args.user,
-        token.args.borrower,
-        token.args.from,
-        token.args.target,
-      ].filter((value): value is string => typeof value === "string");
-      if (
-        !participants.some((participant) => actors.some((actor) => sameAddress(participant, actor)))
-      ) {
+      // Canonical Aave V3 shape: the Pool forwards its own `msg.sender` as the
+      // reserve-token `caller`/`from` and the operation's beneficiary as
+      // `onBehalfOf` (mint) or the underlying receiver (burn target). Only the
+      // mint brings a new beneficiary into a supply/borrow; only the burn
+      // debits a receiver in a withdraw/repay. Every role must match the Pool
+      // event that proved it, so a correct beneficiary with an unrelated
+      // caller no longer authenticates a foreign token.
+      const canonicalEvent =
+        operation === "supply" || operation === "supplyNative" || operation === "borrow"
+          ? "Mint"
+          : "Burn";
+      if (token.eventName !== canonicalEvent) {
         throw new Error(
-          `Neverland ${operation} reserve-token ${token.eventName} does not involve operation actor`,
+          `Neverland ${operation} reserve-token ${token.eventName} is not canonical evidence for this operation`,
         );
+      }
+      if (token.eventName === "Mint") {
+        const caller = token.args.caller;
+        const onBehalfOf = token.args.onBehalfOf;
+        if (
+          !("onBehalfOf" in poolEvent) ||
+          typeof caller !== "string" ||
+          typeof onBehalfOf !== "string" ||
+          !sameAddress(caller, poolEvent.user) ||
+          !sameAddress(onBehalfOf, poolEvent.onBehalfOf)
+        ) {
+          throw new Error(
+            `Neverland ${operation} reserve-token Mint caller ${String(caller)} / beneficiary ${String(onBehalfOf)} does not match Pool event user / onBehalfOf`,
+          );
+        }
+      } else {
+        const from = token.args.from;
+        const target = token.args.target;
+        if (
+          typeof from !== "string" ||
+          typeof target !== "string" ||
+          !sameAddress(from, poolEvent.user) ||
+          !sameAddress(target, "to" in poolEvent ? poolEvent.to : ZERO_ADDRESS)
+        ) {
+          throw new Error(
+            `Neverland ${operation} reserve-token Burn from ${String(from)} / target ${String(target)} does not match Pool event user / receiver`,
+          );
+        }
       }
     }
     const outcome: NeverlandOutcome = { ...poolEvent, priceObservations, rewardObservations };
