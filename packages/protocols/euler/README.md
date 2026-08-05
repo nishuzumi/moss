@@ -41,7 +41,7 @@ github.com/euler-xyz/euler-interfaces @ df477f9d56a0c11542c26aabb63690219eecce6d
 - **No `receiver` parameter.** Assets always return to the acting account; forwarding elsewhere is a `transfer` away and keeps intent alignment tight.
 - **No batching through `EVC.batch`.** Each step is its own transaction with its own Receipt, which is what makes them independently verifiable. A batched variant would collapse them into one opaque call.
 - **No liquidation, `pullDebt`, `EulerSwap`, or `EulerEarn`.**
-- `borrow` and `enableController` should carry a `liquidation` **risk label**. That word is not in the closed risk set yet — it arrives with the perps vocabulary change — so the danger currently rides as a `tags` entry, which is what ADR 0003 designates tags for.
+- `borrow` carries the `debt` and `liquidation` risk labels, and `enableController` carries `liquidation`: borrowing records repayment obligations and hands the debt vault control of this account's collateral, which is exactly the danger an Agent inspects in the closed risk set.
 
 ## ABI provenance (ADR 0007)
 

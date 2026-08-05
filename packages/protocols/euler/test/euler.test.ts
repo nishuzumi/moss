@@ -283,6 +283,16 @@ describe("Euler", () => {
       type: { description: expect.stringContaining("20-byte EVM address") },
     });
     expect(supply?.params.amount?.description).toContain("display units");
+
+    // The danger is in the closed risk set, not the long-tail tags: borrowing
+    // records repayment obligations and hands the debt vault control of this
+    // account's collateral; enabling a controller lets that vault seize it.
+    const [borrow] = registry.load([{ protocol: "euler", method: "borrow" }]);
+    expect(borrow).toMatchObject({ risk: ["approval", "debt", "liquidation"] });
+    const [enableController] = registry.load([
+      { protocol: "euler-vault-connector", method: "enableController" },
+    ]);
+    expect(enableController).toMatchObject({ risk: ["approval", "liquidation"] });
   });
 
   it("builds supply as an approval plus exactly one direct deposit", async () => {
@@ -570,6 +580,185 @@ describe("Euler", () => {
     });
     expect(() => registry.parseReceipt(capability, shortPayout)).toThrow(
       "requires an underlying transfer out of the vault",
+    );
+  });
+
+  it("refuses an ambiguous trace instead of guessing the asset or debt token", async () => {
+    const { registry } = offlineRegistry({
+      enabledCollaterals: [WMON_VAULT.toLowerCase()],
+      enabledControllers: [USDC_VAULT.toLowerCase()],
+    });
+
+    // A decoy Transfer that moves exactly the reported amount and sits ahead of
+    // the real movement costs an attacker one event, so an ambiguous trace must
+    // fail loudly rather than let the Receipt name the decoy. The decoy token
+    // is deliberately not one the vault ever touches.
+    const decoy = getAddress("0x9999999999999999999999999999999999999999");
+
+    const borrow = await registry.action("euler", "borrow", ACCOUNT, {
+      vault: USDC_VAULT,
+      amount: "100",
+      collateral: WMON_VAULT,
+    });
+    if (borrow.kind !== "capability") throw new Error("expected Capability");
+    const assets = parseUnits("100", 6);
+
+    const decoyPayout = [
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "CallWithContext",
+        {
+          caller: USDC_VAULT,
+          onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+          onBehalfOfAccount: ACCOUNT,
+          targetContract: USDC_VAULT,
+          selector: "0x4b3fd148",
+        },
+      ),
+      eventChange(EVaultAbi, USDC_VAULT, "Borrow", { account: ACCOUNT, assets }),
+      // Decoy payout: same amount, sits ahead of the real one.
+      eventChange(ERC20Abi, decoy, "Transfer", {
+        from: USDC_VAULT,
+        to: ACCOUNT,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
+        from: USDC_VAULT,
+        to: ACCOUNT,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, DEBT_TOKEN, "Transfer", {
+        from: zeroAddress,
+        to: ACCOUNT,
+        value: assets,
+      }),
+    ];
+    expect(() => registry.parseReceipt(borrow, decoyPayout)).toThrow(
+      "transfers out of the vault match the reported",
+    );
+
+    // Decoy debt mint: keep the payout unique, add a second mint from zero.
+    const decoyDebtMint = [
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "CallWithContext",
+        {
+          caller: USDC_VAULT,
+          onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+          onBehalfOfAccount: ACCOUNT,
+          targetContract: USDC_VAULT,
+          selector: "0x4b3fd148",
+        },
+      ),
+      eventChange(EVaultAbi, USDC_VAULT, "Borrow", { account: ACCOUNT, assets }),
+      // Decoy mint: same amount, sits ahead of the real one.
+      eventChange(ERC20Abi, decoy, "Transfer", {
+        from: zeroAddress,
+        to: ACCOUNT,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, DEBT_TOKEN, "Transfer", {
+        from: zeroAddress,
+        to: ACCOUNT,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
+        from: USDC_VAULT,
+        to: ACCOUNT,
+        value: assets,
+      }),
+    ];
+    expect(() => registry.parseReceipt(borrow, decoyDebtMint)).toThrow(
+      "debt-token mints match the reported",
+    );
+
+    const supply = await registry.action("euler", "supply", ACCOUNT, {
+      vault: USDC_VAULT,
+      amount: "100",
+    });
+    if (supply.kind !== "capability") throw new Error("expected Capability");
+
+    const decoyInflow = [
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "CallWithContext",
+        {
+          caller: USDC_VAULT,
+          onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+          onBehalfOfAccount: ACCOUNT,
+          targetContract: USDC_VAULT,
+          selector: "0x6e553f65",
+        },
+      ),
+      // Decoy inflow: same amount, sits ahead of the real one.
+      eventChange(ERC20Abi, decoy, "Transfer", {
+        from: ACCOUNT,
+        to: USDC_VAULT,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
+        from: ACCOUNT,
+        to: USDC_VAULT,
+        value: assets,
+      }),
+      eventChange(EVaultAbi, USDC_VAULT, "Transfer", {
+        from: zeroAddress,
+        to: ACCOUNT,
+        value: assets,
+      }),
+      eventChange(EVaultAbi, USDC_VAULT, "Deposit", {
+        sender: ACCOUNT,
+        owner: ACCOUNT,
+        assets,
+        shares: assets,
+      }),
+    ];
+    expect(() => registry.parseReceipt(supply, decoyInflow)).toThrow(
+      "transfers into the vault match the reported",
+    );
+
+    const repay = await registry.action("euler", "repay", ACCOUNT, {
+      vault: USDC_VAULT,
+      amount: "100",
+    });
+    if (repay.kind !== "capability") throw new Error("expected Capability");
+
+    const decoyDebtBurn = [
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "CallWithContext",
+        {
+          caller: USDC_VAULT,
+          onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+          onBehalfOfAccount: ACCOUNT,
+          targetContract: USDC_VAULT,
+          selector: "0x3384d308",
+        },
+      ),
+      // Decoy burn: same amount, sits ahead of the real one.
+      eventChange(ERC20Abi, decoy, "Transfer", {
+        from: ACCOUNT,
+        to: zeroAddress,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, DEBT_TOKEN, "Transfer", {
+        from: ACCOUNT,
+        to: zeroAddress,
+        value: assets,
+      }),
+      eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
+        from: ACCOUNT,
+        to: USDC_VAULT,
+        value: assets,
+      }),
+      eventChange(EVaultAbi, USDC_VAULT, "Repay", { account: ACCOUNT, assets }),
+    ];
+    expect(() => registry.parseReceipt(repay, decoyDebtBurn)).toThrow(
+      "debt-token burns match the reported",
     );
   });
 
