@@ -601,9 +601,20 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Uniswap mainnet", () => {
     // uniswap.permit2Approve to the router, then the Universal Router
     // swap, state-chained in one simulate run. The unfunded test account
     // proves both approval Receipts live with zero Warnings; the final
-    // swap then reverts only on the account's missing USDC balance
+    // swap then reverts inside Permit2's pull for want of USDC
     // (deterministic for any unfunded account), never on encoding.
     const runtime = await createRuntime();
+    // That revert only means what the assertion below says while the
+    // account holds no USDC, so pin the precondition instead of implying
+    // it. Dust sent to this address should name itself rather than read as
+    // an adapter regression.
+    const balance = await runtime.client.readContract({
+      address: USDC_ADDRESS,
+      abi: ERC20Abi,
+      functionName: "balanceOf",
+      args: [ACCOUNT],
+    });
+    expect(balance).toBe(0n);
     const registry = new Registry(runtime).use(Uniswap);
     const capability = await registry.action("uniswap", "swap", ACCOUNT, {
       tokenIn: USDC_ADDRESS,
@@ -634,7 +645,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Uniswap mainnet", () => {
       amount: "1000000",
     });
     expect(outcome.results[2]?.reverted).toBe(true);
-    expect(outcome.halted?.transactionIndex).toBe(2);
+    // Permit2 raises TRANSFER_FROM_FAILED when it pulls USDC the owner does
+    // not have, so the halt is the balance, not the encoding or an
+    // allowance the two approval legs were supposed to set.
+    expect(outcome.halted).toEqual({ transactionIndex: 2, reason: "TRANSFER_FROM_FAILED" });
   });
 });
 
