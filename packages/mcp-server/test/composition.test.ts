@@ -5,6 +5,36 @@ import { defaultProtocolModules } from "../src/composition.js";
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
 
 describe("default MCP Protocol composition", () => {
+  it("discovers and loads Merkl through the real default Registry composition", () => {
+    const registry = new Registry(runtime).use(...defaultProtocolModules);
+    const discovered = registry.discover({ protocol: "merkl" });
+
+    expect(discovered).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "merkl", method: "rewards", kind: "query" }),
+        expect.objectContaining({ protocol: "merkl", method: "claim", kind: "capability" }),
+      ]),
+    );
+    expect(discovered).toHaveLength(2);
+
+    const loaded = registry.load([
+      { protocol: "merkl", method: "rewards" },
+      { protocol: "merkl", method: "claim" },
+    ]);
+    expect(loaded).toHaveLength(2);
+    expect(loaded.find((item) => item.method === "rewards")).toMatchObject({
+      kind: "query",
+      protocol: "merkl",
+      params: { account: { description: expect.stringContaining("Public account") } },
+    });
+    expect(loaded.find((item) => item.method === "claim")).toMatchObject({
+      kind: "capability",
+      protocol: "merkl",
+      verb: "claim",
+      params: { tokens: { description: expect.stringContaining("merkl.rewards") } },
+    });
+  });
+
   it("includes the Nad.fun Protocol module", () => {
     const nadfunModule = defaultProtocolModules.find((module) => "NadFun" in module);
 
