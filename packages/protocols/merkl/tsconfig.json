@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src",
+    "scripts",
+    "test",
+    "test-online",
+    "vitest.config.ts",
+    "vitest.online.config.ts"
+  ]
+}

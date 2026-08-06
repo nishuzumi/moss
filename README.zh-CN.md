@@ -28,6 +28,7 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
 | Clober | `@themoss/protocol-clober` | `swap` | `quote` |
 | aPriori | `@themoss/protocol-apriori` | `stake`、`unstake`、`claim` | — |
+| Merkl | `@themoss/protocol-merkl` | `claim` | `rewards` |
 | Morpho | `@themoss/protocol-morpho` | `supply`、`withdraw` | `position`、`vaultInfo` |
 | Nad.fun | `@themoss/protocol-nadfun` | — | `quoteBuy`、`quoteSell`、`tokenStatus` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
