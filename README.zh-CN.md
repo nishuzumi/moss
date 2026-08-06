@@ -27,9 +27,9 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 | aPriori | `@themoss/protocol-apriori` | `stake`、`unstake`、`claim` | — |
 | Nad.fun | `@themoss/protocol-nadfun` | — | `quoteBuy`、`quoteSell`、`tokenStatus` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
-ERC-1155 `transfer` 接收 collection、token ID、amount 和 recipient。token ID 与 amount 使用十进制 uint256 字符串（允许零）。该 Capability 只构建一笔 `safeTransferFrom`，目前不暴露批量转账构建；Receipt 仍会解析 `TransferSingle` 和 `TransferBatch` Change，并保留批量条目的原始顺序，不做聚合。
 | Monad Cards | `@themoss/protocol-monad-cards` | — | `totalMinted` |
-| PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+
+ERC-1155 `transfer` 接收 collection、token ID、amount 和 recipient。token ID 与 amount 使用十进制 uint256 字符串（允许零）。该 Capability 只构建一笔 `safeTransferFrom`，目前不暴露批量转账构建；Receipt 仍会解析 `TransferSingle` 和 `TransferBatch` Change，并保留批量条目的原始顺序，不做聚合。
 
 ## 快速开始
 
