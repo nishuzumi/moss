@@ -2,7 +2,7 @@
 
 **English** | [中文](./README.zh-CN.md)
 
-Moss turns Monad protocol interactions into Agent-callable Capabilities through `discover → load → action → simulate`. It builds and verifies unsigned transactions; it never signs or sends them.
+Moss turns Monad protocol interactions into Agent-callable Capabilities through `discover → load → action → simulate`. It builds and verifies unsigned transactions,never send them.
 
 > [!WARNING]
 > Moss is unaudited alpha software. Do not use it with production funds.
