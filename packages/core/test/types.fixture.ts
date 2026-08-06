@@ -1,12 +1,24 @@
 import {
+  type AddressValue,
+  Capability,
+  type Change,
+  type InferParams,
   type MossRuntime,
+  type ParamsSpec,
+  PositionSide,
   Protocol,
+  Receipt,
+  type ReceiptResult,
   Registry,
   type RiskLabel,
   tokenMetadata,
 } from "../src/index.js";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111" as const;
+
+const positionParams = {
+  side: { type: PositionSide, description: "Direction of the position this Capability opens." },
+} satisfies ParamsSpec;
 
 @Protocol({
   name: "labeled-fixture",
@@ -26,6 +38,76 @@ class LabeledFixture {}
   labels: { Token: "not-an-address" },
 })
 class InvalidLabeledFixture {}
+
+@Protocol({
+  name: "perps-fixture",
+  category: "perps",
+  description: "Compile-time perps vocabulary fixture.",
+  contracts: {},
+})
+class PerpsFixture {
+  @Capability<PerpsFixture, typeof positionParams>({
+    intent: "Open a {side} position.",
+    verb: "open",
+    params: positionParams,
+    receipt: "positionReceipt",
+    risk: ["leverage", "liquidation"],
+  })
+  async open(_: InferParams<typeof positionParams>, __: { account: AddressValue }) {
+    return [];
+  }
+
+  @Receipt()
+  positionReceipt(_: readonly Change[]): ReceiptResult<{ operation: "position" }> {
+    return { kind: "receipt", outcome: { operation: "position" }, text: "", changes: [] };
+  }
+}
+
+@Protocol({
+  name: "invalid-category-fixture",
+  // @ts-expect-error Category is a closed set; "perpetuals" is not a member.
+  category: "perpetuals",
+  description: "Compile-time invalid category fixture.",
+  contracts: {},
+})
+class InvalidCategoryFixture {}
+
+@Protocol({
+  name: "invalid-perps-fixture",
+  category: "perps",
+  description: "Compile-time invalid perps vocabulary fixture.",
+  contracts: {},
+})
+class InvalidPerpsFixture {
+  @Capability<InvalidPerpsFixture, typeof positionParams>({
+    intent: "Open a {side} position.",
+    // @ts-expect-error Verb is a closed set; "short" is not a member.
+    verb: "short",
+    params: positionParams,
+    receipt: "positionReceipt",
+    risk: ["liquidation"],
+  })
+  async short(_: InferParams<typeof positionParams>, __: { account: AddressValue }) {
+    return [];
+  }
+
+  @Capability<InvalidPerpsFixture, typeof positionParams>({
+    intent: "Open a {side} position.",
+    verb: "open",
+    params: positionParams,
+    receipt: "positionReceipt",
+    // @ts-expect-error RiskLabel is a closed set; "funding" is not a member.
+    risk: ["funding"],
+  })
+  async open(_: InferParams<typeof positionParams>, __: { account: AddressValue }) {
+    return [];
+  }
+
+  @Receipt()
+  positionReceipt(_: readonly Change[]): ReceiptResult<{ operation: "position" }> {
+    return { kind: "receipt", outcome: { operation: "position" }, text: "", changes: [] };
+  }
+}
 
 const runtime = null as unknown as MossRuntime;
 new Registry(runtime, { trustedTokens: [{ address: ADDRESS, label: "Token" }] });
@@ -53,6 +135,9 @@ tokenMetadata("metadata", { address: ADDRESS });
 
 void LabeledFixture;
 void InvalidLabeledFixture;
+void PerpsFixture;
+void InvalidCategoryFixture;
+void InvalidPerpsFixture;
 void debtRisk;
 void invalidRisk;
 void metadataKind;

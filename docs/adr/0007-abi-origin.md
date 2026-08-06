@@ -6,6 +6,19 @@ ABIs are load-bearing security artifacts — one wrong function signature means 
 2. **explorer** — pulled from a block explorer's *verified* contract page; header records the URL and retrieval date. The root `pnpm fetch-abi` command uses the official Etherscan V2 endpoint for Monad mainnet (`chainid=143`, `action=getabi`) and emits the full ABI as typed `as const` TypeScript; see [Protocol onboarding](../protocol-onboarding.md#fetch-an-explorer-abi). The CLI is the one-shot bootstrap only: packages that ship explorer ABIs commit a source table (`scripts/abis.ts`: address, module file, export name) and a zero-argument `update:abis` script driving `@themoss/abi-tools`' `fetchAbi` + `renderAbiModule` from it, so regeneration never depends on remembered CLI invocations.
 3. **vendored** — taken from a third-party verifiable source (official SDK on npm, protocol repo). Hand-copying is NOT vendoring: the package commits upstream files **verbatim** in `abis-src/` and deterministically regenerates the full TS artifact, so reviewers diff against upstream instead of trusting a transcription. Follow `dist-tags.latest` with a 7-day release-age guard, never highest-semver; the header records package@version, tarball sha256, and on-chain verification.
 
+### Git-sourced vendored ABIs
+
+When the upstream source is a Git repository rather than an npm tarball, the same vendored tier applies with a Git-specific provenance record:
+
+- Record the full 40-character commit hash; short refs are not acceptable.
+- Commit the upstream file **verbatim** in `abis-src/` under its original path.
+- Pin the exact file path and the SHA-256 of the committed file.
+- Generate the TypeScript artifact deterministically from those committed inputs; `gen:abis` must be offline and produce byte-for-byte reproducible output.
+- Enforce byte-for-byte equality in the test suite so hand-edits to generated files or drift from the committed source fail closed.
+- When the block explorer reports no verified source for the deployed contract, use an **honest degraded verification**: record deployed bytecode, search for the required function selectors in that bytecode, and exercise the adapter's live behavior on Monad mainnet. Do not claim an explorer-verified cross-check or treat bytecode presence as source verification.
+
+The `abis-src/VENDOR.json` for a Git-sourced ABI records `sourceKind: "git"`, `repository`, `commit`, `file`, `fileSha256`, and `vendoredAt`. This is a provenance-shape variant within the vendored tier, not a fourth tier.
+
 If none of the three is possible, the protocol does not get an adapter.
 
 ## Mechanics worth recording

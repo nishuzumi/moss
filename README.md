@@ -25,6 +25,7 @@ Moss currently targets Monad mainnet, chain ID `143`.
 | ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
 | aPriori | `@themoss/protocol-apriori` | `stake`, `unstake`, `claim` | — |
+| Nad.fun | `@themoss/protocol-nadfun` | — | `quoteBuy`, `quoteSell`, `tokenStatus` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
 | **Neverland** (Aave V3-based lending) | `@themoss/protocol-neverland` | `supply`, `supplyNative`, `withdraw`, `withdrawNative`, `borrow`, `repay` | `reserves`, `reserveData`, `accountData`, `accountReserve` |
 
