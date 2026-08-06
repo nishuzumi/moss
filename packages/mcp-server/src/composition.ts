@@ -1,6 +1,7 @@
 import * as erc from "@themoss/erc";
 import * as apriori from "@themoss/protocol-apriori";
 import * as kuru from "@themoss/protocol-kuru";
+import * as merkl from "@themoss/protocol-merkl";
 import * as monadCards from "@themoss/protocol-monad-cards";
 import * as nadfun from "@themoss/protocol-nadfun";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
@@ -12,6 +13,7 @@ export const defaultProtocolModules = [
   erc,
   apriori,
   kuru,
+  merkl,
   monadCards,
   nadfun,
   pancakeswap,

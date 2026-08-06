@@ -27,6 +27,7 @@
     "@themoss/erc": "workspace:*",
     "@themoss/protocol-apriori": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/protocol-merkl": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-nadfun": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
