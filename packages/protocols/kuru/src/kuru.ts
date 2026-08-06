@@ -456,7 +456,7 @@ export class Kuru {
     // ponytail: monotonic reverse quote; replace with an order-book estimator if RPC volume matters.
     let high = scaleUnits(target, outputDecimals, inputDecimals);
     if (high < 1n) high = 1n;
-    if (high > UINT256_MAX) throw new TargetOutputUnsatisfiableError();
+    if (high > UINT256_MAX) high = UINT256_MAX;
     let highQuote = await this.#quoteRoute(route, high);
     while (highQuote < target) {
       if (high === UINT256_MAX) throw new TargetOutputUnsatisfiableError();

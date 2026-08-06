@@ -16,6 +16,7 @@ import {
   encodeAbiParameters,
   encodeEventTopics,
   encodeFunctionResult,
+  formatUnits,
   getAddress,
 } from "viem";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -501,6 +502,52 @@ describe("Kuru", () => {
     expect(error.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
     expect(quotedInputs.at(-1)).toBe(UINT256_MAX);
     expect(quotedInputs.filter((amount) => amount === UINT256_MAX)).toHaveLength(1);
+    expect(quotedInputs.every((amount) => amount <= UINT256_MAX)).toBe(true);
+  });
+
+  it("evaluates a capped oversized initial estimate before finding a favorable route input", async () => {
+    const quotedInputs: bigint[] = [];
+    const inputDenominator = UINT256_MAX / 4n;
+    expect(2n * 10n ** 80n).toBeGreaterThan(UINT256_MAX);
+    const { registry } = offlineRegistry([
+      reverseMarket(
+        DIRECT_ROUTE_A,
+        {
+          inputNumerator: 1n,
+          inputDenominator,
+          quotedInputs,
+        },
+        { baseDecimals: 80, sizePrecision: 10n ** 30n },
+      ),
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "2",
+    });
+    if (quote.kind !== "query") throw new Error("expected target-output query");
+
+    expect(quotedInputs[0]).toBe(UINT256_MAX);
+    expect(quotedInputs.every((amount) => amount <= UINT256_MAX)).toBe(true);
+    const expectedAmountIn = 2n * inputDenominator;
+    expect(expectedAmountIn).toBeLessThanOrEqual(UINT256_MAX);
+    expect(quote.data).toMatchObject({
+      amountSide: "amountOut",
+      estimatedAmountIn: formatUnits(expectedAmountIn, 80),
+      path: [NATIVE, USDC_ADDRESS],
+    });
+
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "2",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const swap = flattenCapabilityTree(capability).at(-1);
+    if (!swap) throw new Error("missing Kuru transaction");
+    const decoded = decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data });
+    expect(decoded.args[0]).toEqual([DIRECT_ROUTE_A]);
+    expect(decoded.args[5]).toBeLessThanOrEqual(UINT256_MAX);
     expect(quotedInputs.every((amount) => amount <= UINT256_MAX)).toBe(true);
   });
 
@@ -1097,10 +1144,14 @@ function directMarket(
   };
 }
 
-function reverseMarket(address: `0x${string}`, sellBehavior: MockQuoteBehavior): MockMarket {
+function reverseMarket(
+  address: `0x${string}`,
+  sellBehavior: MockQuoteBehavior,
+  options: { baseDecimals?: number; sizePrecision?: bigint } = {},
+): MockMarket {
   return {
-    ...market(address, ZERO, USDC_ADDRESS, 50, 0, 1n, 1n),
-    sizePrecision: 1n,
+    ...market(address, ZERO, USDC_ADDRESS, options.baseDecimals ?? 50, 0, 1n, 1n),
+    sizePrecision: options.sizePrecision ?? 1n,
     sellBehavior,
   };
 }
