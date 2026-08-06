@@ -137,6 +137,32 @@ describe("moss MCP server", () => {
     });
   });
 
+  it("discovers and loads Neverland lending Capabilities from the default composition", async () => {
+    const client = await connectedClient();
+    const discovered = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "supply" } }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(discovered).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "neverland", method: "supply", kind: "capability" }),
+        expect.objectContaining({
+          protocol: "neverland",
+          method: "supplyNative",
+          kind: "capability",
+        }),
+      ]),
+    );
+    const loaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "neverland", method: "borrow" }] },
+      }),
+    ) as { params: Record<string, unknown> }[];
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]?.params).toHaveProperty("asset");
+    expect(loaded[0]?.params).toHaveProperty("amount");
+  });
+
   it("round-trips a Capability tree through action JSON", async () => {
     const capability = parseText(
       await (await connectedClient()).callTool({
