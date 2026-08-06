@@ -95,4 +95,14 @@ describe("root README Protocol tables", () => {
     expect(chinesePackages).toEqual(englishPackages);
     expect(new Set(englishPackages).size).toBe(defaultProtocolModules.length);
   });
+
+  it("uses Chinese separators in Capability and Query cells", () => {
+    const chinese = readmes.find(({ label }) => label === "Chinese");
+    if (!chinese) throw new Error("Chinese README fixture is missing");
+
+    for (const [, , capabilities, queries] of protocolRows(chinese)) {
+      expect(capabilities).not.toContain(",");
+      expect(queries).not.toContain(",");
+    }
+  });
 });
