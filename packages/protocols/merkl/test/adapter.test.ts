@@ -17,7 +17,7 @@ import {
 } from "viem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { distributorAbi } from "../src/abis/distributor.js";
-import { parseMerklRewardsResponse } from "../src/api.js";
+import { fetchMerklRewardCandidates, parseMerklRewardsResponse } from "../src/api.js";
 import {
   MAX_MERKL_CLAIM_TOKENS,
   MERKL_DISTRIBUTOR_ADDRESS,
@@ -36,8 +36,12 @@ const LEAF_A = merklLeaf(ACCOUNT, TOKEN_A, AMOUNT_A);
 const LEAF_B = merklLeaf(ACCOUNT, TOKEN_B, AMOUNT_B);
 const ROOT = hashPair(LEAF_A, LEAF_B);
 const WRONG_ROOT = `0x${"99".repeat(32)}` as Hex;
+const UINT208_MAX = 2n ** 208n - 1n;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 function hashPair(a: Hex, b: Hex): Hex {
   return BigInt(a) < BigInt(b) ? keccak256(concatHex([a, b])) : keccak256(concatHex([b, a]));
@@ -76,6 +80,14 @@ function reward(
 
 function payload(rewards = [reward(TOKEN_A, AMOUNT_A.toString(), [LEAF_B])]) {
   return [{ chain: { id: 143, name: "Monad" }, rewards }];
+}
+
+function rewardAtRoot(token: string, amount: string, proof: readonly Hex[], root: Hex) {
+  const candidate = reward(token, amount, proof, { root });
+  return {
+    ...candidate,
+    breakdowns: candidate.breakdowns.map((breakdown) => ({ ...breakdown, root })),
+  };
 }
 
 interface OfflineOptions {
@@ -166,10 +178,10 @@ describe("Merkl API validation", () => {
     ).toThrow(/does not match/);
   });
 
-  it("rejects duplicate tokens and empty proofs for positive rewards", () => {
-    expect(() => parseMerklRewardsResponse(payload([reward(TOKEN_A, "100", [])]), ACCOUNT)).toThrow(
-      /must not be empty/,
-    );
+  it("accepts empty proofs as candidates and rejects duplicate tokens", () => {
+    expect(
+      parseMerklRewardsResponse(payload([reward(TOKEN_A, "100", [])]), ACCOUNT)[0]?.proofs,
+    ).toEqual([]);
     expect(() =>
       parseMerklRewardsResponse(
         payload([reward(TOKEN_A, "100", [LEAF_B]), reward(TOKEN_A.toLowerCase(), "100", [LEAF_B])]),
@@ -191,6 +203,66 @@ describe("Merkl API validation", () => {
         ACCOUNT,
       ),
     ).toThrow(/does not match its reward root/);
+  });
+
+  it("bounds proof length before parsing proof nodes", () => {
+    expect(() =>
+      parseMerklRewardsResponse(
+        payload([
+          reward(
+            TOKEN_A,
+            "100",
+            Array.from({ length: 257 }, () => LEAF_B),
+          ),
+        ]),
+        ACCOUNT,
+      ),
+    ).toThrow(/proofs count exceeds 256/);
+  });
+
+  it("accepts the uint208 cumulative maximum and rejects the next value", () => {
+    expect(
+      parseMerklRewardsResponse(
+        payload([reward(TOKEN_A, UINT208_MAX.toString(), [LEAF_B])]),
+        ACCOUNT,
+      )[0]?.cumulativeAmount,
+    ).toBe(UINT208_MAX);
+    expect(() =>
+      parseMerklRewardsResponse(
+        payload([reward(TOKEN_A, (UINT208_MAX + 1n).toString(), [LEAF_B])]),
+        ACCOUNT,
+      ),
+    ).toThrow(/uint208 cumulative amount limit/);
+  });
+});
+
+describe("Merkl API request lifecycle", () => {
+  it("times out while a response body stalls after headers", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+        const signal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal?.addEventListener(
+              "abort",
+              () => controller.error(new DOMException("aborted", "AbortError")),
+              { once: true },
+            );
+          },
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }),
+    );
+
+    const result = fetchMerklRewardCandidates(ACCOUNT, { reload: false }).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(result).resolves.toMatchObject({
+      message: "Merkl rewards request timed out after 10000ms",
+    });
   });
 });
 
@@ -245,6 +317,63 @@ describe("merkl.rewards", () => {
         ],
       },
     });
+  });
+
+  it("rejects a non-empty API proof that does not verify against the active root", async () => {
+    const { registry } = offline({
+      apiPayload: payload([reward(TOKEN_A, AMOUNT_A.toString(), [WRONG_ROOT])]),
+    });
+    const result = await registry.action("merkl", "rewards", ACCOUNT, { account: ACCOUNT });
+    expect(result).toMatchObject({
+      kind: "query",
+      data: {
+        rewards: [
+          {
+            claimableAmount: AMOUNT_A.toString(),
+            proofLength: 1,
+            claimableNow: false,
+            unavailableReason: "API proof does not match the active Merkle root.",
+          },
+        ],
+      },
+    });
+  });
+
+  it("accepts an empty proof when the leaf is the active single-leaf root", async () => {
+    const apiPayload = payload([rewardAtRoot(TOKEN_A, AMOUNT_A.toString(), [], LEAF_A)]);
+    const { registry } = offline({ apiPayload, root: LEAF_A });
+    const result = await registry.action("merkl", "rewards", ACCOUNT, { account: ACCOUNT });
+    expect(result).toMatchObject({
+      kind: "query",
+      data: { rewards: [{ proofLength: 0, claimableNow: true }] },
+    });
+
+    const { capability } = await claimCapability({ apiPayload, root: LEAF_A });
+    const [transaction] = flattenCapabilityTree(capability);
+    const decoded = decodeFunctionData({
+      abi: distributorAbi,
+      data: transaction?.transaction.data as Hex,
+    });
+    expect(decoded.args?.[3]).toEqual([[]]);
+  });
+
+  it("rejects an empty proof when the leaf differs from the active root", async () => {
+    const apiPayload = payload([reward(TOKEN_A, AMOUNT_A.toString(), [])]);
+    const { registry } = offline({ apiPayload });
+    const result = await registry.action("merkl", "rewards", ACCOUNT, { account: ACCOUNT });
+    expect(result).toMatchObject({
+      kind: "query",
+      data: {
+        rewards: [
+          {
+            proofLength: 0,
+            claimableNow: false,
+            unavailableReason: "API proof does not match the active Merkle root.",
+          },
+        ],
+      },
+    });
+    await expect(claimCapability({ apiPayload })).rejects.toThrow(/proof does not match/);
   });
 });
 
@@ -345,6 +474,7 @@ describe("merkl.claim construction", () => {
       { proof: [LEAF_B] },
       { recipient: OTHER },
       { distributor: OTHER },
+      { calldata: "0x" },
     ]) {
       await expect(
         registry.action("merkl", "claim", ACCOUNT, { tokens: [TOKEN_A], ...extra }),
