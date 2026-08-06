@@ -7,7 +7,7 @@ Moss Protocol adapter for discovering and safely self-claiming [Merkl](https://m
 - Query `merkl.rewards({ account })` inspects any public account.
 - Capability `merkl.claim({ tokens })` claims 1–16 unique reward tokens, preserving the requested order.
 
-`rewards` reports each token's API cumulative earned amount, API-reported claimed amount, authoritative current on-chain claimed amount, incremental amount claimable now, pending amount, proof availability, effective on-chain recipient, and availability reason. Campaign breakdowns are included as API-derived metadata only; their names and amounts are not on-chain verified.
+`rewards` reports each token's API cumulative earned amount, API-reported claimed amount, authoritative current on-chain claimed amount, incremental amount claimable now, pending amount, proof availability, effective on-chain recipient, and availability reason. It verifies each proof against the active on-chain root before setting `claimableNow`. Campaign breakdowns are included as API-derived metadata only; their names and amounts are not on-chain verified.
 
 `claim` is strictly self-claim-only. The user is always `ActionCtx.account`. The Agent cannot provide a user, Distributor, recipient, amount, proof, or arbitrary calldata. The Capability owns exactly one direct `Distributor.claim` transaction and needs no approvals.
 
@@ -29,7 +29,7 @@ GET https://api.merkl.xyz/v4/users/{account}/rewards?chainId=143
 GET https://api.merkl.xyz/v4/users/{account}/rewards?chainId=143&reloadChainId=143
 ```
 
-The Query uses the normal endpoint. Claim construction uses Merkl's fresh-reload mechanism and rejects network errors, schema drift, wrong chains, malformed addresses/uints/proofs, duplicates, and inconsistent records. There is no stale hard-coded fallback.
+The Query uses the normal endpoint. Claim construction uses Merkl's fresh-reload mechanism and rejects network errors, schema drift, wrong chains, malformed addresses/uints/proofs, duplicates, and inconsistent records. Requests have a 10-second end-to-end timeout and bounded response, reward, breakdown, and proof sizes. Cumulative claim amounts are limited to the Distributor's `uint208` storage range. There is no stale hard-coded fallback.
 
 Merkl API `amount` is cumulative earned value and is the amount passed to the Distributor. The incremental value payable now is:
 
@@ -37,7 +37,7 @@ Merkl API `amount` is cumulative earned value and is the amount passed to the Di
 claimable = API cumulative amount - Distributor.claimed(account, token)
 ```
 
-The on-chain claimed value takes precedence over the API's claimed field. `pending` is reported separately and is never added to transaction amounts. Before constructing calldata, the adapter reads the active root and claimed values, locally verifies every proof using `keccak256(abi.encode(user, token, cumulativeAmount))` with sorted proof pairs, and requires a strictly positive incremental amount.
+The on-chain claimed value takes precedence over the API's claimed field. `pending` is reported separately and is never added to transaction amounts. Both Query and claim construction locally verify proofs using `keccak256(abi.encode(user, token, cumulativeAmount))` with sorted proof pairs; an empty proof is valid for a single-leaf tree when the leaf itself equals the active root. Claim construction also requires a strictly positive incremental amount.
 
 For each token the effective recipient is resolved exactly as the deployed Distributor does: token-specific mapping, then account-wide mapping at token zero, then the account itself. Claim construction rejects any redirect away from `ActionCtx.account`, including a default redirect. A mapping explicitly set to the same account is accepted.
 
@@ -59,7 +59,7 @@ It deliberately does not reconstruct cumulative amounts, proofs, campaigns, or t
 
 ## Risk metadata and exclusions
 
-Claims are inflow-only. Moss Registry currently rejects an empty risk list and Core has no accepted inflow label, so `merkl.claim` temporarily carries `risk: ["fundOut"]`, following the existing aPriori claim precedent. This is a compatibility placeholder, not a semantic description, and should be replaced when the framework accepts `fundIn` or an equivalent label.
+The claim is inflow-only. `fundOut` is a temporary Registry-compatible placeholder. The maintainer-approved representation is tracked in [#164](https://github.com/nishuzumi/moss/issues/164) and should replace this label once Core resolves that issue.
 
 This v1 package does not expose claiming for another user, operator or main-operator controls, `toggleOperator`, `toggleMainOperatorStatus`, recipient configuration, `setClaimRecipient`, `claimWithRecipient`, callback data or contract callbacks, swaps, vault deposits, campaign management, disputes, tree updates, governance/admin methods, cross-chain claiming, or arbitrary Distributor addresses.
 

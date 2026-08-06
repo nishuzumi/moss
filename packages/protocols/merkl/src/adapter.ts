@@ -118,9 +118,9 @@ export class MerklProtocol {
     verb: "claim",
     params: claimParams,
     receipt: "claimReceipt",
-    // The claim is inflow-only. Registry currently rejects an empty risk list
-    // and core has no accepted fundIn label; follow the aPriori claim precedent
-    // until the framework gains a semantically correct inflow label.
+    // The claim is inflow-only. fundOut is a temporary Registry-compatible
+    // placeholder; the maintainer-approved representation is tracked in #164:
+    // https://github.com/nishuzumi/moss/issues/164
     risk: ["fundOut"],
     tags: ["rewards", "merkle", "batch-claim", "incentives"],
   })
@@ -316,8 +316,17 @@ function queryReward(
   else if (candidate.cumulativeAmount < state.onchainClaimedAmount) {
     unavailableReason = "API cumulative amount is behind the on-chain claimed amount.";
   } else if (claimable === 0n) unavailableReason = "No newly claimable reward is available.";
-  else if (candidate.proofs.length === 0) unavailableReason = "API did not provide a Merkle proof.";
-  else if (!sameAddress(state.effectiveRecipient, account)) {
+  else if (
+    !verifyMerklProof(
+      account,
+      candidate.token,
+      candidate.cumulativeAmount,
+      candidate.proofs,
+      merkleRoot,
+    )
+  ) {
+    unavailableReason = "API proof does not match the active Merkle root.";
+  } else if (!sameAddress(state.effectiveRecipient, account)) {
     unavailableReason = `On-chain recipient mapping redirects this token to ${state.effectiveRecipient}.`;
   }
 

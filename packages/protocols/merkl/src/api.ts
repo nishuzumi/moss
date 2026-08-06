@@ -9,6 +9,8 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 4_000_000;
 const MAX_REWARD_RECORDS = 128;
 const MAX_BREAKDOWNS_PER_REWARD = 512;
+const MAX_PROOF_LENGTH = 256;
+const UINT208_MAX = 2n ** 208n - 1n;
 const UINT256_MAX = 2n ** 256n - 1n;
 
 export async function fetchMerklRewardCandidates(
@@ -21,33 +23,44 @@ export async function fetchMerklRewardCandidates(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  let response: Response;
   try {
-    response = await fetch(url, { signal: controller.signal });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Merkl rewards request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) throw requestTimeoutError();
+      throw new Error(`Merkl rewards request failed: ${errorMessage(error)}`);
     }
-    throw new Error(`Merkl rewards request failed: ${errorMessage(error)}`);
+
+    if (!response.ok) {
+      throw new Error(
+        `Merkl rewards request failed with HTTP ${response.status}; retry after checking api.merkl.xyz status`,
+      );
+    }
+
+    let body: string;
+    try {
+      body = await readBoundedResponse(response);
+    } catch (error) {
+      if (controller.signal.aborted) throw requestTimeoutError();
+      if (error instanceof Error && error.message.startsWith("Merkl rewards response exceeds")) {
+        throw error;
+      }
+      throw new Error(`Merkl rewards response body could not be read: ${errorMessage(error)}`);
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch (error) {
+      throw new Error(`Merkl rewards response is not valid JSON: ${errorMessage(error)}`);
+    }
+
+    return parseMerklRewardsResponse(payload, account);
   } finally {
+    // Covers fetch, status handling, the complete streamed body, and JSON parsing.
     clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    throw new Error(
-      `Merkl rewards request failed with HTTP ${response.status}; retry after checking api.merkl.xyz status`,
-    );
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(await readBoundedResponse(response));
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Merkl rewards response")) throw error;
-    throw new Error(`Merkl rewards response is not valid JSON: ${errorMessage(error)}`);
-  }
-
-  return parseMerklRewardsResponse(payload, account);
 }
 
 export function parseMerklRewardsResponse(
@@ -96,7 +109,7 @@ function parseReward(value: unknown, account: AddressValue, index: number): Merk
   const token = record(reward.token, `${path}.token`);
   parseChainId(token.chainId, `${path}.token.chainId`);
   const tokenAddress = parseAddress(token.address, `${path}.token.address`);
-  const cumulativeAmount = parseUnsignedInteger(reward.amount, `${path}.amount`);
+  const cumulativeAmount = parseCumulativeAmount(reward.amount, `${path}.amount`);
   const apiClaimedAmount = parseUnsignedInteger(reward.claimed, `${path}.claimed`);
   const pendingAmount = parseUnsignedInteger(reward.pending, `${path}.pending`);
   if (apiClaimedAmount > cumulativeAmount) {
@@ -105,12 +118,12 @@ function parseReward(value: unknown, account: AddressValue, index: number): Merk
 
   const root = parseBytes32(reward.root, `${path}.root`);
   if (!Array.isArray(reward.proofs)) throw schemaError(`${path}.proofs must be an array`);
+  if (reward.proofs.length > MAX_PROOF_LENGTH) {
+    throw schemaError(`${path}.proofs count exceeds ${MAX_PROOF_LENGTH}`);
+  }
   const proofs = reward.proofs.map((proof, proofIndex) =>
     parseBytes32(proof, `${path}.proofs[${proofIndex}]`),
   );
-  if (cumulativeAmount > 0n && proofs.length === 0) {
-    throw schemaError(`${path}.proofs must not be empty for a positive cumulative amount`);
-  }
 
   return {
     root,
@@ -150,6 +163,8 @@ function parseBreakdowns(
     ) {
       throw schemaError(`${path}.opportunityId must be an unsigned integer string`);
     }
+    // Breakdown values are API metadata and never enter Distributor.claim;
+    // keep their honest uint256 range distinct from reward.amount's uint208 bound.
     const amount = parseUnsignedInteger(breakdown.amount, `${path}.amount`);
     const claimed = parseUnsignedInteger(breakdown.claimed, `${path}.claimed`);
     const pending = parseUnsignedInteger(breakdown.pending, `${path}.pending`);
@@ -229,6 +244,14 @@ function parseUnsignedInteger(value: unknown, path: string): bigint {
   return parsed;
 }
 
+function parseCumulativeAmount(value: unknown, path: string): bigint {
+  const parsed = parseUnsignedInteger(value, path);
+  if (parsed > UINT208_MAX) {
+    throw schemaError(`${path} exceeds the Distributor uint208 cumulative amount limit`);
+  }
+  return parsed;
+}
+
 function record(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw schemaError(`${path} must be an object`);
@@ -246,4 +269,8 @@ function schemaError(detail: string): Error {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requestTimeoutError(): Error {
+  return new Error(`Merkl rewards request timed out after ${REQUEST_TIMEOUT_MS}ms`);
 }
