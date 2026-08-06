@@ -25,6 +25,7 @@ import {
 import { ERC20 } from "@themoss/erc";
 import { decodeEventLog, formatUnits, getAddress, isAddress, parseUnits } from "viem";
 import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
+import { KuruQuoteError, type KuruRouteQuoteFailure } from "./errors.js";
 import type {
   KuruQuote,
   KuruSwapOutcome,
@@ -46,6 +47,7 @@ const KURU_MARKET_DISCOVERY_TIMEOUT_MS = 10_000;
 const MAX_KURU_MARKET_DISCOVERY_BYTES = 1_000_000;
 const MAX_KURU_MARKET_CANDIDATES = 256;
 const MAX_KURU_MARKET_ROUTES = 256;
+const UINT256_MAX = 2n ** 256n - 1n;
 
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
@@ -261,7 +263,12 @@ export class Kuru {
     const [firstRoute] = routes;
     const firstLeg = firstRoute?.[0];
     const lastLeg = firstRoute?.at(-1);
-    if (!firstLeg || !lastLeg) throw new Error("no verified Kuru market path for this token pair");
+    if (!firstLeg || !lastLeg) {
+      throw new KuruQuoteError(
+        "NO_VERIFIED_ROUTE",
+        "no verified Kuru market path for this token pair",
+      );
+    }
     const inputDecimals = firstLeg.inputDecimals;
     const outputDecimals = lastLeg.outputDecimals;
     const slippage = BigInt(params.slippage ?? DEFAULT_SLIPPAGE_BPS);
@@ -379,11 +386,27 @@ export class Kuru {
     const settled = await Promise.allSettled(
       routes.map(async (route) => ({ route, amountOut: await this.#quoteRoute(route, amountIn) })),
     );
-    const quoted = settled.flatMap((result) =>
-      result.status === "fulfilled" && result.value.amountOut > 0n ? [result.value] : [],
-    );
+    const failures: KuruRouteQuoteFailure[] = [];
+    const causes: unknown[] = [];
+    const quoted = [];
+    for (const [index, result] of settled.entries()) {
+      if (result.status === "fulfilled") {
+        if (result.value.amountOut > 0n) quoted.push(result.value);
+        continue;
+      }
+      const route = routes[index];
+      if (!route) throw new Error("Kuru route quote result did not match its route");
+      failures.push(routeQuoteFailure(route, result.reason));
+      causes.push(result.reason);
+    }
+    if (failures.length > 0) throw routeQuoteUnavailable(failures, causes);
     const [first] = quoted;
-    if (!first) throw new Error("no Kuru market path can quote this input amount");
+    if (!first) {
+      throw new KuruQuoteError(
+        "NO_POSITIVE_QUOTE",
+        "every verified Kuru market path returned zero output for this input amount",
+      );
+    }
     return quoted.reduce((best, current) => (current.amountOut > best.amountOut ? current : best));
   }
 
@@ -399,11 +422,28 @@ export class Kuru {
         amountIn: await this.#requiredInput(route, amountOut, inputDecimals, outputDecimals),
       })),
     );
-    const quoted = settled.flatMap((result) =>
-      result.status === "fulfilled" ? [result.value] : [],
-    );
+    const failures: KuruRouteQuoteFailure[] = [];
+    const causes: unknown[] = [];
+    const quoted = [];
+    for (const [index, result] of settled.entries()) {
+      if (result.status === "fulfilled") {
+        quoted.push(result.value);
+        continue;
+      }
+      if (result.reason instanceof TargetOutputUnsatisfiableError) continue;
+      const route = routes[index];
+      if (!route) throw new Error("Kuru route quote result did not match its route");
+      failures.push(routeQuoteFailure(route, result.reason));
+      causes.push(result.reason);
+    }
+    if (failures.length > 0) throw routeQuoteUnavailable(failures, causes);
     const [first] = quoted;
-    if (!first) throw new Error("no Kuru market path can satisfy this output amount");
+    if (!first) {
+      throw new KuruQuoteError(
+        "TARGET_OUTPUT_UNSATISFIABLE",
+        "no verified Kuru market path can satisfy this output amount within the uint256 input range",
+      );
+    }
     return quoted.reduce((best, current) => (current.amountIn < best.amountIn ? current : best));
   }
 
@@ -416,9 +456,12 @@ export class Kuru {
     // ponytail: monotonic reverse quote; replace with an order-book estimator if RPC volume matters.
     let high = scaleUnits(target, outputDecimals, inputDecimals);
     if (high < 1n) high = 1n;
-    for (let attempts = 0; (await this.#quoteRoute(route, high)) < target; attempts += 1) {
-      if (attempts >= 255) throw new Error("Kuru target output exceeds uint256 input range");
-      high *= 2n;
+    if (high > UINT256_MAX) throw new TargetOutputUnsatisfiableError();
+    let highQuote = await this.#quoteRoute(route, high);
+    while (highQuote < target) {
+      if (high === UINT256_MAX) throw new TargetOutputUnsatisfiableError();
+      high = high <= UINT256_MAX / 2n ? high * 2n : UINT256_MAX;
+      highQuote = await this.#quoteRoute(route, high);
     }
     let low = 0n;
     while (low + 1n < high) {
@@ -458,6 +501,36 @@ export class Kuru {
         : { from: KURU_NATIVE },
     );
   }
+}
+
+class TargetOutputUnsatisfiableError extends Error {
+  constructor() {
+    super("Kuru target output exceeds the uint256 input range");
+    this.name = "TargetOutputUnsatisfiableError";
+  }
+}
+
+function routeQuoteFailure(route: Route, reason: unknown): KuruRouteQuoteFailure {
+  return {
+    path: routeTokens(route),
+    markets: route.map(({ market }) => market.address),
+    message: errorMessage(reason),
+  };
+}
+
+function routeQuoteUnavailable(
+  failures: readonly KuruRouteQuoteFailure[],
+  causes: readonly unknown[],
+): KuruQuoteError {
+  const cause =
+    causes.length === 1
+      ? causes[0]
+      : new AggregateError(causes, "multiple verified Kuru route quote evaluations failed");
+  return new KuruQuoteError(
+    "ROUTE_QUOTE_UNAVAILABLE",
+    `${failures.length} verified Kuru route quote evaluation${failures.length === 1 ? "" : "s"} failed; best-route comparison is incomplete`,
+    { failures, cause },
+  );
 }
 
 async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {

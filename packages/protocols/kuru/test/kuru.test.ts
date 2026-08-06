@@ -20,7 +20,7 @@ import {
 } from "viem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KuruOrderbookAbi, KuruRouterAbi } from "../src/abis/kuru.js";
-import { KURU_ROUTER_ADDRESS, Kuru } from "../src/index.js";
+import { KURU_ROUTER_ADDRESS, Kuru, KuruQuoteError } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const ZERO = getAddress("0x0000000000000000000000000000000000000000");
@@ -29,6 +29,18 @@ const MON_USDC_WORSE = getAddress("0x2222222222222222222222222222222222222222");
 const MON_AUSD = getAddress("0x3333333333333333333333333333333333333333");
 const DIRECT_USDC_AUSD = getAddress("0x4444444444444444444444444444444444444444");
 const DIRECT_USDC_AUSD_BETTER = getAddress("0x5555555555555555555555555555555555555555");
+const DIRECT_ROUTE_A = getAddress("0x6666666666666666666666666666666666666666");
+const DIRECT_ROUTE_B = getAddress("0x7777777777777777777777777777777777777777");
+const UINT256_MAX = 2n ** 256n - 1n;
+
+type MockQuoteBehavior = {
+  rejectionMessage?: string;
+  rejectAtOrAbove?: bigint;
+  maximumOutput?: bigint;
+  inputNumerator?: bigint;
+  inputDenominator?: bigint;
+  quotedInputs?: bigint[];
+};
 
 type MockMarket = {
   address: `0x${string}`;
@@ -40,6 +52,10 @@ type MockMarket = {
   buyDenominator: bigint;
   sellNumerator: bigint;
   sellDenominator: bigint;
+  pricePrecision?: bigint;
+  sizePrecision?: bigint;
+  buyBehavior?: MockQuoteBehavior;
+  sellBehavior?: MockQuoteBehavior;
   verified?: boolean;
 };
 
@@ -200,6 +216,315 @@ describe("Kuru", () => {
     if (!swap) throw new Error("missing Kuru transaction");
     const decoded = decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data });
     expect(decoded.args.slice(0, 3)).toEqual([[DIRECT_USDC_AUSD], [false], [false]]);
+  });
+
+  it("reports when discovery completes without a verified route", async () => {
+    const { registry } = offlineRegistry([]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      name: "KuruQuoteError",
+      code: "NO_VERIFIED_ROUTE",
+      failures: [],
+    });
+  });
+
+  it("distinguishes all-zero exact-input quotes from unavailable routes", async () => {
+    const markets = [
+      directMarket(DIRECT_ROUTE_A, { maximumOutput: 0n }),
+      directMarket(DIRECT_ROUTE_B, { maximumOutput: 0n }),
+    ];
+    const { registry } = offlineRegistry(markets);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      }),
+    );
+
+    expect(error).toMatchObject({ code: "NO_POSITIVE_QUOTE", failures: [] });
+  });
+
+  it("retains every exact-input route rejection in stable route order", async () => {
+    const markets = [
+      directMarket(DIRECT_ROUTE_A, { rejectionMessage: "route A RPC failed" }),
+      directMarket(DIRECT_ROUTE_B, { rejectionMessage: "route B decode failed" }),
+    ];
+    const { registry } = offlineRegistry(markets);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      }),
+    );
+
+    expect(error.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(error.failures).toEqual([
+      {
+        path: [USDC_ADDRESS, AUSD_ADDRESS],
+        markets: [DIRECT_ROUTE_A],
+        message: "route A RPC failed",
+      },
+      {
+        path: [USDC_ADDRESS, AUSD_ADDRESS],
+        markets: [DIRECT_ROUTE_B],
+        message: "route B decode failed",
+      },
+    ]);
+    expect(error.cause).toBeInstanceOf(AggregateError);
+    expect((error.cause as AggregateError).errors).toMatchObject([
+      { message: "route A RPC failed" },
+      { message: "route B decode failed" },
+    ]);
+  });
+
+  it("fails closed for mixed zero and rejected exact-input routes", async () => {
+    const { registry } = offlineRegistry([
+      directMarket(DIRECT_ROUTE_A, { maximumOutput: 0n }),
+      directMarket(DIRECT_ROUTE_B, { rejectionMessage: "route B unavailable" }),
+    ]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "ROUTE_QUOTE_UNAVAILABLE",
+      failures: [{ markets: [DIRECT_ROUTE_B], message: "route B unavailable" }],
+    });
+  });
+
+  it("refuses both quote and swap when a positive exact-input route has an unavailable peer", async () => {
+    const { registry } = offlineRegistry([
+      directMarket(DIRECT_ROUTE_A),
+      directMarket(DIRECT_ROUTE_B, { rejectionMessage: "comparison peer rejected" }),
+    ]);
+    const params = {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    } as const;
+
+    for (const method of ["quote", "swap"] as const) {
+      const error = await kuruQuoteError(registry.action("kuru", method, ACCOUNT, params));
+      expect(error).toMatchObject({
+        code: "ROUTE_QUOTE_UNAVAILABLE",
+        failures: [{ markets: [DIRECT_ROUTE_B], message: "comparison peer rejected" }],
+      });
+      expect(error.cause).toMatchObject({ message: "comparison peer rejected" });
+    }
+  });
+
+  it("selects the largest exact-input result when every route completes", async () => {
+    const { registry } = offlineRegistry([
+      directMarket(DIRECT_ROUTE_A),
+      directMarket(DIRECT_ROUTE_B, undefined, 2n, 1n),
+    ]);
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const swap = flattenCapabilityTree(capability).at(-1);
+    if (!swap) throw new Error("missing Kuru transaction");
+
+    expect(decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data }).args[0]).toEqual(
+      [DIRECT_ROUTE_B],
+    );
+  });
+
+  it("reports target output as unsatisfiable when every route exhausts uint256", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, {
+        inputNumerator: 1n,
+        inputDenominator: 10n ** 50n,
+        maximumOutput: 1n,
+      }),
+      reverseMarket(DIRECT_ROUTE_B, {
+        inputNumerator: 1n,
+        inputDenominator: 10n ** 50n,
+        maximumOutput: 1n,
+      }),
+    ]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountOut: "2",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "TARGET_OUTPUT_UNSATISFIABLE",
+      failures: [],
+    });
+  });
+
+  it("retains every unavailable target-output route", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, { rejectionMessage: "target route A transport failed" }),
+      reverseMarket(DIRECT_ROUTE_B, { rejectionMessage: "target route B call failed" }),
+    ]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountOut: "2",
+      }),
+    );
+
+    expect(error.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(error.failures).toEqual([
+      {
+        path: [NATIVE, USDC_ADDRESS],
+        markets: [DIRECT_ROUTE_A],
+        message: "target route A transport failed",
+      },
+      {
+        path: [NATIVE, USDC_ADDRESS],
+        markets: [DIRECT_ROUTE_B],
+        message: "target route B call failed",
+      },
+    ]);
+  });
+
+  it("fails closed when a satisfying target-output route has an unavailable peer", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, { inputNumerator: 1n, inputDenominator: 10n ** 50n }),
+      reverseMarket(DIRECT_ROUTE_B, { rejectionMessage: "target comparison unavailable" }),
+    ]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountOut: "2",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "ROUTE_QUOTE_UNAVAILABLE",
+      failures: [{ markets: [DIRECT_ROUTE_B], message: "target comparison unavailable" }],
+    });
+  });
+
+  it("selects a satisfying target-output route when its peer is deterministically unsatisfiable", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, { inputNumerator: 1n, inputDenominator: 10n ** 50n }),
+      reverseMarket(DIRECT_ROUTE_B, {
+        inputNumerator: 1n,
+        inputDenominator: 10n ** 50n,
+        maximumOutput: 1n,
+      }),
+    ]);
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "2",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const swap = flattenCapabilityTree(capability).at(-1);
+    if (!swap) throw new Error("missing Kuru transaction");
+
+    expect(decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data }).args[0]).toEqual(
+      [DIRECT_ROUTE_A],
+    );
+  });
+
+  it("selects the minimum input when every target-output route satisfies the target", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, { inputNumerator: 1n, inputDenominator: 2n * 10n ** 50n }),
+      reverseMarket(DIRECT_ROUTE_B, { inputNumerator: 1n, inputDenominator: 10n ** 50n }),
+    ]);
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "2",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const swap = flattenCapabilityTree(capability).at(-1);
+    if (!swap) throw new Error("missing Kuru transaction");
+
+    expect(decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data }).args[0]).toEqual(
+      [DIRECT_ROUTE_B],
+    );
+  });
+
+  it("preserves earlier-route preference when target-output inputs tie", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, { inputNumerator: 1n, inputDenominator: 10n ** 50n }),
+      reverseMarket(DIRECT_ROUTE_B, { inputNumerator: 1n, inputDenominator: 10n ** 50n }),
+    ]);
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "2",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const swap = flattenCapabilityTree(capability).at(-1);
+    if (!swap) throw new Error("missing Kuru transaction");
+
+    expect(decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data }).args[0]).toEqual(
+      [DIRECT_ROUTE_A],
+    );
+  });
+
+  it("quotes UINT256_MAX at most once and never exceeds it during reverse search", async () => {
+    const quotedInputs: bigint[] = [];
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, {
+        inputNumerator: 1n,
+        inputDenominator: 10n ** 50n,
+        maximumOutput: 1n,
+        quotedInputs,
+      }),
+    ]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountOut: "2",
+      }),
+    );
+
+    expect(error.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
+    expect(quotedInputs.at(-1)).toBe(UINT256_MAX);
+    expect(quotedInputs.filter((amount) => amount === UINT256_MAX)).toHaveLength(1);
+    expect(quotedInputs.every((amount) => amount <= UINT256_MAX)).toBe(true);
+  });
+
+  it("keeps a quote rejection encountered during reverse search unavailable", async () => {
+    const { registry } = offlineRegistry([
+      reverseMarket(DIRECT_ROUTE_A, {
+        inputNumerator: 1n,
+        inputDenominator: 10n ** 60n,
+        rejectionMessage: "reverse-search RPC rejected",
+        rejectAtOrAbove: 8n * 10n ** 50n,
+      }),
+    ]);
+    const error = await kuruQuoteError(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountOut: "2",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "ROUTE_QUOTE_UNAVAILABLE",
+      failures: [{ message: "reverse-search RPC rejected" }],
+    });
   });
 
   it("translates ordered Changes without reconstructing the planned path", async () => {
@@ -604,6 +929,17 @@ async function swapCapability(registry: Registry) {
   return capability;
 }
 
+async function kuruQuoteError(action: Promise<unknown>): Promise<KuruQuoteError> {
+  try {
+    await action;
+  } catch (error) {
+    expect(error).toBeInstanceOf(KuruQuoteError);
+    if (error instanceof KuruQuoteError) return error;
+    throw error;
+  }
+  throw new Error("expected a KuruQuoteError");
+}
+
 function offlineRegistry(
   markets: readonly MockMarket[] = MARKETS,
   fetchMock = marketDiscoveryFetch(markets),
@@ -623,8 +959,8 @@ function offlineRegistry(
       if (!entry) throw new Error(`unknown market ${String(args[0])}`);
       if (entry.verified === false) return [0, 0n, ZERO, 0n, ZERO, 0n, 0, 0n, 0n, 0n, 0n];
       return [
-        10 ** entry.quoteDecimals,
-        10n ** BigInt(entry.baseDecimals),
+        entry.pricePrecision ?? 10 ** entry.quoteDecimals,
+        entry.sizePrecision ?? 10n ** BigInt(entry.baseDecimals),
         entry.base,
         BigInt(entry.baseDecimals),
         entry.quote,
@@ -636,7 +972,17 @@ function offlineRegistry(
         0n,
       ];
     },
-    call: async ({ to, account, data }: { to: string; account: string; data: Hex }) => {
+    call: async ({
+      to,
+      account,
+      data,
+      value,
+    }: {
+      to: string;
+      account: string;
+      data: Hex;
+      value?: bigint;
+    }) => {
       const entry = byAddress.get(to.toLowerCase());
       if (!entry) throw new Error(`unexpected call ${to}`);
       const decoded = decodeFunctionData({ abi: KuruOrderbookAbi, data });
@@ -653,22 +999,39 @@ function offlineRegistry(
         throw new Error("Kuru quotes must use the zero-address preview sender");
       }
       const size = decoded.args[0];
-      const result =
+      const behavior =
         decoded.functionName === "placeAndExecuteMarketBuy"
-          ? convertUnits(
-              size,
-              entry.quoteDecimals,
-              entry.baseDecimals,
-              entry.buyNumerator,
-              entry.buyDenominator,
-            )
-          : convertUnits(
-              size,
-              entry.baseDecimals,
-              entry.quoteDecimals,
-              entry.sellNumerator,
-              entry.sellDenominator,
-            );
+          ? entry.buyBehavior
+          : entry.sellBehavior;
+      const quotedInput = value ?? size;
+      behavior?.quotedInputs?.push(quotedInput);
+      if (
+        behavior?.rejectionMessage &&
+        (behavior.rejectAtOrAbove === undefined || quotedInput >= behavior.rejectAtOrAbove)
+      ) {
+        throw new Error(behavior.rejectionMessage);
+      }
+      let result =
+        behavior?.inputNumerator !== undefined
+          ? (quotedInput * behavior.inputNumerator) / (behavior.inputDenominator ?? 1n)
+          : decoded.functionName === "placeAndExecuteMarketBuy"
+            ? convertUnits(
+                size,
+                entry.quoteDecimals,
+                entry.baseDecimals,
+                entry.buyNumerator,
+                entry.buyDenominator,
+              )
+            : convertUnits(
+                size,
+                entry.baseDecimals,
+                entry.quoteDecimals,
+                entry.sellNumerator,
+                entry.sellDenominator,
+              );
+      if (behavior?.maximumOutput !== undefined && result > behavior.maximumOutput) {
+        result = behavior.maximumOutput;
+      }
       return {
         data: encodeFunctionResult({
           abi: KuruOrderbookAbi,
@@ -719,6 +1082,26 @@ function market(
     sellDenominator,
     buyNumerator: sellDenominator,
     buyDenominator: sellNumerator,
+  };
+}
+
+function directMarket(
+  address: `0x${string}`,
+  sellBehavior?: MockQuoteBehavior,
+  sellNumerator = 1n,
+  sellDenominator = 1n,
+): MockMarket {
+  return {
+    ...market(address, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, sellNumerator, sellDenominator),
+    sellBehavior,
+  };
+}
+
+function reverseMarket(address: `0x${string}`, sellBehavior: MockQuoteBehavior): MockMarket {
+  return {
+    ...market(address, ZERO, USDC_ADDRESS, 50, 0, 1n, 1n),
+    sizePrecision: 1n,
+    sellBehavior,
   };
 }
 
