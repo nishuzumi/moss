@@ -16,6 +16,7 @@ import {
   decodeAbiParameters,
   decodeFunctionData,
   encodeAbiParameters,
+  encodeErrorResult,
   encodeEventTopics,
   encodeFunctionResult,
   getAddress,
@@ -123,7 +124,7 @@ describe("Uniswap", () => {
     expect(client.call).not.toHaveBeenCalled();
   });
 
-  it("fails when no canonical fee tier has an initialized pool", async () => {
+  it("fails when no canonical fee tier can quote the exact input", async () => {
     const { registry } = offlineRegistry(new Map());
     await expect(
       registry.action("uniswap", "quote", ACCOUNT, {
@@ -131,7 +132,7 @@ describe("Uniswap", () => {
         tokenOut: USDC_ADDRESS,
         amountIn: "1",
       }),
-    ).rejects.toThrow("no initialized Uniswap v4 pool");
+    ).rejects.toThrow("no canonical Uniswap v4 pool can quote the exact input");
   });
 
   it("quotes the best tier in display units", async () => {
@@ -152,6 +153,49 @@ describe("Uniswap", () => {
         path: [NATIVE, USDC_ADDRESS],
       },
     });
+  });
+
+  it("ignores a tier that cannot fill the exact input", async () => {
+    const { registry } = offlineRegistry(
+      TIER_QUOTES,
+      new Map([[100, unavailablePoolQuote("NotEnoughLiquidity")]]),
+    );
+
+    await expect(
+      registry.action("uniswap", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).resolves.toMatchObject({ data: { feeTier: 500, estimatedAmountOut: "20" } });
+  });
+
+  it("does not misclassify a transport failure as an unavailable pool", async () => {
+    const transportFailure = new Error("RPC request timed out");
+    const { registry } = offlineRegistry(TIER_QUOTES, new Map([[100, transportFailure]]));
+
+    await expect(
+      registry.action("uniswap", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("RPC request timed out");
+  });
+
+  it("fails closed on an unexpected quote revert", async () => {
+    const unexpectedFailure = quoteRevert(
+      encodeErrorResult({ abi: V4QuoterAbi, errorName: "NotSelf" }),
+    );
+    const { registry } = offlineRegistry(TIER_QUOTES, new Map([[100, unexpectedFailure]]));
+
+    await expect(
+      registry.action("uniswap", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("execution reverted");
   });
 
   it("builds a native exact-in swap as one Universal Router transaction", async () => {
@@ -652,7 +696,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Uniswap mainnet", () => {
   });
 });
 
-function offlineRegistry(tierQuotes: ReadonlyMap<number, bigint> = TIER_QUOTES) {
+function offlineRegistry(
+  tierQuotes: ReadonlyMap<number, bigint> = TIER_QUOTES,
+  tierFailures: ReadonlyMap<number, unknown> = new Map(),
+) {
   const client = {
     readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
       if (functionName === "decimals") return 6;
@@ -667,8 +714,9 @@ function offlineRegistry(tierQuotes: ReadonlyMap<number, bigint> = TIER_QUOTES) 
         throw new Error(`unexpected call ${decoded.functionName}`);
       }
       const [params] = decoded.args as readonly [{ poolKey: { fee: number } }];
+      if (tierFailures.has(params.poolKey.fee)) throw tierFailures.get(params.poolKey.fee);
       const amountOut = tierQuotes.get(params.poolKey.fee);
-      if (amountOut === undefined) throw new Error("execution reverted: pool not initialized");
+      if (amountOut === undefined) throw unavailablePoolQuote("PoolNotInitialized");
       return {
         data: encodeFunctionResult({
           abi: V4QuoterAbi,
@@ -682,6 +730,25 @@ function offlineRegistry(tierQuotes: ReadonlyMap<number, bigint> = TIER_QUOTES) 
     client: client as MossRuntime["client"] & { call: ReturnType<typeof vi.fn> },
     registry: new Registry({ rpcUrl: "http://offline", client }).use(Uniswap),
   };
+}
+
+function unavailablePoolQuote(errorName: "PoolNotInitialized" | "NotEnoughLiquidity"): Error {
+  const inner =
+    errorName === "PoolNotInitialized"
+      ? encodeErrorResult({ abi: PoolManagerAbi, errorName })
+      : encodeErrorResult({ abi: V4QuoterAbi, errorName, args: [POOL_ID] });
+  return quoteRevert(inner);
+}
+
+function quoteRevert(inner: Hex): Error {
+  const data = encodeErrorResult({
+    abi: V4QuoterAbi,
+    errorName: "UnexpectedRevertBytes",
+    args: [inner],
+  });
+  return new Error("execution reverted", {
+    cause: Object.assign(new Error("RPC request failed"), { data }),
+  });
 }
 
 function nativeTransfer(from: `0x${string}`, to: `0x${string}`, value: bigint): Change {

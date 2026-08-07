@@ -62,11 +62,13 @@ import {
 } from "@themoss/core";
 import { ERC20, ERC20Abi } from "@themoss/erc";
 import {
+  decodeErrorResult,
   decodeEventLog,
   encodeAbiParameters,
   encodePacked,
   formatUnits,
   getAddress,
+  isHex,
   parseUnits,
 } from "viem";
 import { Permit2Abi, PoolManagerAbi, UniversalRouterAbi, V4QuoterAbi } from "./abis/uniswap.js";
@@ -521,7 +523,7 @@ export class Uniswap {
     const amountIn = parseUnits(params.amountIn, decimals);
     if (amountIn > MAX_UINT128) throw new ParameterError("amountIn exceeds uint128");
 
-    const quoted = await Promise.allSettled(
+    const quoted = await Promise.all(
       UNISWAP_V4_FEE_TIERS.map(async (tier) => {
         const poolKey: PoolKey = {
           currency0,
@@ -530,20 +532,23 @@ export class Uniswap {
           tickSpacing: tier.tickSpacing,
           hooks: NO_HOOKS,
         };
-        const [amountOut] = await this.quoter.call.quoteExactInputSingle([
-          { poolKey, zeroForOne, exactAmount: amountIn, hookData: "0x" },
-        ]);
-        return { poolKey, amountOut };
+        try {
+          const [amountOut] = await this.quoter.call.quoteExactInputSingle([
+            { poolKey, zeroForOne, exactAmount: amountIn, hookData: "0x" },
+          ]);
+          return { poolKey, amountOut };
+        } catch (error) {
+          if (isUnavailablePoolQuote(error)) return undefined;
+          throw error;
+        }
       }),
     );
     const candidates = quoted.flatMap((result) =>
-      result.status === "fulfilled" && result.value.amountOut > 0n ? [result.value] : [],
+      result && result.amountOut > 0n ? [result] : [],
     );
     const [first] = candidates;
     if (!first) {
-      throw new Error(
-        "no initialized Uniswap v4 pool quotes this pair across the canonical fee tiers",
-      );
+      throw new Error("no canonical Uniswap v4 pool can quote the exact input for this pair");
     }
     const best = candidates.reduce((left, right) =>
       right.amountOut > left.amountOut ? right : left,
@@ -583,6 +588,55 @@ function sameToken(left: TokenRef, right: TokenRef): boolean {
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+/**
+ * V4Quoter wraps the PoolManager's revert in UnexpectedRevertBytes. Only a
+ * deterministic unavailable-tier error is skippable: transport failures and
+ * every other EVM revert abort selection, so a partial quote set is never
+ * presented as the best available route.
+ */
+function isUnavailablePoolQuote(error: unknown): boolean {
+  const data = quoteRevertData(error);
+  if (!data) return false;
+  const reason = unwrapQuoteRevert(data);
+  try {
+    if (
+      decodeErrorResult({ abi: PoolManagerAbi, data: reason }).errorName === "PoolNotInitialized"
+    ) {
+      return true;
+    }
+  } catch {
+    // The reason may belong to the Quoter rather than the PoolManager.
+  }
+  try {
+    return decodeErrorResult({ abi: V4QuoterAbi, data: reason }).errorName === "NotEnoughLiquidity";
+  } catch {
+    return false;
+  }
+}
+
+function unwrapQuoteRevert(data: Hex): Hex {
+  try {
+    const decoded = decodeErrorResult({ abi: V4QuoterAbi, data });
+    if (decoded.errorName !== "UnexpectedRevertBytes") return data;
+    const [reason] = decoded.args;
+    return reason;
+  } catch {
+    return data;
+  }
+}
+
+function quoteRevertData(error: unknown): Hex | undefined {
+  let current = error;
+  const seen = new Set<object>();
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const data = (current as { data?: unknown }).data;
+    if (typeof data === "string" && isHex(data)) return data;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 function decodePoolManagerEvent(change: Extract<Change, { kind: "event" }>) {
