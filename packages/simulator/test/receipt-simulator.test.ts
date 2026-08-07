@@ -324,3 +324,118 @@ describe("Capability simulation", () => {
     });
   });
 });
+
+describe("Pinned block API", () => {
+  const BLOCK_A = "0xabc";
+  const BLOCK_B = "0xdef";
+
+  function pinnedBlockRuntime(
+    blocks: string[],
+    requests: { method: string; params: unknown[] }[],
+    failTrace = false,
+  ): MossRuntime {
+    let blockIndex = 0;
+    return {
+      rpcUrl: "http://offline",
+      client: {
+        request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+          requests.push({ method, params: params ?? [] });
+          if (method === "eth_blockNumber") {
+            if (blockIndex >= blocks.length) throw new Error("rpc unreachable");
+            return blocks[blockIndex++];
+          }
+          if (method === "eth_estimateGas") return "0x5208";
+          const tracer = (params?.[2] as { tracer?: string } | undefined)?.tracer;
+          if (tracer === "callTracer") {
+            if (failTrace) throw new Error("debug_traceCall unavailable");
+            return { type: "CALL", from: A, to: B, logs: [] } satisfies CallFrame;
+          }
+          if (tracer === "prestateTracer") return { pre: {}, post: {} } satisfies PrestateDiff;
+          throw new Error(`unexpected RPC method ${method}`);
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: minimal debug RPC fixture
+      } as any,
+    };
+  }
+
+  it("returns undefined before the first simulation without fabricating a block", async () => {
+    const requests: { method: string; params: unknown[] }[] = [];
+    const simulator = createTraceSimulator(pinnedBlockRuntime([BLOCK_A], requests), {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    });
+    expect(await simulator.getPinnedBlockNumber?.()).toBeUndefined();
+    // No RPC of any kind happened before the first simulate.
+    expect(requests).toEqual([]);
+  });
+
+  it("exposes the exact block used by every trace, gas estimate, and diff without extra RPC", async () => {
+    const requests: { method: string; params: unknown[] }[] = [];
+    const simulator = createTraceSimulator(pinnedBlockRuntime([PINNED_BLOCK], requests), {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    });
+
+    const outcome = await simulator.simulate(capability("parent", C, [capability("child", B)]));
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.results).toHaveLength(2);
+
+    const pinned = await simulator.getPinnedBlockNumber?.();
+    expect(pinned).toBe(PINNED_BLOCK);
+
+    // Every trace, diff, and gas estimate pinned the getter's block.
+    const blockUsing = requests.filter(
+      ({ method }) => method === "debug_traceCall" || method === "eth_estimateGas",
+    );
+    expect(blockUsing.length).toBeGreaterThan(0);
+    for (const { params } of blockUsing) {
+      expect(params[1]).toBe(PINNED_BLOCK);
+    }
+
+    // The getter itself issued no second eth_blockNumber.
+    expect(requests.filter(({ method }) => method === "eth_blockNumber")).toHaveLength(1);
+  });
+
+  it("reports the latest run's block across repeated simulations", async () => {
+    const simulator = createTraceSimulator(pinnedBlockRuntime([BLOCK_A, BLOCK_B], []), {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    });
+
+    await simulator.simulate(capability("fixture", B));
+    expect(await simulator.getPinnedBlockNumber?.()).toBe(BLOCK_A);
+
+    await simulator.simulate(capability("fixture", B));
+    expect(await simulator.getPinnedBlockNumber?.()).toBe(BLOCK_B);
+  });
+
+  it("never leaks the previous run's block after a base-block resolution failure", async () => {
+    const simulator = createTraceSimulator(
+      // Only one block: the second simulate() resolution fails fail-closed.
+      pinnedBlockRuntime([BLOCK_A], []),
+      { receipt: (node, changes) => coveringReceipt(node.protocol, changes) },
+    );
+
+    await simulator.simulate(capability("fixture", B));
+    expect(await simulator.getPinnedBlockNumber?.()).toBe(BLOCK_A);
+
+    const outcome = await simulator.simulate(capability("fixture", B));
+    expect(outcome.halted).toBeDefined();
+    expect(await simulator.getPinnedBlockNumber?.()).toBeUndefined();
+  });
+
+  it("keeps the pinned block available after a post-pin halt", async () => {
+    const simulator = createTraceSimulator(pinnedBlockRuntime([BLOCK_A], [], true), {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    });
+
+    const outcome = await simulator.simulate(capability("fixture", B));
+    expect(outcome.halted).toBeDefined();
+    // The run pinned BLOCK_A before the trace failed, so it stays exposed.
+    expect(await simulator.getPinnedBlockNumber?.()).toBe(BLOCK_A);
+  });
+
+  it("the createTraceSimulator return value implements the optional getter", async () => {
+    const simulator = createTraceSimulator(pinnedBlockRuntime([BLOCK_A], []), {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    });
+    expect(simulator.getPinnedBlockNumber).toBeTypeOf("function");
+  });
+});
