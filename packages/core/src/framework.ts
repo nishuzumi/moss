@@ -1,13 +1,26 @@
 import { isAddress, isHex } from "viem";
 import type {
   CapabilityNode,
+  CapabilityResult,
   Change,
   JsonSafeValue,
+  Nestable,
   ReceiptChange,
   ReceiptResult,
   TransactionNode,
   UnsignedTx,
 } from "./types.js";
+
+/**
+ * Declares a Capability's result nestable through its own Protocol's `self`.
+ * The marker is compile-time only, so nesting is a decision each Capability
+ * states where it is written rather than an assertion the caller makes about it:
+ * `SelfRef` names only declared Capabilities, and Registry still refuses at the
+ * call site anything that is not a decorated Capability.
+ */
+export function nestable<R extends CapabilityResult>(result: R): Nestable<R> {
+  return result as Nestable<R>;
+}
 
 export function toJsonSafe(value: unknown): JsonSafeValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;

@@ -1,0 +1,19 @@
+{
+  "comment": "Deployment provenance manifest (ADR 0007). Addresses from Uniswap's official deployment record (Uniswap/docs content/protocols/v4/deployments.mdx, 'Monad: 143'). These deployments are direct (non-proxy), so each entry pins the keccak256 of the runtime bytecode observed via rpc.monad.xyz on 2026-07-28; the live test recomputes the hashes and asserts the selectors/topics the adapter uses are present, which turns any redeployment into a red suite instead of a silent drift. Sourcify reports no verified source for chain 143 (checked 2026-07-28) and the Monadscan explorer cross-check needs a MONADSCAN_API_KEY, so the vendored artifacts are anchored to the chain by bytecode identity rather than an explorer-derived ABI.",
+  "universalRouter": {
+    "address": "0x0D97Dc33264bfC1c226207428A79b26757fb9dc3",
+    "deployedBytecodeKeccak256": "0x5c84d90c7d4dbe374f13a7b506c22cadf4f9ee4f6d6106711001aee7c5153c5a"
+  },
+  "v4Quoter": {
+    "address": "0xa222Dd357A9076d1091Ed6Aa2e16C9742dD26891",
+    "deployedBytecodeKeccak256": "0x3666b10d21aee597139d129b378b2cdaeaaaaaffeb142c1f64366a7bd5be8b3b"
+  },
+  "poolManager": {
+    "address": "0x188d586Ddcf52439676Ca21A244753fA19F9Ea8e",
+    "deployedBytecodeKeccak256": "0xf5d7a45765367807b101f825ec74004078c79bd96c621e481c608ee22f7336d4"
+  },
+  "permit2": {
+    "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "deployedBytecodeKeccak256": "0x332f9ca0fbd282f4a9b16f5332870dc98addc5172dd5e48ab6fa7c9be3d10fa0"
+  }
+}
