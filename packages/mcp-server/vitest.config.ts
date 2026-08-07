@@ -18,6 +18,7 @@ export default defineConfig({
       "@themoss/protocol-apriori": src("../protocols/apriori/src/index.ts"),
       "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
       "@themoss/protocol-nadfun": src("../protocols/nadfun/src/index.ts"),
+      "@themoss/protocol-nns": src("../protocols/nns/src/index.ts"),
       "@themoss/protocol-pancakeswap": src("../protocols/pancakeswap/src/index.ts"),
       "@themoss/system": src("../system/src/index.ts"),
     },

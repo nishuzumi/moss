@@ -5,6 +5,33 @@ import { defaultProtocolModules } from "../src/composition.js";
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
 
 describe("default MCP Protocol composition", () => {
+  it("includes the Nad Name Service Protocol module", () => {
+    const nnsModule = defaultProtocolModules.find((module) => "NadNameService" in module);
+
+    expect(nnsModule).toBeDefined();
+  });
+
+  it("discovers and loads Nad Name Service identity Queries exactly once", () => {
+    const registry = new Registry(runtime).use(...defaultProtocolModules);
+    const discovered = registry.discover({ protocol: "nns" });
+
+    expect(discovered).toHaveLength(2);
+    expect(discovered.map(({ method }) => method).sort()).toEqual(["primaryName", "profile"]);
+
+    const loaded = registry.load([
+      { protocol: "nns", method: "primaryName" },
+      { protocol: "nns", method: "profile" },
+    ]);
+
+    expect(loaded).toHaveLength(2);
+    expect(loaded).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "nns", method: "primaryName", kind: "query" }),
+        expect.objectContaining({ protocol: "nns", method: "profile", kind: "query" }),
+      ]),
+    );
+  });
+
   it("includes the Nad.fun Protocol module", () => {
     const nadfunModule = defaultProtocolModules.find((module) => "NadFun" in module);
 
