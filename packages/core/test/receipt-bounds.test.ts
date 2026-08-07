@@ -119,6 +119,22 @@ describe("Receipt traversal bounds", () => {
     expectReceiptError(overBudget, "PARAMETER_COUNT");
   });
 
+  it("fails an over-wide changes array with a typed error instead of a spread RangeError", () => {
+    const c = change(0);
+    const receipt: ReceiptResult = {
+      kind: "receipt",
+      outcome: null,
+      text: "root",
+      changes: Array.from({ length: 200_000 }, () => ({
+        kind: "change" as const,
+        change: c,
+        data: null,
+        text: "leaf",
+      })),
+    };
+    expectReceiptError(receipt, "PARAMETER_COUNT");
+  });
+
   it("flattens a valid Receipt tree, preserving Change identity, length and order", () => {
     const first = change(0);
     const second = change(1);

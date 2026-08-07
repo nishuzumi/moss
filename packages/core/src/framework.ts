@@ -439,6 +439,17 @@ function flattenReceipt(receipt: ReceiptResult): ReceiptChange[] {
     assertBoundedParams(current.outcome, `${path}.outcome`, budget);
     requireText(current.text, `${path}.text`);
     if (!Array.isArray(current.changes)) throw new Error(`${path}.changes must be an array`);
+    // Bound the fanout before materializing child frames, so an over-wide
+    // changes array fails with a typed error rather than allocating a frame per
+    // child and then spreading an unbounded array into push() (a RangeError).
+    // Mirrors the array lookahead in assertBoundedParams.
+    if (budget.parameterNodes + current.changes.length > CAPABILITY_TREE_LIMITS.maxParameterNodes) {
+      throw new CapabilityTreeError(
+        "PARAMETER_COUNT",
+        path,
+        `total parameter nodes exceed ${CAPABILITY_TREE_LIMITS.maxParameterNodes}`,
+      );
+    }
     const children: ReceiptFrame[] = [];
     for (const [index, child] of current.changes.entries()) {
       const childPath = `${path}.changes[${index}]`;
