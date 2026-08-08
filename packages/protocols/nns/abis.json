@@ -1,0 +1,7 @@
+{
+  "protocol": "Nad Name Service",
+  "address": "0xcc7a1bff8845573dbf0b3b96e25b9b549d4a2ec7",
+  "addressSource": "https://github.com/monad-crypto/protocols/blob/main/mainnet/nad_name_service.jsonc",
+  "abiSource": "https://docs.nad.domains/developers/contracts/contract-abi.md",
+  "artifact": "abis-src/NadNameService.json"
+}
