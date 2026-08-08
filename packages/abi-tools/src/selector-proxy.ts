@@ -7,6 +7,19 @@ import {
   signatureOf,
 } from "./compare-abi.js";
 import { ADDRESS_PATTERN } from "./fetch-abi.js";
+import type {
+  CrossCheckSelectorProxyAbiOptions,
+  EthCall,
+  FacetAbiUnion,
+  FacetReport,
+  FacetSource,
+  ResolveSelectorProxyOptions,
+  Selector,
+  SelectorProxyCrossCheck,
+  SelectorProxyResolution,
+  SelectorRow,
+  ViemCallClient,
+} from "./types.js";
 
 /**
  * Explorer cross-check support for selector-proxy (Diamond-style) contracts.
@@ -38,16 +51,6 @@ import { ADDRESS_PATTERN } from "./fetch-abi.js";
  * registry fails the run loudly instead of being misread as an unavailable
  * view or an unmapped selector.
  */
-
-/** 4-byte function selector, lowercase whenever this module produces one. */
-export type Selector = `0x${string}`;
-
-/**
- * Where a selector→facet map came from. The two loupe sources are complete
- * maps; the two point-lookup sources cover only the probed selectors;
- * `"none"` means the contract answered no registry view at all.
- */
-export type FacetSource = "facets" | "facetAddresses" | "facetAddress" | "selectorToFacet" | "none";
 
 const LOUPE_ABI = parseAbi([
   "function facets() view returns ((address facetAddress, bytes4[] functionSelectors)[])",
@@ -86,22 +89,34 @@ const SELECTOR_PATTERN = /^0x[0-9a-fA-F]{8}$/;
 const MAX_FACETS = 256;
 const MAX_SELECTORS = 8192;
 
-/**
- * Injected `eth_call`: resolve with the returned data on success, throw
- * `EthCallRevert` on revert, and let transport failures throw anything else.
- * viem's `client.call` fits as
- * ```ts
- * async ({ to, data }) => {
- *   try {
- *     return (await client.call({ to, data })).data ?? "0x";
- *   } catch (error) {
- *     if (error instanceof CallExecutionError) throw new EthCallRevert(error.message);
- *     throw error;
- *   }
- * }
- * ```
- */
-export type EthCall = (request: { to: `0x${string}`; data: `0x${string}` }) => Promise<string>;
+/** Adapts viem's `client.call` to the injected `EthCall` contract. */
+export function createViemEthCall(client: ViemCallClient): EthCall {
+  return async ({ to, data }) => {
+    try {
+      return (await client.call({ to, data })).data ?? "0x";
+    } catch (error) {
+      // Error constructors differ when pnpm installs viem under multiple peer
+      // graphs. The direct cause is viem's semantic classification; walking
+      // deeper could mistake a transport error with a colliding name for a
+      // revert below an UnknownRpcError.
+      const cause =
+        typeof error === "object" && error !== null && "cause" in error ? error.cause : undefined;
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "CallExecutionError" &&
+        typeof cause === "object" &&
+        cause !== null &&
+        "name" in cause &&
+        cause.name === "ExecutionRevertedError"
+      ) {
+        throw new EthCallRevert(error instanceof Error ? error.message : String(error));
+      }
+      throw error;
+    }
+  };
+}
 
 /**
  * The one throw `EthCall` may use for an EVM revert. Everything else a
@@ -114,50 +129,6 @@ export class EthCallRevert extends Error {
     super(message);
     this.name = "EthCallRevert";
   }
-}
-
-/** Injected `eth_getCode`: returns `"0x"` for an address with no code. */
-export type GetCode = (address: `0x${string}`) => Promise<string>;
-
-export interface ResolveSelectorProxyOptions {
-  /** The dispatcher address every selector is resolved against. */
-  proxy: string;
-  /** Injected `eth_call` transport. */
-  call: EthCall;
-  /**
-   * Selectors to resolve when only a point-lookup view exists. The loupe
-   * views ignore this and return the complete map.
-   */
-  selectors?: readonly string[];
-  /**
-   * Injected `eth_getCode`, enabling the fallback acceptance of a
-   * point-lookup view whose dispatcher implements it directly: such a view
-   * answers zero (or reverts) for its own selector, so the self-probe alone
-   * would resolve the proxy to `"none"`. With `getCode`, a view that fails
-   * the self-probe is still accepted when at least one probed selector
-   * resolves to an address with deployed code, which a fallback returning
-   * decodable garbage cannot fake. Without `getCode`, only the self-probe
-   * decides.
-   */
-  getCode?: GetCode;
-}
-
-export interface SelectorProxyResolution {
-  /** The resolved proxy, lowercase. */
-  proxy: `0x${string}`;
-  /** Which registry view produced the map. */
-  source: FacetSource;
-  /**
-   * True when `selectorFacets` is the proxy's complete map (loupe sources).
-   * Point-lookup sources cover only the probed selectors, so an absent
-   * selector means "returned no facet", not "the proxy dispatches nothing
-   * else".
-   */
-  complete: boolean;
-  /** Facet for every selector that resolved to one, lowercase both sides. */
-  selectorFacets: ReadonlyMap<Selector, `0x${string}`>;
-  /** Distinct facets in first-seen order, lowercase. */
-  facets: readonly `0x${string}`[];
 }
 
 function normalizeSelector(selector: string): Selector {
@@ -386,18 +357,6 @@ export async function resolveSelectorProxy(
   return { proxy, source: "none", complete: false, selectorFacets: new Map(), facets: [] };
 }
 
-export interface FacetAbiUnion {
-  /** Deduplicated union of the facet ABIs, first definition kept. */
-  union: Abi;
-  /**
-   * Same canonical signature carried by two facets (or twice by one) with
-   * different semantics, reported in `compareDeployedAbi`'s issue format.
-   * Identical redefinitions (facets sharing a base contract's events) are
-   * deduplicated silently.
-   */
-  conflicts: readonly AbiComparisonIssue[];
-}
-
 /**
  * Union facet ABIs into one deployed surface for `compareDeployedAbi`.
  * Constructors are excluded like the comparison itself excludes them.
@@ -431,98 +390,13 @@ export function unionFacetAbis(facetAbis: ReadonlyMap<`0x${string}`, Abi>): Face
 }
 
 /**
- * Per-selector routing verdict for one vendored function. `selector-collision`
- * is the evidence verdict: the facet's verified ABI carries the vendored
- * signature and a second function at the same 4-byte selector, so which of the
- * two the facet dispatches cannot be read off the ABI.
- */
-export type SelectorRowStatus =
-  | "matched"
-  | "unmapped"
-  | "facet-no-code"
-  | "facet-unverified"
-  | "facet-fetch-failed"
-  | "not-in-facet-abi"
-  | "selector-collision"
-  | "mismatch";
-
-export interface SelectorRow {
-  /** The vendored function's 4-byte selector. */
-  selector: Selector;
-  /** Canonical signature, e.g. `function transfer(address,uint256)`. */
-  signature: string;
-  /** The facet the proxy dispatches this selector to, when it has one. */
-  facet?: `0x${string}`;
-  status: SelectorRowStatus;
-  /** Human-readable specifics for everything but `matched`. */
-  detail?: string;
-}
-
-export interface FacetReport {
-  facet: `0x${string}`;
-  /**
-   * `verified` when the explorer returned the facet's ABI, `no-code` when
-   * `eth_getCode` returned empty (the fetch is skipped), `unverified` when
-   * the explorer refused with "source code not verified", `fetch-failed` for
-   * every other fetch error (network, rate limit, bad key).
-   */
-  status: "verified" | "unverified" | "no-code" | "fetch-failed";
-  /** Item count of the verified ABI. */
-  abiItems?: number;
-  /** The fetch error message for `unverified` and `fetch-failed`. */
-  detail?: string;
-}
-
-export interface CrossCheckSelectorProxyAbiOptions {
-  /** The vendored interface the proxy is expected to serve. */
-  vendored: Abi;
-  /** The dispatcher address. */
-  proxy: string;
-  /** Injected `eth_call` transport. */
-  call: EthCall;
-  /** Injected `eth_getCode` transport, for the facet no-code check. */
-  getCode: GetCode;
-  /**
-   * Fetches one facet's explorer-verified ABI, e.g.
-   * `(facet) => fetchAbi(facet, key)`. Called once per distinct facet,
-   * sequentially, so explorer rate limits stay in the caller's control.
-   */
-  fetchFacetAbi: (facet: `0x${string}`) => Promise<Abi>;
-  /** Passed through to the union `compareDeployedAbi` run. */
-  allowedActualOnly?: readonly string[];
-}
-
-export interface SelectorProxyCrossCheck {
-  proxy: `0x${string}`;
-  /** `"none"` means not a selector proxy: `rows`, `facets`, and `issues` are
-   * empty and the caller should use the single-implementation path. */
-  source: FacetSource;
-  complete: boolean;
-  /** One routing verdict per vendored function, in vendored order. */
-  rows: readonly SelectorRow[];
-  /** One report per facet the vendored surface routes to. */
-  facets: readonly FacetReport[];
-  /**
-   * Cross-facet conflicts plus `compareDeployedAbi(vendored, union)` in the
-   * existing issue format. Functions are additionally verified per selector
-   * in `rows`; events and errors are covered only here, against the union of
-   * every facet the resolution names. With a complete loupe map that union
-   * is the whole deployed surface, so a missing event is real. With a
-   * point-lookup source the union covers only routed facets, so event and
-   * error coverage is best-effort: presence, mismatches, and conflicts
-   * surface, but an absent event is not reported as missing because it may
-   * live on a facet the registry cannot enumerate.
-   */
-  issues: readonly AbiComparisonIssue[];
-}
-
-/**
  * Explorer cross-check for a selector proxy: resolve every vendored function
  * selector to its facet, fetch each routed facet's verified ABI once, then
  * verify both ways: per selector (each vendored function exists on the exact
  * facet its selector dispatches to, with `compareDeployedAbi`'s semantics)
  * and against the union of the facet ABIs (which also covers events and
- * errors). An all-`matched` `rows` plus acceptable `issues` is a pass.
+ * errors). Callers use `status`, which also accounts for unavailable facet
+ * evidence; rows and issues alone are not a pass criterion.
  */
 export async function crossCheckSelectorProxyAbi(
   options: CrossCheckSelectorProxyAbiOptions,
@@ -545,6 +419,7 @@ export async function crossCheckSelectorProxyAbi(
     return {
       proxy: resolution.proxy,
       source: "none",
+      status: "not-selector-proxy",
       complete: false,
       rows: [],
       facets: [],
@@ -582,20 +457,24 @@ export async function crossCheckSelectorProxyAbi(
   const comparison = compareDeployedAbi(vendored, union, {
     allowedActualOnly: options.allowedActualOnly,
   });
-  // A point-lookup map names only routed facets, so an event or error absent
-  // from this union may simply live on a facet the registry cannot
-  // enumerate. Missing is a verdict the partial evidence cannot support;
-  // presence, a mismatch, or a conflict it can, so those still surface.
-  const issues = [
-    ...conflicts,
-    ...(resolution.complete
-      ? comparison
-      : comparison.filter(
-          (issue) => issue.kind !== "missing" || issue.signature.startsWith("function "),
-        )),
-  ];
-
   const reportByFacet = new Map(facetReports.map((report) => [report.facet, report]));
+  const unavailableEvidence = facetReports.some(
+    ({ status }) => status === "unverified" || status === "fetch-failed",
+  );
+  // Missing requires absence evidence. Events and errors need a complete map
+  // with every facet ABI; a function routed to an unavailable facet has only
+  // an inconclusive row, not proof that the function is absent.
+  const canProveMissingEventsAndErrors = resolution.complete && !unavailableEvidence;
+  const comparisonIssues = comparison.filter((issue) => {
+    if (issue.kind !== "missing") return true;
+    if (!issue.signature.startsWith("function ")) return canProveMissingEventsAndErrors;
+    const target = targets.find(({ signature }) => signature === issue.signature);
+    const facet = target === undefined ? undefined : resolution.selectorFacets.get(target.selector);
+    const status = facet === undefined ? undefined : reportByFacet.get(facet)?.status;
+    return status !== "unverified" && status !== "fetch-failed";
+  });
+  const issues = [...conflicts, ...comparisonIssues];
+
   const rows: SelectorRow[] = targets.map(({ fn, selector, signature }) => {
     const facet = resolution.selectorFacets.get(selector);
     if (facet === undefined) {
@@ -677,9 +556,18 @@ export async function crossCheckSelectorProxyAbi(
     return { selector, signature, facet, status: "matched" as const };
   });
 
+  const mismatch =
+    facetReports.some(({ status }) => status === "no-code") ||
+    rows.some(
+      ({ status }) =>
+        status !== "matched" && status !== "facet-unverified" && status !== "facet-fetch-failed",
+    ) ||
+    issues.length > 0;
+
   return {
     proxy: resolution.proxy,
     source: resolution.source,
+    status: mismatch ? "mismatch" : unavailableEvidence ? "inconclusive" : "matched",
     complete: resolution.complete,
     rows,
     facets: facetReports,

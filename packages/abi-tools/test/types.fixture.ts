@@ -5,20 +5,31 @@ import {
   type AbiComparisonIssue,
   type CompareDeployedAbiOptions,
   compareDeployedAbi,
+  createViemEthCall,
   ERC1967_IMPLEMENTATION_SLOT,
+  type EthCall,
   erc1967ImplementationAddress,
   type FacetSource,
   type FetchAbiError,
   type FetchAbiErrorKind,
   fetchAbi,
   renderAbiModule,
+  type SelectorProxyCrossCheckStatus,
   type SelectorRowStatus,
+  type ViemCallClient,
 } from "../src/index.js";
 
 declare const address: string;
 declare const key: string;
 declare const error: FetchAbiError;
 declare const abi: Abi;
+declare const viemClient: ViemCallClient;
+
+// The viem adapter preserves the injected transport contract.
+const ethCall: EthCall = createViemEthCall(viemClient);
+void ethCall;
+// @ts-expect-error a viem client returns an object carrying call data, not raw hex
+void createViemEthCall({ call: async () => "0x" });
 
 // fetchAbi returns a typed ABI, with fetch injectable.
 const fetched: Promise<Abi> = fetchAbi(address, key);
@@ -69,6 +80,11 @@ void implementation;
 
 // The selector-proxy verdicts stay closed literal unions, like the fetch error
 // kinds above: a caller can switch on them exhaustively.
+const checkStatus: SelectorProxyCrossCheckStatus = "inconclusive";
+void checkStatus;
+// @ts-expect-error unknown cross-check statuses are rejected
+const badCheckStatus: SelectorProxyCrossCheckStatus = "partial";
+void badCheckStatus;
 const rowStatus: SelectorRowStatus = "selector-collision";
 void rowStatus;
 // @ts-expect-error unknown row statuses are rejected

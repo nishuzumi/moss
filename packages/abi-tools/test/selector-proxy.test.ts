@@ -1,9 +1,17 @@
 import type { Abi } from "abitype";
-import { encodeFunctionResult, getAddress, parseAbi, toFunctionSelector } from "viem";
+import {
+  CallExecutionError,
+  createPublicClient,
+  custom,
+  encodeFunctionResult,
+  getAddress,
+  parseAbi,
+  toFunctionSelector,
+} from "viem";
 import { describe, expect, it } from "vitest";
 import {
+  createViemEthCall,
   crossCheckSelectorProxyAbi,
-  type EthCall,
   EthCallRevert,
   FACET_ADDRESS_SELECTOR,
   FACET_ADDRESSES_SELECTOR,
@@ -11,9 +19,9 @@ import {
   FACETS_SELECTOR,
   resolveSelectorProxy,
   SELECTOR_TO_FACET_SELECTOR,
-  type Selector,
   unionFacetAbis,
 } from "../src/selector-proxy.js";
+import type { EthCall, Selector } from "../src/types.js";
 
 const PROXY = "0x1000000000000000000000000000000000000001";
 const FACET_A = "0x000000000000000000000000000000000000aaaa";
@@ -154,6 +162,93 @@ function facetAddressesCall(entries: FacetEntries): EthCall {
 const revertingCall: EthCall = async () => {
   throw new EthCallRevert("execution reverted");
 };
+
+describe("createViemEthCall", () => {
+  it("propagates viem transport failures instead of reclassifying them as reverts", async () => {
+    const client = createPublicClient({
+      transport: custom(
+        {
+          request: async () => {
+            throw new Error("HTTP 429 from explorer RPC");
+          },
+        },
+        { retryCount: 0 },
+      ),
+    });
+
+    try {
+      await resolveSelectorProxy({ proxy: PROXY, call: createViemEthCall(client) });
+      expect.unreachable("the transport failure must propagate");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CallExecutionError);
+      expect(error).not.toBeInstanceOf(EthCallRevert);
+      expect((error as Error & { cause?: Error }).cause?.message).toContain(
+        "HTTP 429 from explorer RPC",
+      );
+    }
+  });
+
+  it("does not classify a transport error by a colliding descendant name", async () => {
+    const transportFailure = Object.assign(new Error("HTTP 503 from upstream"), {
+      name: "ExecutionRevertedError",
+    });
+    const client = createPublicClient({
+      transport: custom(
+        { request: async () => Promise.reject(transportFailure) },
+        { retryCount: 0 },
+      ),
+    });
+
+    try {
+      await resolveSelectorProxy({ proxy: PROXY, call: createViemEthCall(client) });
+      expect.unreachable("the transport failure must propagate");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CallExecutionError);
+      expect(error).not.toBeInstanceOf(EthCallRevert);
+      expect((error as Error & { cause?: Error }).cause?.name).toBe("UnknownRpcError");
+    }
+  });
+
+  it("classifies a viem execution revert as EthCallRevert", async () => {
+    const executionRevert = Object.assign(new Error("execution reverted: forbidden"), {
+      code: 3,
+      data: "0x",
+    });
+    const client = createPublicClient({
+      transport: custom(
+        { request: async () => Promise.reject(executionRevert) },
+        { retryCount: 0 },
+      ),
+    });
+
+    const resolution = await resolveSelectorProxy({
+      proxy: PROXY,
+      call: createViemEthCall(client),
+    });
+
+    expect(resolution).toMatchObject({ source: "none", complete: false });
+  });
+
+  it("classifies a viem revert across duplicated package instances", async () => {
+    // pnpm can install viem more than once for different peer graphs. Those
+    // errors have different constructors but retain viem's stable taxonomy.
+    const executionRevert = Object.assign(new Error("execution reverted"), {
+      name: "ExecutionRevertedError",
+    });
+    const callExecution = Object.assign(new Error("call reverted"), {
+      name: "CallExecutionError",
+      cause: executionRevert,
+    });
+    const client = { call: async () => Promise.reject(callExecution) };
+
+    const resolution = await resolveSelectorProxy({
+      proxy: PROXY,
+      call: createViemEthCall(client),
+    });
+
+    expect(resolution).toMatchObject({ source: "none", complete: false });
+  });
+});
 
 describe("loupe selector constants", () => {
   it("derives the selectors the specs publish", () => {
@@ -516,7 +611,12 @@ describe("crossCheckSelectorProxyAbi", () => {
       getCode: hasCode,
       fetchFacetAbi,
     });
-    expect(result).toMatchObject({ proxy: PROXY, source: "selectorToFacet", complete: false });
+    expect(result).toMatchObject({
+      proxy: PROXY,
+      source: "selectorToFacet",
+      status: "matched",
+      complete: false,
+    });
     expect(result.rows).toEqual([
       {
         selector: TRANSFER,
@@ -553,7 +653,7 @@ describe("crossCheckSelectorProxyAbi", () => {
       getCode: hasCode,
       fetchFacetAbi,
     });
-    expect(result).toMatchObject({ source: "facetAddress", complete: false });
+    expect(result).toMatchObject({ source: "facetAddress", status: "mismatch", complete: false });
     expect(result.rows[0]).toMatchObject({ selector: TRANSFER, status: "matched" });
     expect(result.rows[1]).toMatchObject({ selector: BALANCE_OF, status: "unmapped" });
     expect(result.rows[1]?.detail).toMatch(/returned no facet/);
@@ -598,6 +698,99 @@ describe("crossCheckSelectorProxyAbi", () => {
     expect(result).toMatchObject({ source: "facets", complete: true });
     expect(result.rows).toMatchObject([{ selector: TRANSFER, status: "matched" }]);
     expect(fetched).toEqual([FACET_A, FACET_B]);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("is inconclusive when a complete map includes an unfetched facet", async () => {
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer],
+      proxy: PROXY,
+      call: facetsCall([
+        [FACET_A, [TRANSFER]],
+        [FACET_B, [UNKNOWN]],
+      ]),
+      getCode: hasCode,
+      fetchFacetAbi: async (facet) => {
+        if (facet === FACET_A) return [transfer];
+        throw new Error("HTTP 503");
+      },
+    });
+
+    expect(result.rows).toMatchObject([{ selector: TRANSFER, status: "matched" }]);
+    expect(result.issues).toEqual([]);
+    expect(result.facets).toMatchObject([
+      { facet: FACET_A, status: "verified" },
+      { facet: FACET_B, status: "fetch-failed" },
+    ]);
+    expect(result.status).toBe("inconclusive");
+  });
+
+  it("does not claim a routed function is missing when its facet ABI is unavailable", async () => {
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer, balanceOf],
+      proxy: PROXY,
+      call: facetsCall([
+        [FACET_A, [TRANSFER]],
+        [FACET_B, [BALANCE_OF]],
+      ]),
+      getCode: hasCode,
+      fetchFacetAbi: async (facet) => {
+        if (facet === FACET_A) return [transfer];
+        throw new Error("HTTP 503");
+      },
+    });
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.rows).toMatchObject([
+      { selector: TRANSFER, status: "matched" },
+      { selector: BALANCE_OF, facet: FACET_B, status: "facet-fetch-failed" },
+    ]);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("keeps a proven mismatch decisive when unrelated facet evidence is unavailable", async () => {
+    const changed = { ...transfer, outputs: [{ name: "", type: "uint256" }] } as Abi[number];
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer],
+      proxy: PROXY,
+      call: facetsCall([
+        [FACET_A, [TRANSFER]],
+        [FACET_B, [UNKNOWN]],
+      ]),
+      getCode: hasCode,
+      fetchFacetAbi: async (facet) => {
+        if (facet === FACET_A) return [changed];
+        throw new Error("HTTP 503");
+      },
+    });
+
+    expect(result.rows).toMatchObject([{ selector: TRANSFER, status: "mismatch" }]);
+    expect(result.issues).toMatchObject([
+      { kind: "mismatch", signature: "function transfer(address,uint256)" },
+    ]);
+    expect(result.status).toBe("mismatch");
+  });
+
+  it("does not claim an event is missing while a complete-map facet ABI is unavailable", async () => {
+    const result = await crossCheckSelectorProxyAbi({
+      vendored: [transfer, transferEvent],
+      proxy: PROXY,
+      call: facetsCall([
+        [FACET_A, [TRANSFER]],
+        [FACET_B, [UNKNOWN]],
+      ]),
+      getCode: hasCode,
+      fetchFacetAbi: async (facet) => {
+        if (facet === FACET_A) return [transfer];
+        throw new Error("HTTP 503");
+      },
+    });
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.facets).toMatchObject([
+      { facet: FACET_A, status: "verified" },
+      { facet: FACET_B, status: "fetch-failed" },
+    ]);
     expect(result.issues).toEqual([]);
   });
 
@@ -662,12 +855,13 @@ describe("crossCheckSelectorProxyAbi", () => {
     [
       "no code",
       { getCode: async () => "0x", failure: undefined },
-      { facet: { status: "no-code" }, row: { status: "facet-no-code" } },
+      { status: "mismatch", facet: { status: "no-code" }, row: { status: "facet-no-code" } },
     ],
     [
       "an unverified facet",
       { getCode: undefined, failure: "Contract source code not verified" },
       {
+        status: "inconclusive",
         facet: { status: "unverified" },
         row: { status: "facet-unverified", detail: "Contract source code not verified" },
       },
@@ -676,6 +870,7 @@ describe("crossCheckSelectorProxyAbi", () => {
       "a failing explorer fetch",
       { getCode: undefined, failure: "HTTP 503" },
       {
+        status: "inconclusive",
         facet: { status: "fetch-failed" },
         row: { status: "facet-fetch-failed", detail: "HTTP 503" },
       },
@@ -690,6 +885,7 @@ describe("crossCheckSelectorProxyAbi", () => {
         throw new Error(setup.failure ?? "must not fetch a codeless facet");
       },
     });
+    expect(result.status).toBe(expected.status);
     expect(result.facets).toMatchObject([{ facet: FACET_A, ...expected.facet }]);
     expect(result.rows).toMatchObject([{ selector: TRANSFER, facet: FACET_A, ...expected.row }]);
   });
@@ -818,6 +1014,7 @@ describe("crossCheckSelectorProxyAbi", () => {
     expect(result).toEqual({
       proxy: PROXY,
       source: "none",
+      status: "not-selector-proxy",
       complete: false,
       rows: [],
       facets: [],
