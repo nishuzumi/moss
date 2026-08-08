@@ -85,6 +85,9 @@ importers:
       abitype:
         specifier: ^1.2.3
         version: 1.2.3(typescript@5.9.3)(zod@4.4.3)
+      viem:
+        specifier: ^2.54.3
+        version: 2.54.3(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
       tsup:
         specifier: ^8.5.1
