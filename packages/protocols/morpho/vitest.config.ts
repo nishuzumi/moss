@@ -12,15 +12,10 @@ export default defineConfig({
     // Tests run against workspace sources, not dists, so a stale build can
     // never produce phantom failures.
     alias: {
-      "@themoss/core": src("../core/src/index.ts"),
-      "@themoss/simulator": src("../simulator/src/index.ts"),
-      "@themoss/erc": src("../erc/src/index.ts"),
-      "@themoss/protocol-apriori": src("../protocols/apriori/src/index.ts"),
-      "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
-      "@themoss/protocol-morpho": src("../protocols/morpho/src/index.ts"),
-      "@themoss/protocol-nadfun": src("../protocols/nadfun/src/index.ts"),
-      "@themoss/protocol-pancakeswap": src("../protocols/pancakeswap/src/index.ts"),
-      "@themoss/system": src("../system/src/index.ts"),
+      "@themoss/core": src("../../core/src/index.ts"),
+      "@themoss/simulator": src("../../simulator/src/index.ts"),
+      "@themoss/erc": src("../../erc/src/index.ts"),
+      "@themoss/system": src("../../system/src/index.ts"),
     },
   },
 });
