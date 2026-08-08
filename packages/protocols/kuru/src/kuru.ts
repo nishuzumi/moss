@@ -35,6 +35,52 @@ import type {
   VerifiedMarket,
 } from "./types.js";
 
+/** Why a Kuru quote could not be produced. */
+export type KuruQuoteErrorCode =
+  /** Discovery completed; no verified direct or via-MON route exists. */
+  | "NO_VERIFIED_ROUTE"
+  /** Every exact-input route completed and returned zero output. */
+  | "NO_POSITIVE_QUOTE"
+  /** Nothing could be quoted and at least one evaluation did not complete. */
+  | "ROUTE_QUOTE_UNAVAILABLE"
+  /** Every route completed and none can reach the requested output. */
+  | "TARGET_OUTPUT_UNSATISFIABLE";
+
+/**
+ * A route evaluation that did not complete, and which route it was.
+ *
+ * The path is the same human-readable token list a successful quote returns, so a caller can see
+ * which candidate went unmeasured without market addresses or SDK structures leaking out.
+ */
+export type KuruUnavailableRoute = {
+  readonly path: readonly TokenRef[];
+  readonly error: Error;
+};
+
+/**
+ * Typed rejection of a Kuru quote. `unavailable` holds the evaluations that did not complete,
+ * so a caller can tell "the answer is no" from "we never finished asking".
+ */
+export class KuruQuoteError extends Error {
+  readonly code: KuruQuoteErrorCode;
+  readonly side: KuruQuote["amountSide"];
+  readonly unavailable: readonly KuruUnavailableRoute[];
+
+  constructor(
+    code: KuruQuoteErrorCode,
+    side: KuruQuote["amountSide"],
+    detail: string,
+    unavailable: readonly KuruUnavailableRoute[] = [],
+  ) {
+    super(`${code}: ${detail}`);
+    this.name = "KuruQuoteError";
+    this.code = code;
+    this.side = side;
+    this.unavailable = unavailable;
+    if (unavailable[0]) this.cause = unavailable[0].error;
+  }
+}
+
 // Official Monad mainnet Router:
 // https://docs.kuru.io/contracts/Contract-addresses (retrieved 2026-07-15).
 // The live Kuru test verifies deployed bytecode.
@@ -261,7 +307,14 @@ export class Kuru {
     const [firstRoute] = routes;
     const firstLeg = firstRoute?.[0];
     const lastLeg = firstRoute?.at(-1);
-    if (!firstLeg || !lastLeg) throw new Error("no verified Kuru market path for this token pair");
+    if (!firstLeg || !lastLeg) {
+      // Discovery completed and produced nothing: a different claim from any quote outcome.
+      throw new KuruQuoteError(
+        "NO_VERIFIED_ROUTE",
+        side.kind,
+        "no verified Kuru market path for this token pair",
+      );
+    }
     const inputDecimals = firstLeg.inputDecimals;
     const outputDecimals = lastLeg.outputDecimals;
     const slippage = BigInt(params.slippage ?? DEFAULT_SLIPPAGE_BPS);
@@ -379,11 +432,35 @@ export class Kuru {
     const settled = await Promise.allSettled(
       routes.map(async (route) => ({ route, amountOut: await this.#quoteRoute(route, amountIn) })),
     );
-    const quoted = settled.flatMap((result) =>
-      result.status === "fulfilled" && result.value.amountOut > 0n ? [result.value] : [],
+    // Rejections are kept with the route they belong to: each one is a candidate that was never
+    // compared, and naming it is the difference between evidence and a bare count.
+    const unavailable = settled.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [{ path: routeTokens(routes[index] as Route), error: asError(result.reason) }]
+        : [],
     );
+    const completed = settled.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+
+    const quoted = completed.filter((entry) => entry.amountOut > 0n);
     const [first] = quoted;
-    if (!first) throw new Error("no Kuru market path can quote this input amount");
+    if (!first) {
+      // These were one message before, and they are different claims.
+      if (unavailable.length > 0) {
+        throw new KuruQuoteError(
+          "ROUTE_QUOTE_UNAVAILABLE",
+          "amountIn",
+          `no route quoted this input and ${unavailable.length} of ${routes.length} evaluations did not complete, so the comparison is incomplete`,
+          unavailable,
+        );
+      }
+      throw new KuruQuoteError(
+        "NO_POSITIVE_QUOTE",
+        "amountIn",
+        `all ${routes.length} verified routes completed and quoted zero output for this input amount`,
+      );
+    }
     return quoted.reduce((best, current) => (current.amountOut > best.amountOut ? current : best));
   }
 
@@ -399,12 +476,67 @@ export class Kuru {
         amountIn: await this.#requiredInput(route, amountOut, inputDecimals, outputDecimals),
       })),
     );
+    // The reverse search rejects both when a route cannot reach the target and when the
+    // evaluation failed; only the first is an answer.
+    const unsatisfiable: KuruUnavailableRoute[] = [];
+    const unavailable: KuruUnavailableRoute[] = [];
+    settled.forEach((result, index) => {
+      if (result.status !== "rejected") return;
+      const entry = {
+        path: routeTokens(routes[index] as Route),
+        error: asError(result.reason),
+      };
+      (isUnsatisfiableTarget(entry.error) ? unsatisfiable : unavailable).push(entry);
+    });
     const quoted = settled.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : [],
     );
+
     const [first] = quoted;
-    if (!first) throw new Error("no Kuru market path can satisfy this output amount");
+    if (!first) {
+      if (unavailable.length > 0) {
+        throw new KuruQuoteError(
+          "ROUTE_QUOTE_UNAVAILABLE",
+          "amountOut",
+          `no route satisfied this output and ${unavailable.length} of ${routes.length} evaluations did not complete, so the comparison is incomplete`,
+          unavailable,
+        );
+      }
+      throw new KuruQuoteError(
+        "TARGET_OUTPUT_UNSATISFIABLE",
+        "amountOut",
+        `all ${routes.length} verified routes outgrew what their markets can price for this output amount`,
+        unsatisfiable,
+      );
+    }
     return quoted.reduce((best, current) => (current.amountIn < best.amountIn ? current : best));
+  }
+
+  /**
+   * #quoteRoute for the reverse search, where an input too large for the market to represent is
+   * an answer rather than a fault.
+   *
+   * The doubling probe overflows the market's size type long before the 255-attempt guard can
+   * fire, so that guard was unreachable in practice and the overflow surfaced as a viem
+   * IntegerOutOfRangeError — indistinguishable, to the caller above, from an RPC failure. It is
+   * not the same thing: the value came from our own search, nothing was asked of the chain, and
+   * the conclusion is deterministic. Treated as "this route cannot reach the target", which is
+   * what it means.
+   */
+  async #quoteRouteForSearch(route: Route, amountIn: bigint): Promise<bigint> {
+    try {
+      return await this.#quoteRoute(route, amountIn);
+    } catch (error) {
+      if (isProbeBeyondEncodableSize(error) || isMarketArithmeticOverflow(error)) {
+        throw new KuruQuoteError(
+          "TARGET_OUTPUT_UNSATISFIABLE",
+          "amountOut",
+          "reaching this target needs more input than this market can price",
+          [{ path: routeTokens(route), error: asError(error) }],
+        );
+      }
+      throw error;
+    }
   }
 
   async #requiredInput(
@@ -416,13 +548,15 @@ export class Kuru {
     // ponytail: monotonic reverse quote; replace with an order-book estimator if RPC volume matters.
     let high = scaleUnits(target, outputDecimals, inputDecimals);
     if (high < 1n) high = 1n;
-    for (let attempts = 0; (await this.#quoteRoute(route, high)) < target; attempts += 1) {
-      if (attempts >= 255) throw new Error("Kuru target output exceeds uint256 input range");
-      high *= 2n;
-    }
+    // Doubling stops on its own: the size argument is uint96, so #quoteRouteForSearch refuses
+    // to encode a probe past that and reports the route as unsatisfiable.
+    while ((await this.#quoteRouteForSearch(route, high)) < target) high *= 2n;
     let low = 0n;
     while (low + 1n < high) {
       const middle = (low + high) / 2n;
+      // Deliberately not the classifier: `middle` is below a size that already priced, so a
+      // refusal here says nothing about the range. For a two-leg route the second leg is sized
+      // from what the chain returned for the first, so it can fail on a smaller probe.
       if ((await this.#quoteRoute(route, middle)) >= target) high = middle;
       else low = middle;
     }
@@ -712,4 +846,76 @@ function requireFollowingRouterTrade(
   throw new Error(
     "Kuru flip-order Receipt requires an immediately following Router Trade from the same market",
   );
+}
+
+/** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
+function asError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/**
+ * True when a route rejection means "this route cannot reach the target", as opposed to "the
+ * evaluation did not complete". Only the reverse search raises the former, and it says so with
+ * a typed error rather than a message match.
+ */
+function isUnsatisfiableTarget(error: Error): boolean {
+  return error instanceof KuruQuoteError && error.code === "TARGET_OUTPUT_UNSATISFIABLE";
+}
+
+/**
+ * True when the probe outgrew what the market's size parameter can even hold.
+ *
+ * This is viem refusing to encode a `uint96` argument: client-side, before anything is asked of
+ * the chain. Applied only to the doubling loop, where each probe is deliberately larger than the
+ * last, so a refusal means the search has outgrown what the size argument can hold. The binary
+ * search uses the raw quote instead — its probes are below a size that already priced, and for a
+ * two-leg route the second leg is sized from the chain's answer to the first, so a refusal there
+ * would prove nothing.
+ *
+ * An on-chain revert is deliberately NOT accepted here. It looks similar and is not: `eth_call`
+ * reverts for a paused market, a failed require, or the provider's own gas cap, none of which
+ * say anything about the priceable range. Calling those "the target cannot be reached" would
+ * state a definitive no from evidence that establishes nothing — the very failure this change
+ * exists to prevent. They stay unavailable, which is the honest reading: we could not find out.
+ *
+ * Matched on viem's error name rather than message text: the name is part of its API, the
+ * wording is not. The walk is depth-bounded because a `cause` chain can be cyclic.
+ */
+function isProbeBeyondEncodableSize(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
+    if (current.name === "IntegerOutOfRangeError") return true;
+    current = current.cause;
+  }
+  return false;
+}
+
+/** Solidity `Panic(uint256)` selector, followed by the code as a uint256. */
+const PANIC_SELECTOR = "0x4e487b71";
+const PANIC_ARITHMETIC_OVERFLOW = 0x11n;
+
+/**
+ * True when the market itself refused the probe with an arithmetic overflow.
+ *
+ * Authenticated the same way the Uniswap adapter authenticates its skippable reverts: the revert
+ * data is decoded and matched, not inferred from an error class. `Panic(0x11)` from the
+ * orderbook means the size overflowed its own arithmetic, so a larger probe cannot help either.
+ *
+ * A revert with no data stays unavailable. Kuru markets produce those below the panic threshold,
+ * and so does a provider `eth_call` gas cap — nothing in an empty revert attributes the failure
+ * to the market.
+ */
+function isMarketArithmeticOverflow(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
+    const data = (current as { data?: unknown }).data;
+    if (
+      typeof data === "string" &&
+      data.startsWith(PANIC_SELECTOR) &&
+      data.length === PANIC_SELECTOR.length + 64 &&
+      BigInt(`0x${data.slice(PANIC_SELECTOR.length)}`) === PANIC_ARITHMETIC_OVERFLOW
+    ) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
 }
