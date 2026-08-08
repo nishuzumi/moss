@@ -1,0 +1,9 @@
+{
+  "distributor": {
+    "proxy": "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae",
+    "implementation": "0x3f0fa7847b1b2e4515a93e05b29f115d9bb51d85",
+    "proxyRuntimeCodeHash": "0x1663c7ebc964dfa69a98528bccf3431438c5149fbabb8313d33374df61f3985a",
+    "implementationRuntimeCodeHash": "0x9c2edb9dffd093d12e7361203d857bf6d1bd208fcc1aeff7a8b6ac73323a04e7",
+    "allowedExplorerOnly": []
+  }
+}

@@ -11,6 +11,7 @@
       "@themoss/system",
       "@themoss/protocol-apriori",
       "@themoss/protocol-kuru",
+      "@themoss/protocol-merkl",
       "@themoss/protocol-monad-cards",
       "@themoss/protocol-nadfun",
       "@themoss/protocol-pancakeswap",
