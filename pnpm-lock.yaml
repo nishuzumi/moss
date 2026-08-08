@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  postcss: 8.5.18
+
 importers:
 
   .:
@@ -88,7 +91,7 @@ importers:
     devDependencies:
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
@@ -110,7 +113,7 @@ importers:
     devDependencies:
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -135,7 +138,7 @@ importers:
         version: 2.10.0(typescript@5.9.3)
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
@@ -149,8 +152,8 @@ importers:
   packages/mcp-server:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.29.0
-        version: 1.29.0(zod@3.25.76)
+        specifier: ^1.30.0
+        version: 1.30.0(zod@3.25.76)
       '@themoss/core':
         specifier: workspace:*
         version: link:../core
@@ -187,7 +190,7 @@ importers:
     devDependencies:
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -209,7 +212,7 @@ importers:
     devDependencies:
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -240,7 +243,7 @@ importers:
         version: link:../../system
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -271,7 +274,7 @@ importers:
         version: link:../../system
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
@@ -293,7 +296,7 @@ importers:
         version: link:../../abi-tools
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
@@ -355,7 +358,7 @@ importers:
         version: link:../../simulator
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
@@ -411,7 +414,7 @@ importers:
     devDependencies:
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -436,7 +439,7 @@ importers:
         version: link:../simulator
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3)
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -1033,9 +1036,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@1.19.14':
-    resolution: {integrity: sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==}
-    engines: {node: '>=18.14.1'}
+  '@hono/node-server@2.0.12':
+    resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
+    engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
 
@@ -1067,8 +1070,8 @@ packages:
   '@manypkg/get-packages@1.1.3':
     resolution: {integrity: sha512-fo+QhuU3qE/2TQMQmbVMqaQ6EWbMhi4ABWP+O4AM1NqPBuy0OrApV5LO6BrrgnhtAHS2NH6RrVk9OL181tTi8A==}
 
-  '@modelcontextprotocol/sdk@1.29.0':
-    resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
+  '@modelcontextprotocol/sdk@1.30.0':
+    resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -1587,8 +1590,8 @@ packages:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
     engines: {node: '>=8.6.0'}
 
-  fast-uri@3.1.3:
-    resolution: {integrity: sha512-i70LwGWUduXqzicKXWshooq+sWL1K3WUU5rKZNG/0i3a1OSoX3HqhH5WbWwTmqWfor4urUakGPiRQcleRZTwOg==}
+  fast-uri@3.1.4:
+    resolution: {integrity: sha512-8JnbkQ4juDyvYs4mgFGQqg4yCYtFDtUtmp2QIQq11ZZe5CFQ5wcqm1rqDgAh/QdMySuBnPzMUiJUNZG5N/AiQw==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -1951,7 +1954,7 @@ packages:
     engines: {node: '>= 18'}
     peerDependencies:
       jiti: '>=1.21.0'
-      postcss: '>=8.0.9'
+      postcss: 8.5.18
       tsx: ^4.8.1
       yaml: ^2.4.2
     peerDependenciesMeta:
@@ -1964,8 +1967,8 @@ packages:
       yaml:
         optional: true
 
-  postcss@8.5.16:
-    resolution: {integrity: sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg==}
+  postcss@8.5.18:
+    resolution: {integrity: sha512-xdB1oSLHbz1vRWgCDalrCqEFTWzFlhqFC5tIHLMOSUIjhm3XXQ1qrFy8S/ESr1JYRRXqM3c1QFiMZUJdUTqyMQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   prettier@2.8.8:
@@ -2181,7 +2184,7 @@ packages:
     peerDependencies:
       '@microsoft/api-extractor': ^7.36.0
       '@swc/core': ^1
-      postcss: ^8.4.12
+      postcss: 8.5.18
       typescript: '>=4.5.0'
     peerDependenciesMeta:
       '@microsoft/api-extractor':
@@ -2760,7 +2763,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@hono/node-server@1.19.14(hono@4.12.27)':
+  '@hono/node-server@2.0.12(hono@4.12.27)':
     dependencies:
       hono: 4.12.27
 
@@ -2801,9 +2804,9 @@ snapshots:
       globby: 11.1.0
       read-yaml-file: 1.1.0
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 1.19.14(hono@4.12.27)
+      '@hono/node-server': 2.0.12(hono@4.12.27)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -3038,7 +3041,7 @@ snapshots:
   ajv@8.20.0:
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 3.1.3
+      fast-uri: 3.1.4
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -3357,7 +3360,7 @@ snapshots:
       merge2: 1.4.1
       micromatch: 4.0.8
 
-  fast-uri@3.1.3: {}
+  fast-uri@3.1.4: {}
 
   fastq@1.20.1:
     dependencies:
@@ -3690,14 +3693,14 @@ snapshots:
       mlly: 1.8.2
       pathe: 2.0.3
 
-  postcss-load-config@6.0.1(postcss@8.5.16)(tsx@4.23.0):
+  postcss-load-config@6.0.1(postcss@8.5.18)(tsx@4.23.0):
     dependencies:
       lilconfig: 3.1.3
     optionalDependencies:
-      postcss: 8.5.16
+      postcss: 8.5.18
       tsx: 4.23.0
 
-  postcss@8.5.16:
+  postcss@8.5.18:
     dependencies:
       nanoid: 3.3.15
       picocolors: 1.1.1
@@ -3933,7 +3936,7 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  tsup@8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3):
+  tsup@8.5.1(postcss@8.5.18)(tsx@4.23.0)(typescript@5.9.3):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.7)
       cac: 6.7.14
@@ -3944,7 +3947,7 @@ snapshots:
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
       picocolors: 1.1.1
-      postcss-load-config: 6.0.1(postcss@8.5.16)(tsx@4.23.0)
+      postcss-load-config: 6.0.1(postcss@8.5.18)(tsx@4.23.0)
       resolve-from: 5.0.0
       rollup: 4.62.2
       source-map: 0.7.6
@@ -3953,7 +3956,7 @@ snapshots:
       tinyglobby: 0.2.17
       tree-kill: 1.2.2
     optionalDependencies:
-      postcss: 8.5.16
+      postcss: 8.5.18
       typescript: 5.9.3
     transitivePeerDependencies:
       - jiti
@@ -4045,7 +4048,7 @@ snapshots:
       esbuild: 0.28.1
       fdir: 6.5.0(picomatch@4.0.5)
       picomatch: 4.0.5
-      postcss: 8.5.16
+      postcss: 8.5.18
       rollup: 4.62.2
       tinyglobby: 0.2.17
     optionalDependencies:
