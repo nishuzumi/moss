@@ -8,19 +8,16 @@ export default defineConfig({
   // transform must lower them (ADR 0001 toolchain constraint). This is also
   // why the repo pins vitest 3 — vite 8's oxc does not lower them.
   esbuild: { target: "es2022" },
+  // The keyed online explorer cross-check lives in test-online/ and runs only
+  // through vitest.online.config.ts (pnpm test:abi:online).
+  test: { include: ["test/**/*.test.ts"] },
   resolve: {
     // Tests run against workspace sources, not dists, so a stale build can
     // never produce phantom failures.
     alias: {
-      "@themoss/core": src("../core/src/index.ts"),
-      "@themoss/simulator": src("../simulator/src/index.ts"),
-      "@themoss/erc": src("../erc/src/index.ts"),
-      "@themoss/protocol-aave": src("../protocols/aave/src/index.ts"),
-      "@themoss/protocol-apriori": src("../protocols/apriori/src/index.ts"),
-      "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
-      "@themoss/protocol-nadfun": src("../protocols/nadfun/src/index.ts"),
-      "@themoss/protocol-pancakeswap": src("../protocols/pancakeswap/src/index.ts"),
-      "@themoss/system": src("../system/src/index.ts"),
+      "@themoss/core": src("../../core/src/index.ts"),
+      "@themoss/erc": src("../../erc/src/index.ts"),
+      "@themoss/simulator": src("../../simulator/src/index.ts"),
     },
   },
 });
