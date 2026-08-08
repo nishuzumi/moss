@@ -1,0 +1,18 @@
+{
+  "router": {
+    "address": "0x9dA18982a33FD0c7051B19F0d7C76F2d5E7e017c",
+    "allowedExplorerOnly": []
+  },
+  "vault": {
+    "address": "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
+    "allowedExplorerOnly": []
+  },
+  "vaultExtension": {
+    "address": "0x0E8B07657D719B86e06bF0806D6729e3D528C9A9",
+    "allowedExplorerOnly": []
+  },
+  "vaultExplorer": {
+    "address": "0x043A2daD730d585C44FB79D2614F295D2d625412",
+    "allowedExplorerOnly": []
+  }
+}
