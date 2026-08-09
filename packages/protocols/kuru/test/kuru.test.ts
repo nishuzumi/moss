@@ -20,7 +20,7 @@ import {
 } from "viem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KuruOrderbookAbi, KuruRouterAbi } from "../src/abis/kuru.js";
-import { KURU_ROUTER_ADDRESS, Kuru, KuruQuoteError } from "../src/index.js";
+import { KURU_ROUTER_ADDRESS, Kuru, type KuruQuote, KuruQuoteError } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const ZERO = getAddress("0x0000000000000000000000000000000000000000");
@@ -127,6 +127,7 @@ describe("Kuru", () => {
       estimatedAmountOut: "1.2",
       minimumAmountOut: "0.6",
       path: [USDC_ADDRESS, NATIVE, AUSD_ADDRESS],
+      unavailable: [],
     });
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
       pairs: readonly unknown[];
@@ -175,6 +176,7 @@ describe("Kuru", () => {
       maximumAmountIn: "1.005",
       minimumAmountOut: "1.2",
       path: [USDC_ADDRESS, NATIVE, AUSD_ADDRESS],
+      unavailable: [],
     });
 
     const capability = await registry.action("kuru", "swap", ACCOUNT, {
@@ -605,13 +607,16 @@ describe("Kuru", () => {
   });
 
   it("selects a quoted route when another evaluation did not complete", async () => {
-    // Deliberately NOT fail-closed, and this is the one open decision in the issue. Refusing
-    // here would be safer in principle: the route that failed might have won, and the caller
-    // cannot tell the comparison was partial. Measured against mainnet, though, refusing makes
-    // a live liquid pair unquotable — USDC/AUSD discovers 15 routes, the reverse search issues
-    // several hundred sequential eth_calls per quote, and the public endpoint rate-limits some of
-    // them. Aborting on any one of those turns a working pair into a permanent failure.
-    // Selection is left as it was; the failure paths carry the distinction instead.
+    // Deliberately NOT fail-closed. The issue leaves this to the maintainer, so the reasoning
+    // is recorded here rather than assumed: refusing is safer in principle, since the route that
+    // failed might have won. Measured against mainnet USDC/AUSD (15 discovered routes, ~800
+    // eth_calls per target-output quote), 25 of those calls failed when issued at full fan-out —
+    // but 22 were self-inflicted rate-limiting: capping in-flight calls at 4 removed them, and a
+    // single retry absorbed the rest of that class. What survives batching and retry is 3 markets
+    // that revert deterministically with no revert data, in every run. Those are unclassifiable
+    // by construction, so refusing on them would make a liquid pair permanently unquotable for a
+    // reason no caller can act on. Selection is therefore left as upstream had it, and the
+    // partiality is reported instead of hidden — which is what the issue actually asks for.
     const { registry } = offlineRegistry([
       market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
       { ...market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 6n, 5n), quoteFails: true },
@@ -622,7 +627,15 @@ describe("Kuru", () => {
       tokenOut: AUSD_ADDRESS,
       amountIn: "1",
     });
-    expect(quote.kind).toBe("query");
+    if (quote.kind !== "query") throw new Error("expected query");
+    // The point of the whole issue: the caller is told the comparison was partial, and which
+    // candidate went unmeasured, instead of receiving a winner that looks exhaustive.
+    const data = quote.data as KuruQuote;
+    expect(data.unavailable).toEqual([
+      { path: [USDC_ADDRESS, NATIVE, AUSD_ADDRESS], reason: expect.any(String) },
+    ]);
+    // A Query result is JSON-coerced, so the gap has to survive as data, not as an Error.
+    expect(data.unavailable[0]?.reason).not.toHaveLength(0);
   });
 
   it("separates an unsatisfiable target from an incomplete comparison", async () => {
@@ -656,7 +669,9 @@ describe("Kuru", () => {
       tokenOut: AUSD_ADDRESS,
       amountOut: "1",
     });
-    expect(quote.kind).toBe("query");
+    if (quote.kind !== "query") throw new Error("expected query");
+    const data = quote.data as KuruQuote;
+    expect(data.unavailable.map((entry) => entry.path)).toEqual([[USDC_ADDRESS, AUSD_ADDRESS]]);
   });
 
   it("accepts only the encode refusal as an exhausted range, not any failed call", async () => {

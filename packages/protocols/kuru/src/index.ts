@@ -6,4 +6,8 @@ export {
   type KuruQuoteErrorCode,
   type KuruUnavailableRoute,
 } from "./kuru.js";
-export type { KuruSwapOutcome } from "./types.js";
+export type {
+  KuruQuote,
+  KuruSwapOutcome,
+  KuruUnavailableEvaluation,
+} from "./types.js";

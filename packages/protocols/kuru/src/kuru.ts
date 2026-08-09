@@ -28,6 +28,8 @@ import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 import type {
   KuruQuote,
   KuruSwapOutcome,
+  KuruUnavailableEvaluation,
+  KuruUnavailableRoute,
   MarketCandidate,
   PreparedSwap,
   Route,
@@ -46,16 +48,7 @@ export type KuruQuoteErrorCode =
   /** Every route completed and none can reach the requested output. */
   | "TARGET_OUTPUT_UNSATISFIABLE";
 
-/**
- * A route evaluation that did not complete, and which route it was.
- *
- * The path is the same human-readable token list a successful quote returns, so a caller can see
- * which candidate went unmeasured without market addresses or SDK structures leaking out.
- */
-export type KuruUnavailableRoute = {
-  readonly path: readonly TokenRef[];
-  readonly error: Error;
-};
+export type { KuruUnavailableRoute } from "./types.js";
 
 /**
  * Typed rejection of a Kuru quote. `unavailable` holds the evaluations that did not complete,
@@ -148,6 +141,7 @@ export class Kuru {
         estimatedAmountOut: formatUnits(prepared.estimatedAmountOut, prepared.outputDecimals),
         minimumAmountOut: formatUnits(prepared.minimumAmountOut, prepared.outputDecimals),
         path,
+        unavailable: reportable(prepared.unavailable),
       };
     }
     return {
@@ -156,6 +150,7 @@ export class Kuru {
       maximumAmountIn: formatUnits(prepared.executionAmountIn, prepared.inputDecimals),
       minimumAmountOut: formatUnits(prepared.minimumAmountOut, prepared.outputDecimals),
       path,
+      unavailable: reportable(prepared.unavailable),
     };
   }
 
@@ -340,6 +335,7 @@ export class Kuru {
         minimumAmountOut,
         inputDecimals,
         outputDecimals,
+        unavailable: quoted.unavailable,
       };
     }
 
@@ -360,6 +356,7 @@ export class Kuru {
       minimumAmountOut,
       inputDecimals,
       outputDecimals,
+      unavailable: quoted.unavailable,
     };
   }
 
@@ -461,7 +458,8 @@ export class Kuru {
         `all ${routes.length} verified routes completed and quoted zero output for this input amount`,
       );
     }
-    return quoted.reduce((best, current) => (current.amountOut > best.amountOut ? current : best));
+    const best = quoted.reduce((left, right) => (right.amountOut > left.amountOut ? right : left));
+    return { ...best, unavailable };
   }
 
   async #quoteTargetOutput(
@@ -509,7 +507,10 @@ export class Kuru {
         unsatisfiable,
       );
     }
-    return quoted.reduce((best, current) => (current.amountIn < best.amountIn ? current : best));
+    // Only `unavailable` marks the comparison partial: a route that completed and cannot reach
+    // the target was measured, and saying so would overstate the gap.
+    const best = quoted.reduce((left, right) => (right.amountIn < left.amountIn ? right : left));
+    return { ...best, unavailable };
   }
 
   /**
@@ -849,6 +850,16 @@ function requireFollowingRouterTrade(
 }
 
 /** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
+/**
+ * Gaps as a Query result can carry them: the Error's message, since the value is about to be
+ * JSON-coerced and the Error itself would arrive empty.
+ */
+function reportable(
+  unavailable: readonly KuruUnavailableRoute[],
+): readonly KuruUnavailableEvaluation[] {
+  return unavailable.map(({ path, error }) => ({ path, reason: error.message }));
+}
+
 function asError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
 }

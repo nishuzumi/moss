@@ -1,6 +1,11 @@
 import { type ActionCtx, NATIVE, type TokenRef } from "@themoss/core";
 import { USDC_ADDRESS } from "@themoss/system";
-import type { Kuru, KuruQuoteError, KuruQuoteErrorCode } from "../src/index.js";
+import type {
+  Kuru,
+  KuruQuoteError,
+  KuruQuoteErrorCode,
+  KuruUnavailableEvaluation,
+} from "../src/index.js";
 
 declare const kuru: Kuru;
 declare const ctx: ActionCtx;
@@ -56,3 +61,23 @@ quoteError.unavailable = [];
 // Each retained failure names the route it belongs to, in the same shape a quote returns.
 const failedPath: readonly TokenRef[] | undefined = quoteError.unavailable[0]?.path;
 void failedPath;
+
+// ── KuruQuote: partiality is part of the published contract too ──────────────
+// The gap list is what lets a caller refuse a partial comparison, so it must be reachable
+// without a cast and must not be silently optional — an `unavailable?:` would let a consumer
+// forget the check and still compile.
+
+declare const quote: Awaited<ReturnType<Kuru["quote"]>>;
+const gaps: readonly KuruUnavailableEvaluation[] = quote.unavailable;
+void gaps;
+
+// The reason is a string, not an Error: a Query result is JSON-coerced on the way out.
+const reason: string | undefined = quote.unavailable[0]?.reason;
+void reason;
+
+// @ts-expect-error the gap list is read-only
+quote.unavailable = [];
+
+// @ts-expect-error a gap reports a message, not the live Error the thrown form keeps
+const liveError: Error | undefined = quote.unavailable[0]?.error;
+void liveError;
