@@ -1,12 +1,11 @@
-// GENERATED FILE - do not edit by hand.
-//   regenerate offline from abis-src/: pnpm gen:abis
-// ABI origin: official Nad Name Service documentation (ADR 0007)
-//   source:   https://docs.nad.domains/developers/contracts/contract-abi.md
-//   artifact: contract-abi.md - verbatim in ../abis-src/
-//   file:     sha256 63060346a0d43fed03f9413eca2090efb40c4dd771c09b52e10246d5d253f743
-//   retrieved: 2026-08-10 (UTC)
+> For the complete documentation index, see [llms.txt](https://docs.nad.domains/llms.txt). Markdown versions of documentation pages are available by appending `.md` to page URLs; this page is available as [Markdown](https://docs.nad.domains/developers/contracts/contract-abi.md).
 
-export const NadNameServiceAbi = [
+# Contract ABI
+
+**NadNameService.sol**
+
+```json
+[
   {
     "anonymous": false,
     "inputs": [
@@ -367,4 +366,6 @@ export const NadNameServiceAbi = [
     "stateMutability": "view",
     "type": "function"
   }
-] as const;
+]
+
+```

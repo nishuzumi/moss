@@ -7,6 +7,7 @@ import {
   Protocol,
   Query,
 } from "@themoss/core";
+import { getAddress } from "viem";
 import { NadNameServiceAbi } from "./abis/nad-name-service.js";
 
 // Nad Name Service on Monad mainnet.
@@ -61,6 +62,12 @@ export class NadNameService {
   })
   async profile(params: InferParams<typeof addressParams>): Promise<NadNameServiceProfile> {
     const profile = await this.nns.read.getProfileForAddress([params.address]);
+    const returnedAddress = Array.isArray(profile) ? profile[0] : profile.addr;
+    if (getAddress(returnedAddress) !== getAddress(params.address)) {
+      throw new Error(
+        `NNS profile returned address ${returnedAddress} for requested address ${params.address}`,
+      );
+    }
     const primaryName = Array.isArray(profile) ? profile[1] : profile.primaryName;
     const avatar = Array.isArray(profile) ? profile[2] : profile.avatar;
     return { address: params.address, primaryName, avatar };

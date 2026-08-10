@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run test/ test-online/live-mainnet.test.ts",
     "gen:abis": "tsx scripts/gen-abis.ts",
-    "test:online": "vitest run test-online/live-mainnet.test.ts"
+    "test:online": "vitest run test-online/live-mainnet.test.ts",
+    "test:abi:online": "vitest run --config vitest.online.config.ts"
   },
   "dependencies": {
     "@themoss/core": "workspace:*"

@@ -41,17 +41,28 @@ https://github.com/monad-crypto/protocols/blob/main/mainnet/nad_name_service.jso
 
 ## ABI provenance
 
-The complete official ABI is vendored at `abis-src/NadNameService.json` from:
+The complete official ABI source is vendored verbatim at `abis-src/contract-abi.md`
+from:
 
 ```text
 https://docs.nad.domains/developers/contracts/contract-abi.md
 ```
 
 `abis-src/VENDOR.json` pins the source URL, retrieval date, and SHA-256. The
-generated `src/abis/nad-name-service.ts` module is reproducible offline:
+generator extracts the `NadNameService.sol` JSON block from that artifact and
+produces `src/abis/nad-name-service.ts` reproducibly offline:
 
 ```bash
 pnpm --filter @themoss/protocol-nns gen:abis
+```
+
+The deployed address is an ERC-1967 proxy. `abis.json` pins the proxy,
+implementation, and implementation bytecode hash. The keyed online suite also
+checks the proxy slot and semantically compares the generated ABI with the
+implementation ABI returned by Monadscan:
+
+```bash
+MONADSCAN_API_KEY=... pnpm --filter @themoss/protocol-nns test:abi:online
 ```
 
 ## Scope and safety

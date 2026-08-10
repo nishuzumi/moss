@@ -127,6 +127,28 @@ describe("NadNameService", () => {
     });
   });
 
+  it.each([
+    [
+      "an object profile",
+      {
+        addr: "0x1111111111111111111111111111111111111111",
+        primaryName: "salmo.nad",
+        avatar: "ipfs://avatar",
+      },
+    ],
+    [
+      "a positional tuple profile",
+      ["0x1111111111111111111111111111111111111111", "salmo.nad", "ipfs://avatar"],
+    ],
+  ])("fails closed when %s belongs to another address", async (_shape, profile) => {
+    const { registry, readContract } = offlineRegistry();
+    readContract.mockImplementationOnce(async () => profile);
+
+    await expect(registry.action("nns", "profile", ACCOUNT, { address: ACCOUNT })).rejects.toThrow(
+      /returned address/i,
+    );
+  });
+
   it("rejects invalid addresses before an RPC read", async () => {
     const { registry, readContract } = offlineRegistry();
 

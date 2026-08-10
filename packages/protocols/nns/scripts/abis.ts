@@ -61,13 +61,19 @@ export function readVendorInfo(packageRoot: string): VendorInfo {
 }
 
 export function readAndValidateAbi(packageRoot: string, vendor: VendorInfo): readonly AbiEntry[] {
-  const raw = readFileSync(join(packageRoot, "abis-src", vendor.file), "utf8");
-  const actualHash = sha256(raw);
+  const rawArtifact = readFileSync(join(packageRoot, "abis-src", vendor.file), "utf8");
+  const actualHash = sha256(rawArtifact);
   if (actualHash !== vendor.fileSha256) {
     throw new Error(`NNS ABI hash mismatch: expected ${vendor.fileSha256}, received ${actualHash}`);
   }
 
-  const abi = JSON.parse(raw) as readonly AbiEntry[];
+  const abiCodeBlock = rawArtifact.match(
+    /\*\*NadNameService\.sol\*\*\r?\n\r?\n```json\r?\n([\s\S]*?)\r?\n```/,
+  )?.[1];
+  if (!abiCodeBlock)
+    throw new Error("NNS ABI documentation artifact has no NadNameService JSON block");
+
+  const abi = JSON.parse(abiCodeBlock) as readonly AbiEntry[];
   if (!Array.isArray(abi)) throw new Error("NNS ABI must be a JSON array");
 
   const functions = abi

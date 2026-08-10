@@ -2,9 +2,9 @@ name: ABI cross-check
 
 # Online + keyed by design (ADR 0007): runs every package's `test:abi:online`
 # suite (root script: `pnpm -r --if-present test:abi:online`). A protocol
-# package opts in by shipping that script; today that is kuru, which verifies
-# its vendored Router ABI against the explorer-verified implementation and
-# asserts the pinned proxy targets have not been upgraded. Fork PRs never
+# package opts in by shipping that script; Kuru and NNS verify their vendored
+# ABIs against pinned deployed implementations and assert their proxy targets
+# have not been upgraded. Fork PRs never
 # receive the secret — this workflow has no pull_request trigger at all;
 # offline `pnpm test` remains the only gate they need.
 on:
