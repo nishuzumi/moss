@@ -1,0 +1,24 @@
+{
+  "vendoredAt": "2026-07-28",
+  "releaseAgeGuardDays": 7,
+  "packages": [
+    {
+      "name": "@uniswap/universal-router",
+      "version": "2.0.0",
+      "tarballSha256": "9b68a657b304708c4834878995e8d984b6889acfef4773e82038ab9ad094de14",
+      "files": {
+        "UniversalRouter.json": "artifacts/contracts/UniversalRouter.sol/UniversalRouter.json",
+        "PoolManager.json": "artifacts/@uniswap/v4-core/src/PoolManager.sol/PoolManager.json",
+        "IAllowanceTransfer.json": "artifacts/permit2/src/interfaces/IAllowanceTransfer.sol/IAllowanceTransfer.json"
+      }
+    },
+    {
+      "name": "@uniswap/v4-periphery",
+      "version": "1.0.3",
+      "tarballSha256": "a044868e7476395e3687f78fceaf5b1a18cce98862891c2715d3e95887838994",
+      "files": {
+        "V4Quoter.json": "foundry-out/V4Quoter.sol/V4Quoter.json"
+      }
+    }
+  ]
+}

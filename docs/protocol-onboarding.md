@@ -21,7 +21,7 @@ Every ABI under `src/abis/` declares one origin:
 
 - `compiled`: generated from committed contract source;
 - `explorer`: retrieved from a verified-contract page with URL and date;
-- `vendored`: generated deterministically from committed full upstream artifacts with package version and tarball digest.
+- `vendored`: generated deterministically from committed full upstream artifacts, pinned either by npm package version and tarball digest or by upstream Git commit and file digest.
 
 Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset. A vendored ABI can additionally be cross-checked against the explorer-verified implementation behind the protocol's proxies: ship a `test:abi:online` script (the root command and the ABI cross-check workflow pick it up automatically) and build the suite from `@themoss/abi-tools` — `fetchAbi`, `compareDeployedAbi`, and the ERC-1967 helpers. See ADR 0007 and `packages/protocols/kuru` (`abis.json` + `test-online/`) for the reference implementation.
 
@@ -65,6 +65,17 @@ export class MyProtocol {
 ```
 
 Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
+
+Nesting one of the Protocol's own Capabilities goes through the injected `self` reference, declared over the named Capabilities it nests: `declare self: SelfRef<MyProtocol, "approve">`. It behaves exactly like a dependency reference (validated params, core-stamped node, Registry-resolved Receipt parser). Never hand-assemble a `CapabilityNode` in a Protocol package. A Capability declares itself nestable where it is written, by returning `nestable(...)`:
+
+```ts
+@Capability<MyProtocol, typeof approveParams>({ /* ... */ })
+approve(params: ApproveParams): Nestable<TransactionNode[]> {
+  return nestable([this.router.approve(/* protocol arguments */)]);
+}
+```
+
+`self` names only declared Capabilities, so a Query, a Receipt parser, a Capability that never declared itself, or a plain helper shaped like a Capability will not compile. TypeScript cannot see a decorator, so core also refuses at the call site: reaching any other method of the class through `self` throws a named framework error rather than returning undefined. Reaching for `self` from a Query or a Receipt parser throws for the same reason. `declare self` is the only valid form: core owns the property, so a contract or dependency key named `self` is rejected up front and an initialized `self` field is rejected at construction. Core admits each nested call against the same `CAPABILITY_TREE_LIMITS` depth and count budget the finished tree is checked against, so a Capability that nests itself is stopped at the limit rather than after the work is done.
 
 `labels` names fixed Package addresses independently of Handles. Registry renders the example above as `Package(Myprotocol:Router)`, validates the combined payload inside the Core-owned wrapper as a safe 1–32 character name, and exposes it through declared dependency and Receipt parser caller scopes. Receipt parsers still emit raw evidence-backed addresses; Registry owns presentation.
 

@@ -89,11 +89,38 @@ export const PROTOCOL_TARGET = Symbol.for("moss.protocol.target");
 export const METHOD_META = Symbol.for("moss.method");
 export const RECEIPT_META = Symbol.for("moss.receipt");
 
+/** Injected by core on every Protocol instance; a Protocol may only declare it. */
+export const SELF_KEY = "self";
+
+/**
+ * Rejects a Protocol that initialized `self` itself. `super()` runs the base
+ * class field initializers, so without this the injected reference would
+ * silently replace the field. An erased `declare self` leaves no own property
+ * and stays valid.
+ */
+export function requireUnclaimedSelf(instance: object, protocol: string): void {
+  if (Object.hasOwn(instance, SELF_KEY)) {
+    throw new Error(
+      `protocol "${protocol}" must leave "${SELF_KEY}" to core; declare it as "declare self", not an initialized field`,
+    );
+  }
+}
+
 export function Protocol<Dependencies extends ProtocolDependencies = Record<never, never>>(
   config: ProtocolConfig<Dependencies>,
 ) {
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(config.name)) {
     throw new Error(`protocol name "${config.name}" must be a lowercase slug`);
+  }
+  for (const [group, keys] of [
+    ["contract", Object.keys(config.contracts ?? {})],
+    ["dependency", Object.keys(config.protocols ?? {})],
+  ] as const) {
+    if (keys.includes(SELF_KEY)) {
+      throw new Error(
+        `protocol "${config.name}" cannot declare a ${group} named "${SELF_KEY}"; core injects it as the Protocol's own Capability reference`,
+      );
+    }
   }
   return <T extends new () => object & InjectedProtocols<Dependencies>>(
     target: T,
@@ -104,10 +131,11 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
     const injected = class extends Base {
       constructor(...args: unknown[]) {
         super();
-        const [runtime, account, dependencies = {}] = args as [
+        const [runtime, account, dependencies = {}, self] = args as [
           MossRuntime,
           Address,
           Record<string, object>?,
+          object?,
         ];
         if (!runtime?.client || !account) {
           throw new Error(`protocol "${config.name}" must be constructed by Registry`);
@@ -119,6 +147,8 @@ export function Protocol<Dependencies extends ProtocolDependencies = Record<neve
           });
         }
         Object.defineProperty(this, "runtime", { value: runtime, writable: false });
+        requireUnclaimedSelf(this, config.name);
+        if (self) Object.defineProperty(this, SELF_KEY, { value: self, writable: false });
         for (const key of Object.keys(config.protocols ?? {})) {
           const dependency = dependencies[key];
           if (!dependency) {
