@@ -1,0 +1,370 @@
+// GENERATED FILE - do not edit by hand.
+//   regenerate offline from abis-src/: pnpm gen:abis
+// ABI origin: official Nad Name Service documentation (ADR 0007)
+//   source:   https://docs.nad.domains/developers/contracts/contract-abi.md
+//   artifact: contract-abi.md - verbatim in ../abis-src/
+//   file:     sha256 63060346a0d43fed03f9413eca2090efb40c4dd771c09b52e10246d5d253f743
+//   retrieved: 2026-08-10 (UTC)
+
+export const NadNameServiceAbi = [
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "key",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "name": "AttributeSet",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      },
+      {
+        "components": [
+          {
+            "internalType": "string",
+            "name": "key",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "indexed": false,
+        "internalType": "struct IAttributeStorage.Attribute[]",
+        "name": "attributes",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "AttributesSet",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getResolvedAddress",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32[]",
+        "name": "nodes",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "getResolvedAddresses",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "node",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "addr",
+            "type": "address"
+          }
+        ],
+        "internalType": "struct IResolvedAddressStorage.ResolvedAddressItem[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "addr",
+        "type": "address"
+      }
+    ],
+    "name": "getPrimaryNameForAddress",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "addr",
+        "type": "address[]"
+      }
+    ],
+    "name": "getPrimaryNameForAddresses",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "addr",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "primaryName",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct IPrimaryNameStorage.PrimaryNameItem[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string",
+        "name": "key",
+        "type": "string"
+      }
+    ],
+    "name": "getNameAttribute",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string[]",
+        "name": "keys",
+        "type": "string[]"
+      }
+    ],
+    "name": "getNameAttributes",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "string",
+            "name": "key",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct IAttributeStorage.Attribute[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "addr",
+        "type": "address"
+      }
+    ],
+    "name": "getNamesOfAddress",
+    "outputs": [
+      {
+        "internalType": "string[]",
+        "name": "",
+        "type": "string[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string",
+        "name": "key",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "name": "setNameAttribute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "node",
+        "type": "bytes32"
+      },
+      {
+        "components": [
+          {
+            "internalType": "string",
+            "name": "key",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct IAttributeStorage.Attribute[]",
+        "name": "attributes",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "setNameAttributes",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "addr",
+        "type": "address"
+      }
+    ],
+    "name": "getProfileForAddress",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "addr",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "primaryName",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "avatar",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct INadNameService.Profile",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "addrs",
+        "type": "address[]"
+      }
+    ],
+    "name": "getProfilesForAddresses",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "addr",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "primaryName",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "avatar",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct INadNameService.Profile[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+] as const;

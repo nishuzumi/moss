@@ -1,0 +1,35 @@
+{
+  "name": "@themoss/protocol-nns",
+  "version": "0.0.0",
+  "description": "Moss Protocol adapter for Nad Name Service identity queries on Monad mainnet",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run test/ test-online/live-mainnet.test.ts",
+    "gen:abis": "tsx scripts/gen-abis.ts",
+    "test:online": "vitest run test-online/live-mainnet.test.ts",
+    "test:abi:online": "vitest run --config vitest.online.config.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "viem": "^2.54.3",
+    "vitest": "^3.2.6"
+  }
+}

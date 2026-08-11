@@ -29,6 +29,7 @@
     "@themoss/protocol-kuru": "workspace:*",
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-nadfun": "workspace:*",
+    "@themoss/protocol-nns": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
     "@themoss/protocol-uniswap": "workspace:*",
     "@themoss/simulator": "workspace:*",
