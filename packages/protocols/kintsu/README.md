@@ -32,10 +32,13 @@ Unsupported or inconsistent evidence fails closed.
 ## Deployment and ABI Origin
 
 The Adapter uses the StakedMonad proxy and sMON token at
-`0xA3227C5969757783154C60bF0bC1944180ed81B9`. `abis.json` records its expected
-EIP-1967 StakedMonadV2 implementation. The committed full ABI comes from that
-implementation's verified MonadScan source, not the stale V1 artifact linked
-from older Kintsu documentation.
+`0xA3227C5969757783154C60bF0bC1944180ed81B9`, as listed in Kintsu's
+[official contract addresses](https://docs.kintsu.xyz/the-kintsu-protocol/official-contract-addresses).
+The [MonadScan deployment](https://monadscan.com/address/0xA3227C5969757783154C60bF0bC1944180ed81B9)
+identifies the Kintsu-labeled proxy and its current implementation. `abis.json`
+records the expected EIP-1967 StakedMonadV2 implementation. The committed full
+ABI comes from that implementation's verified MonadScan source, not the stale
+V1 artifact linked from older Kintsu documentation.
 
 Refresh the ABI from the repository root with:
 
@@ -45,4 +48,4 @@ MONADSCAN_API_KEY=... pnpm --filter @themoss/protocol-kintsu update:abis
 
 The offline provenance test checks deterministic generated output. The
 separate keyed online suite checks proxy bytecode, the implementation slot,
-and semantic ABI equality.
+the on-chain sMON name/symbol/decimals, and semantic ABI equality.

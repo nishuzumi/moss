@@ -22,7 +22,20 @@ import { ERC20, type ERC20Outcome } from "@themoss/erc";
 import { decodeEventLog, getAddress, isAddressEqual, parseUnits, zeroAddress } from "viem";
 import { StakedMonadAbi } from "./abis/staked-monad.js";
 
+// Kintsu StakedMonad vault and sMON token on Monad mainnet.
+// Canonical deployment sources:
+// - Kintsu official contract addresses:
+//   https://docs.kintsu.xyz/the-kintsu-protocol/official-contract-addresses
+// - MonadScan (Kintsu-labeled proxy and current implementation):
+//   https://monadscan.com/address/0xA3227C5969757783154C60bF0bC1944180ed81B9
+// test-online/abi-explorer.test.ts enforces the proxy linkage, bytecode, and
+// token metadata on chain, plus ABI equality with the explorer artifact.
 export const KINTSU_STAKED_MONAD_ADDRESS = "0xA3227C5969757783154C60bF0bC1944180ed81B9" as const;
+
+// Static ERC-20 metadata for sMON, verified on chain by the online suite.
+export const KINTSU_STAKED_MONAD_NAME = "Kintsu Staked Monad" as const;
+export const KINTSU_STAKED_MONAD_SYMBOL = "sMON" as const;
+export const KINTSU_STAKED_MONAD_DECIMALS = 18 as const;
 
 const DEFAULT_SLIPPAGE_BPS = 50;
 const UINT96_MAX = (1n << 96n) - 1n;

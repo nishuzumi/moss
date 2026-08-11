@@ -1,5 +1,7 @@
 /**
  * Keyed online tripwire for the upgradeable Kintsu StakedMonad deployment.
+ * It checks proxy bytecode and implementation linkage, token metadata, and
+ * semantic equality with the explorer-verified implementation ABI.
  * It is intentionally excluded from the default offline test suite.
  */
 
@@ -14,7 +16,12 @@ import { createRuntime } from "@themoss/core";
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { StakedMonadAbi } from "../src/abis/staked-monad.js";
-import { KINTSU_STAKED_MONAD_ADDRESS } from "../src/kintsu.js";
+import {
+  KINTSU_STAKED_MONAD_ADDRESS,
+  KINTSU_STAKED_MONAD_DECIMALS,
+  KINTSU_STAKED_MONAD_NAME,
+  KINTSU_STAKED_MONAD_SYMBOL,
+} from "../src/index.js";
 
 interface AbiManifest {
   stakedMonad: {
@@ -58,6 +65,32 @@ describe("Kintsu ABI explorer cross-check", () => {
     expect(getAddress(erc1967ImplementationAddress(slot))).toBe(
       getAddress(manifest.stakedMonad.implementation),
     );
+  });
+
+  it("matches on-chain token metadata against the exported constants", {
+    timeout: 60_000,
+  }, async () => {
+    const runtime = await createRuntime();
+    const [name, symbol, decimals] = await Promise.all([
+      runtime.client.readContract({
+        address: manifest.stakedMonad.proxy,
+        abi: StakedMonadAbi,
+        functionName: "name",
+      }) as Promise<string>,
+      runtime.client.readContract({
+        address: manifest.stakedMonad.proxy,
+        abi: StakedMonadAbi,
+        functionName: "symbol",
+      }) as Promise<string>,
+      runtime.client.readContract({
+        address: manifest.stakedMonad.proxy,
+        abi: StakedMonadAbi,
+        functionName: "decimals",
+      }) as Promise<number>,
+    ]);
+    expect(name).toBe(KINTSU_STAKED_MONAD_NAME);
+    expect(symbol).toBe(KINTSU_STAKED_MONAD_SYMBOL);
+    expect(decimals).toBe(KINTSU_STAKED_MONAD_DECIMALS);
   });
 
   it("committed StakedMonad ABI matches the explorer-verified implementation", {
