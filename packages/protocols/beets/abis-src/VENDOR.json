@@ -1,0 +1,12 @@
+{
+  "name": "balancer/balancer-deployments",
+  "branch": "master",
+  "commit": "c1c3038a4fa214231af9099e4438998fccc30d59",
+  "fileSha256": {
+    "Router.json": "cf269cf3a24e3d30182e4ba4ed7ccd5cc9f0bd8306ae3f4daa42e1fe8a466ed8",
+    "Vault.json": "c4bdb00e1e3d2372a6a5073aa7cb63ef9b9e6fce093f50bfccfc52002fbf6f32",
+    "VaultExtension.json": "be467f1e2aa2c7f775c7170b7851eca4329a3b6e2b03b53f6b78dd0f0fe2857d",
+    "VaultExplorer.json": "05a2a259bb1924ec542a2abfae20aaba9159a9028b0679b721fa3a30ce755868"
+  },
+  "vendoredAt": "2026-07-29"
+}
