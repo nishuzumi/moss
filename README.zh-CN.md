@@ -24,6 +24,7 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 | ERC-721 | `@themoss/erc` | `transfer` | `ownerOf`、`balanceOf` |
 | ERC-1155 | `@themoss/erc` | `transfer`, `approve` | `balanceOf`, `uri`, `isApprovedForAll` |
 | Kuru | `@themoss/protocol-kuru` | `swap` | `quote` |
+| Clober | `@themoss/protocol-clober` | `swap` | `quote` |
 | aPriori | `@themoss/protocol-apriori` | `stake`、`unstake`、`claim` | — |
 | Nad.fun | `@themoss/protocol-nadfun` | — | `quoteBuy`、`quoteSell`、`tokenStatus` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |

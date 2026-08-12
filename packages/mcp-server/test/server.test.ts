@@ -123,6 +123,53 @@ describe("moss MCP server", () => {
       type: { default: 50, description: expect.stringContaining("1 bps equals 0.01%") },
       description: expect.stringContaining("adverse movement"),
     });
+
+    const cloberCoordinates = parseText(
+      await client.callTool({
+        name: "discover",
+        arguments: { protocol: "clober" },
+      }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(cloberCoordinates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "clober", method: "quote", kind: "query" }),
+        expect.objectContaining({ protocol: "clober", method: "swap", kind: "capability" }),
+      ]),
+    );
+    expect(cloberCoordinates).toHaveLength(2);
+
+    const cloberLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "clober", method: "quote" },
+            { protocol: "clober", method: "swap" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    const [cloberQuote, cloberSwap] = cloberLoaded;
+    const quoteAmount = cloberQuote?.params.amountIn;
+    const swapAmount = cloberSwap?.params.amountIn;
+    const quoteSlippage = cloberQuote?.params.slippage;
+    const swapSlippage = cloberSwap?.params.slippage;
+    if (!quoteAmount || !swapAmount || !quoteSlippage || !swapSlippage) {
+      throw new Error("missing Clober parameter metadata");
+    }
+    expect(quoteAmount).toMatchObject({
+      type: { description: expect.stringMatching(/display units.*decimals/) },
+      description: expect.stringContaining("Viewer quote"),
+    });
+    expect(swapAmount).toMatchObject({
+      type: quoteAmount.type,
+      description: expect.stringContaining("Controller.spend"),
+    });
+    expect(quoteSlippage.description).toContain("returned minimumAmountOut");
+    expect(swapSlippage.description).toContain("Controller.spend");
+    expect(quoteAmount.description).not.toBe(swapAmount.description);
+    expect(quoteSlippage.description).not.toBe(swapSlippage.description);
+
     const monadCards = parseText(
       await client.callTool({ name: "discover", arguments: { protocol: "monad-cards" } }),
     ) as { protocol: string; method: string; kind: string }[];
