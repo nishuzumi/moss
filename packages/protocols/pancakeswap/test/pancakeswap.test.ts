@@ -4,6 +4,7 @@ import {
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
+  type ReceiptResult,
   Registry,
 } from "@themoss/core";
 import { ERC20Abi } from "@themoss/erc";
@@ -21,6 +22,10 @@ import {
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const TOKEN_A = getAddress("0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa");
 const TOKEN_B = getAddress("0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb");
+// The Registry projects the Router address to its Package label when it renders
+// Receipt text (labels.Router in the Protocol metadata). Locking the label locks
+// that projection alongside the raw base-unit and checksummed-address convention.
+const ROUTER_LABEL = "Package(Pancakeswap:Router)";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -38,6 +43,15 @@ function firstChange(entry: unknown): Change | undefined {
     return obj.change as Change;
   }
   return entry as Change;
+}
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
 }
 
 function erc20Transfer(token: string, from: string, to: string, amount: bigint): Change {
@@ -345,6 +359,19 @@ describe("PancakeSwap swapReceipt", () => {
       amountIn: "500000000000000000",
       amountOut: "450000000000000000",
     });
+
+    // A native MON transfer renders through its own leaf at the top level; the
+    // ERC-20 output transfer is a delegated nested leaf.
+    const nativeText = `Native MON Transfer: 500000000000000000 from ${ACCOUNT} to ${wmonAddr}`;
+    const outTransferText = `ERC20 Transfer: 450000000000000000 ${TOKEN_B} from ${wmonAddr} to ${ACCOUNT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      nativeText,
+      null,
+    ]);
+    expect(receipt.text).toBe(
+      `PancakeSwap V3 Swap: 500000000000000000 in ${ACCOUNT} → 450000000000000000 out ${TOKEN_B}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual([nativeText, outTransferText]);
   });
 
   it("delegates ERC-20 event parsing to erc20.changesReceipt", async () => {
@@ -387,6 +414,22 @@ describe("PancakeSwap swapReceipt", () => {
       amountIn: "1000000000000000000",
       amountOut: "900000000000000000",
     });
+
+    // Every event is delegated to erc20.changesReceipt as a nested Receipt, so
+    // each reads as null at the top level and as an ERC20 leaf when flattened.
+    // Raw base-unit amounts and checksummed addresses are the accepted convention.
+    const inTransferText = `ERC20 Transfer: 1000000000000000000 ${TOKEN_A} from ${ACCOUNT} to ${ROUTER_LABEL}`;
+    const approvalText = `ERC20 Approval: ${ACCOUNT} approved ${ROUTER_LABEL} for 0 ${TOKEN_A}`;
+    const outTransferText = `ERC20 Transfer: 900000000000000000 ${TOKEN_B} from ${ROUTER_LABEL} to ${ACCOUNT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      null,
+      null,
+    ]);
+    expect(receipt.text).toBe(
+      `PancakeSwap V3 Swap: 1000000000000000000 in ${TOKEN_A} → 900000000000000000 out ${TOKEN_B}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual([inTransferText, approvalText, outTransferText]);
   });
 
   it("returns zero placeholders when no Transfer changes are present", async () => {

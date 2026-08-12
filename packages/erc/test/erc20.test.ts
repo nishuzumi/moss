@@ -4,6 +4,7 @@ import {
   type Hex,
   type MossRuntime,
   NATIVE,
+  type ReceiptResult,
   Registry,
 } from "@themoss/core";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
@@ -27,6 +28,15 @@ function registryWithDecimals(decimals = 6) {
     } as unknown as MossRuntime["client"],
   };
   return new Registry(runtime).use(ERC20);
+}
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
 }
 
 describe("ERC20", () => {
@@ -110,7 +120,44 @@ describe("ERC20", () => {
       { operation: "transfer", token: TOKEN, from: ACCOUNT, to: RECIPIENT, amount: "15" },
       { operation: "approve", token: TOKEN, owner: ACCOUNT, spender: SPENDER, amount: "42" },
     ]);
-    expect(receipt.text).toContain("ERC20 Transfer:");
-    expect(receipt.text).toContain("ERC20 Approval:");
+
+    // Lock the exact leaf text an Agent reads for each Change class. Raw
+    // base-unit amounts and address rendering are the accepted convention.
+    const transferText = `ERC20 Transfer: 15 ${TOKEN} from ${ACCOUNT} to ${RECIPIENT}`;
+    const approvalText = `ERC20 Approval: ${ACCOUNT} approved ${SPENDER} for 42 ${TOKEN}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      transferText,
+      approvalText,
+    ]);
+
+    // Top-level Receipt text joins the leaf texts in order.
+    expect(receipt.text).toBe(`${transferText}; ${approvalText}`);
+
+    // The ordered leaf-text sequence, flattened exactly as receiptTexts projects
+    // it to Agents, locks order and completeness together.
+    expect(flattenReceiptTexts(receipt)).toEqual([transferText, approvalText]);
+  });
+
+  it("renders native transfer text with the NATIVE sentinel and raw base units", () => {
+    const native = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: RECIPIENT,
+      value: "500000000000000000",
+    } satisfies Change;
+    const protocol = Object.create(ERC20.prototype) as ERC20;
+    const receipt = protocol.changesReceipt([native]);
+    expect(receipt.outcome).toEqual([
+      {
+        operation: "transfer",
+        token: NATIVE,
+        from: ACCOUNT,
+        to: RECIPIENT,
+        amount: "500000000000000000",
+      },
+    ]);
+    const nativeText = `ERC20 Transfer: 500000000000000000 ${NATIVE} from ${ACCOUNT} to ${RECIPIENT}`;
+    expect(receipt.text).toBe(nativeText);
+    expect(flattenReceiptTexts(receipt)).toEqual([nativeText]);
   });
 });

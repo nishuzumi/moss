@@ -30,6 +30,10 @@ import {
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const PAIR = getAddress("0x1111111111111111111111111111111111111111");
 const SECOND_PAIR = getAddress("0x2222222222222222222222222222222222222222");
+// The Registry projects the Router address to its Package label when it renders
+// Receipt text (labels.Router in the Protocol metadata). Locking the label locks
+// that projection alongside the raw base-unit and checksummed-address convention.
+const ROUTER_LABEL = "Package(Pancakeswap V2:Router)";
 
 describe("PancakeSwapV2", () => {
   it("is self-describing and loads separate human-amount fields", async () => {
@@ -200,6 +204,30 @@ describe("PancakeSwapV2", () => {
       pairs: [PAIR],
     });
     expect(flattenReceiptChanges(receipt)).toEqual(changes);
+
+    // Lock the exact projected text per Change class. Raw base-unit amounts and
+    // checksummed addresses are the accepted convention. The two token transfers
+    // are delegated to erc20.changesReceipt as nested Receipts, so they read as
+    // null at the top level and surface as ERC20 leaves in the flat sequence.
+    const inputTransferText = `ERC20 Transfer: 1000000 ${USDC_ADDRESS} from ${ACCOUNT} to ${PAIR}`;
+    const outputTransferText = `ERC20 Transfer: 20000 ${AUSD_ADDRESS} from ${PAIR} to ${ACCOUNT}`;
+    const syncText = `PancakeSwap Sync: reserves 10000000/20000000 at ${PAIR}`;
+    const swapText = `PancakeSwap Pair Swap: 1000000 in and 20000 out at ${PAIR}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      null,
+      syncText,
+      swapText,
+    ]);
+    expect(receipt.text).toBe(
+      `PancakeSwap Swap: 1000000 ${USDC_ADDRESS} to 20000 ${AUSD_ADDRESS} for ${ACCOUNT}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      inputTransferText,
+      outputTransferText,
+      syncText,
+      swapText,
+    ]);
   });
 
   it("derives native input only from ordered wrap and Pair evidence", async () => {
@@ -230,6 +258,37 @@ describe("PancakeSwapV2", () => {
       amountOut: "20000",
     });
     expect(flattenReceiptChanges(receipt)).toEqual(changes);
+
+    // WMON Deposit renders through its own leaf. The wrap and funding native
+    // transfers plus the WMON funding transfer are delegated ERC20 leaves.
+    const fundingText = `ERC20 Transfer: 1000000000000000000 ${NATIVE} from ${ACCOUNT} to ${ROUTER_LABEL}`;
+    const wrapText = `ERC20 Transfer: 1000000000000000000 ${NATIVE} from ${ROUTER_LABEL} to ${WMON_ADDRESS}`;
+    const depositText = `WMON Deposit: 1000000000000000000 for ${ROUTER_LABEL}`;
+    const wmonToPairText = `ERC20 Transfer: 1000000000000000000 ${WMON_ADDRESS} from ${ROUTER_LABEL} to ${PAIR}`;
+    const outputTransferText = `ERC20 Transfer: 20000 ${USDC_ADDRESS} from ${PAIR} to ${ACCOUNT}`;
+    const syncText = `PancakeSwap Sync: reserves 1000000000000000000/20000 at ${PAIR}`;
+    const swapText = `PancakeSwap Pair Swap: 1000000000000000000 in and 20000 out at ${PAIR}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      null,
+      depositText,
+      null,
+      null,
+      syncText,
+      swapText,
+    ]);
+    expect(receipt.text).toBe(
+      `PancakeSwap Swap: 1000000000000000000 ${NATIVE} to 20000 ${USDC_ADDRESS} for ${ACCOUNT}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      fundingText,
+      wrapText,
+      depositText,
+      wmonToPairText,
+      outputTransferText,
+      syncText,
+      swapText,
+    ]);
   });
 
   it("parses a two-Pair WMON hop in execution order", async () => {
@@ -288,6 +347,37 @@ describe("PancakeSwapV2", () => {
       amountOut: amountOut.toString(),
     });
     expect(flattenReceiptChanges(receipt)).toEqual(changes);
+
+    // WMON Withdrawal renders through its own leaf. The unwrap and payout native
+    // transfers plus the WMON output transfer are delegated ERC20 leaves.
+    const inputTransferText = `ERC20 Transfer: 1000000 ${USDC_ADDRESS} from ${ACCOUNT} to ${PAIR}`;
+    const pairToRouterText = `ERC20 Transfer: 2000000000000000000 ${WMON_ADDRESS} from ${PAIR} to ${ROUTER_LABEL}`;
+    const syncText = `PancakeSwap Sync: reserves 1000000/2000000000000000000 at ${PAIR}`;
+    const swapText = `PancakeSwap Pair Swap: 1000000 in and 2000000000000000000 out at ${PAIR}`;
+    const unwrapText = `ERC20 Transfer: 2000000000000000000 ${NATIVE} from ${WMON_ADDRESS} to ${ROUTER_LABEL}`;
+    const withdrawalText = `WMON Withdrawal: 2000000000000000000 for ${ROUTER_LABEL}`;
+    const payoutText = `ERC20 Transfer: 2000000000000000000 ${NATIVE} from ${ROUTER_LABEL} to ${ACCOUNT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      null,
+      syncText,
+      swapText,
+      null,
+      withdrawalText,
+      null,
+    ]);
+    expect(receipt.text).toBe(
+      `PancakeSwap Swap: 1000000 ${USDC_ADDRESS} to 2000000000000000000 ${NATIVE} for ${ACCOUNT}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      inputTransferText,
+      pairToRouterText,
+      syncText,
+      swapText,
+      unwrapText,
+      withdrawalText,
+      payoutText,
+    ]);
   });
 
   it("rejects missing or reordered Pair evidence", async () => {
@@ -528,5 +618,14 @@ function wethChange(
 function flattenReceiptChanges(receipt: ReceiptResult): Change[] {
   return receipt.changes.flatMap((entry) =>
     entry.kind === "change" ? [entry.change] : flattenReceiptChanges(entry),
+  );
+}
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
   );
 }
