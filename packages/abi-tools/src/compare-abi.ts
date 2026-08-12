@@ -32,7 +32,12 @@ function canonicalType(parameter: AbiRecord): string {
 const canonicalTypes = (parameters: unknown): string =>
   ((parameters as AbiRecord[] | undefined) ?? []).map(canonicalType).join(",");
 
-function signatureOf(item: AbiRecord): string {
+/**
+ * Canonical identity of one ABI item, e.g. `function transfer(address,uint256)`.
+ * Exported for the selector-proxy machinery, which matches vendored functions
+ * against facet ABIs by exactly this identity.
+ */
+export function signatureOf(item: AbiRecord): string {
   if (item.type === "fallback" || item.type === "receive") return String(item.type);
   return `${item.type} ${item.name}(${canonicalTypes(item.inputs)})`;
 }
@@ -41,9 +46,10 @@ function signatureOf(item: AbiRecord): string {
  * The semantics that must match for one signature. Parameter names,
  * `internalType`, `gas`, and the legacy `constant`/`payable` flags are
  * deliberately ignored: they are not part of the on-chain calling or
- * decoding contract.
+ * decoding contract. Exported for the selector-proxy machinery so per-facet
+ * comparisons agree with this module item for item.
  */
-function semanticsOf(item: AbiRecord): string {
+export function semanticsOf(item: AbiRecord): string {
   switch (item.type) {
     case "function":
       return `outputs=(${canonicalTypes(item.outputs)}) stateMutability=${item.stateMutability}`;
