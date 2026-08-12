@@ -130,10 +130,21 @@ class ExplainedFixture {}
   category: "token",
   description: "Compile-time invalid revert-explanation fixture.",
   contracts: {},
-  // @ts-expect-error An explanation is text, not a nested object.
+  // @ts-expect-error A custom-error explanation is text, not a nested object.
   customErrorMessages: { SomeError: { message: "what went wrong" } },
 })
 class InvalidExplainedFixture {}
+
+@Protocol({
+  name: "invalid-string-explained-fixture",
+  category: "token",
+  description: "Compile-time invalid string-revert explanation fixture.",
+  contracts: {},
+  // @ts-expect-error A string-revert explanation is text, not a nested object.
+  stringRevertMessages: { LOK: { message: "the pool is locked" } },
+})
+class InvalidStringExplainedFixture {}
+void InvalidStringExplainedFixture;
 
 const runtime = null as unknown as MossRuntime;
 new Registry(runtime, { trustedTokens: [{ address: ADDRESS, label: "Token" }] });

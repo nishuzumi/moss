@@ -110,12 +110,16 @@ function decodeRevertReason(contract: ResolvedProtocolContract, data: Hex): stri
       const reason = args[0];
       // Nothing to say and nothing to look up; the trace reason is more useful than an empty line.
       if (reason.length === 0) return undefined;
-      const explanation = contract.stringRevertMessages[reason];
+      const explanation = Object.hasOwn(contract.stringRevertMessages, reason)
+        ? contract.stringRevertMessages[reason]
+        : undefined;
       return explanation ? `${reason}: ${explanation}` : reason;
     }
     const identity = `${decoded.errorName}(${renderedArgs.join(", ")})`;
     // Keyed on the name alone, never the arguments, so one entry covers every occurrence.
-    const template = contract.customErrorMessages[decoded.errorName];
+    const template = Object.hasOwn(contract.customErrorMessages, decoded.errorName)
+      ? contract.customErrorMessages[decoded.errorName]
+      : undefined;
     if (!template) return identity;
     // An unrecognised name is left as written, because a silently blank sentence hides the mistake.
     const explanation = template.replace(/\{(\w+)\}/g, (whole, name: string) => {
@@ -135,9 +139,19 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
   const gasBudget = options.gasPerTx ?? DEFAULT_SIMULATION_GAS;
   const prefund: `0x${string}` = `0x${(options.prefundWei ?? DEFAULT_PREFUND_WEI).toString(16)}`;
 
-  // Only what the caller supplied counts as synthetic. The sender prefund below is applied to
-  // every run and predates this option, so reporting it would make the field meaningless.
-  const syntheticState = Object.keys(options.stateOverrides ?? {}) as Address[];
+  // Snapshot the caller's prestate once so later mutation cannot make execution disagree with the
+  // disclosed synthetic addresses. The sender prefund below is applied to every run and predates
+  // this option, so reporting it would make the field meaningless.
+  const initialOverrides: StateOverrides = Object.fromEntries(
+    Object.entries(options.stateOverrides ?? {}).map(([address, override]) => [
+      address.toLowerCase(),
+      {
+        ...override,
+        ...(override.stateDiff ? { stateDiff: { ...override.stateDiff } } : {}),
+      },
+    ]),
+  ) as StateOverrides;
+  const syntheticState = Object.freeze(Object.keys(initialOverrides)) as readonly Address[];
   const finish = (outcome: SimulateOutcome): SimulateOutcome =>
     syntheticState.length > 0 ? { ...outcome, syntheticState } : outcome;
 
@@ -145,8 +159,8 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
     async simulate(root): Promise<SimulateOutcome> {
       const executable = flattenCapabilityTree(root);
       const overrides: StateOverrides = Object.fromEntries(
-        Object.entries(options.stateOverrides ?? {}).map(([address, override]) => [
-          address.toLowerCase(),
+        Object.entries(initialOverrides).map(([address, override]) => [
+          address,
           {
             ...override,
             ...(override.stateDiff ? { stateDiff: { ...override.stateDiff } } : {}),

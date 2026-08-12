@@ -6,37 +6,28 @@
  * `pnpm test` suite. A missing key FAILS this suite instead of skipping, so a
  * misconfigured pipeline cannot stay green.
  *
- * What it enforces on the MarketFactory (a clean ERC-1967 proxy):
- * - the proxy still points at the implementation recorded in abis.json
- *   (ERC-1967 slot read) — a Pendle upgrade turns this red so a human
- *   re-verifies the ABI before trusting it again;
- * - every item of the vendored `IPMarketFactory` interface is present in the
- *   explorer-verified implementation ABI with identical calling and decoding
- *   semantics — a second supply chain, independent of the npm tarball.
+ * What it enforces:
+ * - MarketFactory still points at the implementation recorded in abis.json,
+ *   and its vendored interface remains present in that implementation's
+ *   explorer-verified ABI;
+ * - Router and RouterStatic remain the selector proxies recorded in abis.json,
+ *   every vendored function selector still routes to the expected semantics in
+ *   an explorer-verified facet ABI, and the fetched facet union still covers
+ *   the vendored events and errors that can be established from a point-lookup
+ *   registry.
  *
- * Why only missing/mismatch is asserted (not `issues == []`): the vendored ABI
- * is an interface subset, so the deployed implementation legitimately carries
- * extra functions. Those "actual-only" items are ignored; the check verifies
- * that the surface Moss depends on is faithfully deployed, and the ERC-1967
- * pin above is the tripwire for any implementation upgrade. Individually
- * justified benign drifts are recorded in abis.json (`allowedMismatches`) by
- * exact signature + detail, so any other mismatch still fails — currently only
- * `VERSION()` (vendored `pure`, deployed `view`; a read-only getter Moss never
- * calls).
- *
- * Why the Router and RouterStatic have NO explorer comparison: both are
- * Pendle's own selector-proxy (Diamond-style, selector → facet) with a zero
- * ERC-1967 slot, so `getabi` returns only the dispatcher ABI and a semantic
- * comparison of the vendored full interface fails wholesale. Covering them
- * needs facet enumeration + per-selector union comparison in `@themoss/abi-tools`,
- * tracked in nishuzumi/moss#118 and recorded in abis.json (`selectorProxies`);
- * for v1 they stay on the pinned `@pendle/core-v2` vendored derivation
- * (ADR 0007's vendored tier).
+ * The vendored interfaces are intentionally smaller than some concrete
+ * implementation/facet ABIs. Individually reviewed deployed-only items and
+ * benign semantic drifts are recorded in abis.json by exact canonical
+ * signature (and exact mismatch detail where applicable), so every new ABI
+ * difference still fails closed.
  */
 
 import { readFileSync } from "node:fs";
 import {
   compareDeployedAbi,
+  createViemEthCall,
+  crossCheckSelectorProxyAbi,
   ERC1967_IMPLEMENTATION_SLOT,
   erc1967ImplementationAddress,
   fetchAbi,
@@ -44,8 +35,25 @@ import {
 import { createRuntime } from "@themoss/core";
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { PendleMarketFactoryAbi } from "../src/abis/pendle.js";
-import { PENDLE_MARKET_FACTORY_ADDRESS } from "../src/addresses.js";
+import { PendleMarketFactoryAbi, PendleRouterStaticAbi } from "../src/abis/pendle.js";
+import { PendleRouterContractAbi } from "../src/abis/router.js";
+import {
+  PENDLE_MARKET_FACTORY_ADDRESS,
+  PENDLE_ROUTER_ADDRESS,
+  PENDLE_ROUTER_STATIC_ADDRESS,
+} from "../src/addresses.js";
+
+interface DocumentedAbiDifference {
+  signature: string;
+  reason: string;
+}
+
+interface SelectorProxyManifestEntry {
+  address: Address;
+  expectedFacets: Address[];
+  allowedActualOnly?: DocumentedAbiDifference[];
+  allowedMissing?: DocumentedAbiDifference[];
+}
 
 interface AbiManifest {
   marketFactory: {
@@ -54,6 +62,10 @@ interface AbiManifest {
     // Documented benign drifts between the vendored interface and the deployed
     // implementation, allowed by exact signature + detail so any other drift stays red.
     allowedMismatches?: { signature: string; detail: string; reason: string }[];
+  };
+  selectorProxies: {
+    router: SelectorProxyManifestEntry;
+    routerStatic: SelectorProxyManifestEntry;
   };
 }
 
@@ -71,6 +83,15 @@ describe("Pendle ABI explorer cross-check", () => {
   it("pins the MarketFactory the adapter actually uses", () => {
     expect(getAddress(manifest.marketFactory.proxy)).toBe(
       getAddress(PENDLE_MARKET_FACTORY_ADDRESS),
+    );
+  });
+
+  it("pins the selector proxies the adapter actually uses", () => {
+    expect(getAddress(manifest.selectorProxies.router.address)).toBe(
+      getAddress(PENDLE_ROUTER_ADDRESS),
+    );
+    expect(getAddress(manifest.selectorProxies.routerStatic.address)).toBe(
+      getAddress(PENDLE_ROUTER_STATIC_ADDRESS),
     );
   });
 
@@ -107,4 +128,55 @@ describe("Pendle ABI explorer cross-check", () => {
     });
     expect(breaking).toEqual([]);
   });
+
+  it.each([
+    ["Router", manifest.selectorProxies.router, PendleRouterContractAbi, "selectorToFacet"],
+    ["RouterStatic", manifest.selectorProxies.routerStatic, PendleRouterStaticAbi, "facetAddress"],
+  ] as const)(
+    "%s vendored interface matches its explorer-verified selector facets",
+    { timeout: 180_000 },
+    async (_name, entry, vendored, source) => {
+      const runtime = await createRuntime();
+      const allowedActualOnly = new Set(
+        (entry.allowedActualOnly ?? []).map(({ signature }) => signature),
+      );
+      const allowedMissing = new Set(
+        (entry.allowedMissing ?? []).map(({ signature }) => signature),
+      );
+      const result = await crossCheckSelectorProxyAbi({
+        vendored,
+        proxy: entry.address,
+        call: createViemEthCall(runtime.client),
+        getCode: async (address) => (await runtime.client.getCode({ address })) ?? "0x",
+        fetchFacetAbi: (address) => fetchAbi(address, key ?? ""),
+        allowedActualOnly: [...allowedActualOnly],
+      });
+
+      const breakingRows = result.rows.filter(
+        (row) =>
+          row.status !== "matched" &&
+          !(row.status === "unmapped" && allowedMissing.has(row.signature)),
+      );
+      const breakingIssues = result.issues.filter(
+        (issue) => !(issue.kind === "missing" && allowedMissing.has(issue.signature)),
+      );
+      const observedAllowedMissing = result.rows
+        .filter((row) => row.status === "unmapped" && allowedMissing.has(row.signature))
+        .map(({ signature }) => signature);
+
+      expect(result).toMatchObject({
+        proxy: entry.address.toLowerCase(),
+        source,
+        complete: false,
+        status: allowedMissing.size === 0 ? "matched" : "mismatch",
+      });
+      expect(new Set(result.facets.map(({ facet }) => facet))).toEqual(
+        new Set(entry.expectedFacets.map((facet) => facet.toLowerCase())),
+      );
+      expect(result.facets.every(({ status }) => status === "verified")).toBe(true);
+      expect(breakingRows).toEqual([]);
+      expect(breakingIssues).toEqual([]);
+      expect(new Set(observedAllowedMissing)).toEqual(allowedMissing);
+    },
+  );
 });

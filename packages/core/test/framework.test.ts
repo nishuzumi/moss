@@ -166,6 +166,34 @@ class BadErrorMessageProtocol {
 }
 
 @Protocol({
+  name: "bad-empty-string-revert-reason",
+  category: "token",
+  description: "Fixture with an empty string-revert reason.",
+  contracts: {},
+  stringRevertMessages: { "": "explanation" },
+})
+class BadEmptyStringRevertReasonProtocol {
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+}
+
+@Protocol({
+  name: "bad-empty-string-revert-message",
+  category: "token",
+  description: "Fixture with an empty string-revert explanation.",
+  contracts: {},
+  stringRevertMessages: { LOK: "" },
+})
+class BadEmptyStringRevertMessageProtocol {
+  @Query({ intent: "Inspect the fixture", params: noParams })
+  async inspect() {
+    return null;
+  }
+}
+
+@Protocol({
   name: "composed",
   category: "dex",
   description: "Fixture composed Protocol.",
@@ -802,6 +830,12 @@ describe("framework core seam", () => {
     expect(() => new Registry(runtime).use(MissingRiskProtocol)).toThrow("risk label");
     expect(() => new Registry(runtime).use(BadErrorMessageProtocol)).toThrow(
       'error "MissingError" is not declared by a contract ABI',
+    );
+    expect(() => new Registry(runtime).use(BadEmptyStringRevertReasonProtocol)).toThrow(
+      'protocol "bad-empty-string-revert-reason" revert reason must be a non-empty string',
+    );
+    expect(() => new Registry(runtime).use(BadEmptyStringRevertMessageProtocol)).toThrow(
+      'protocol "bad-empty-string-revert-message" revert "LOK" message must be a non-empty string',
     );
     expect(() => new Registry(runtime).use(OverriddenProtocol)).toThrow("declares no");
     expect(() => new Registry(runtime).use(DecoratedProtocolChild)).toThrow(

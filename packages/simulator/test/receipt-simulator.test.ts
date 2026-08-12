@@ -515,6 +515,46 @@ describe("Capability simulation", () => {
     expect(outcome.syntheticState).toEqual([B]);
   });
 
+  it("snapshots the supplied prestate so execution and disclosure cannot diverge", async () => {
+    const originalDiff = `0x${"01".repeat(32)}` as `0x${string}`;
+    const originalValue = `0x${"02".repeat(32)}` as `0x${string}`;
+    const supplied: StateOverrides = {
+      [B]: { balance: "0x1", stateDiff: { [originalDiff]: originalValue } },
+    };
+    const requests: { method: string; params: unknown[] }[] = [];
+    const runtime = runtimeWithFrames([{ type: "CALL", from: A, to: B, logs: [] }]);
+    runtime.client.request = (async ({
+      method,
+      params,
+    }: {
+      method: string;
+      params?: unknown[];
+    }) => {
+      requests.push({ method, params: params ?? [] });
+      if (method === "eth_blockNumber") return PINNED_BLOCK;
+      if (method === "eth_estimateGas") return "0x5208";
+      return { type: "CALL", from: A, to: B, logs: [] };
+      // biome-ignore lint/suspicious/noExplicitAny: minimal debug RPC fixture
+    }) as any;
+    const simulator = createTraceSimulator(runtime, {
+      stateOverrides: supplied,
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    });
+
+    supplied[C] = { balance: "0x2" };
+    supplied[B] = { balance: "0x3" };
+    const mutatedValue = `0x${"03".repeat(32)}` as `0x${string}`;
+    supplied[B] = { balance: "0x3", stateDiff: { [originalDiff]: mutatedValue } };
+
+    const outcome = await simulator.simulate(capability("fixture", B));
+    const traceOptions = requests[1]?.params[2] as { stateOverrides?: StateOverrides };
+    expect(traceOptions.stateOverrides).not.toHaveProperty(C);
+    expect(traceOptions.stateOverrides?.[B]?.balance).toBe("0x1");
+    expect(traceOptions.stateOverrides?.[B]?.stateDiff?.[originalDiff]).toBe(originalValue);
+    expect(outcome.syntheticState).toEqual([B]);
+    expect(() => (outcome.syntheticState as Address[]).push(C)).toThrow();
+  });
+
   it("omits syntheticState when the caller supplied no prestate", async () => {
     // The sender prefund still happens here and deliberately does not count: reporting it would
     // mark every run synthetic and destroy the signal.
@@ -600,6 +640,58 @@ describe("Capability simulation", () => {
     ).simulate(capability("fixture", B));
 
     expect(outcome.results[0]?.revertReason).toBe("PancakeRouter: EXPIRED");
+  });
+
+  it("does not treat inherited object properties as configured explanations", async () => {
+    const stringOutcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          output: encodeErrorResult({
+            abi: parseAbi(["error Error(string)"]),
+            errorName: "Error",
+            args: ["constructor"],
+          }),
+        },
+      ]),
+      {
+        resolveContract: () => ({
+          abi: RevertAbi,
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    const customOutcome = await createTraceSimulator(
+      runtimeWithFrames([
+        {
+          type: "CALL",
+          from: A,
+          to: B,
+          error: "execution reverted",
+          output: encodeErrorResult({
+            abi: parseAbi(["error toString()"]),
+            errorName: "toString",
+          }),
+        },
+      ]),
+      {
+        resolveContract: () => ({
+          abi: parseAbi(["error toString()"]),
+          customErrorMessages: {},
+          stringRevertMessages: {},
+        }),
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(stringOutcome.results[0]?.revertReason).toBe("constructor");
+    expect(customOutcome.results[0]?.revertReason).toBe("toString()");
   });
 
   it("falls back to the trace reason for an empty require message", async () => {

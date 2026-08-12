@@ -12,9 +12,9 @@ The filtered-markets HTTP request is bounded by a timeout, maximum response size
 
 “Direct” and “via MON” are path classes, not single markets. Kuru quotes every verified direct market and every verified two-market combination through native MON, then selects the best result using the swap-side rules. API response order never determines the selected market; an equal quote still prefers a direct path.
 
-The public quote is advisory. Capability construction repeats discovery and quoting against current state, selects the path itself, and derives current slippage protection. An Agent cannot supply a market address, path, or quote identifier to `swap`; stale or manipulated routing data therefore cannot enter the Capability request.
+The public quote is advisory. Capability construction repeats discovery and quoting against current state and derives current slippage protection. Kuru selects the best path itself, so an Agent cannot supply a market address, path, or quote identifier to its `swap`. Pendle instead accepts one explicit market because each maturity is a different economic product, but construction requires that address to resolve from the freshly discovered and on-chain verified candidate set. In neither Protocol can stale or manipulated routing data enter the Capability request.
 
-Quote results stay at the Agent-facing level. Exact-input quotes return the fixed input, estimated output, and minimum output; target-output quotes return the estimated input, maximum input, and minimum target output. Both return the selected token path in human display units, but do not expose raw integers, market addresses, or SDK structures.
+Kuru quote results stay at the Agent-facing level. Exact-input quotes return the fixed input, estimated output, and minimum output; target-output quotes return the estimated input, maximum input, and minimum target output. Both return the selected token path in human display units, but do not expose raw integers, market addresses, or SDK structures. Pendle exposes its freshly verified market because the Agent selects a maturity, and currently supports exact-input quotes only.
 
 The Protocol implements the small HTTP request with the platform `fetch`; it does not depend on the full Kuru SDK, whose ethers v5 and HTTP stack would duplicate Moss's viem-based runtime.
 
