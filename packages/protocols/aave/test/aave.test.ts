@@ -65,12 +65,23 @@ const LIVE_CANDIDATES = [
 const ROLE_UNITS = 1_000n;
 
 /**
- * Borrowing power the borrow role needs, in the market's eight-decimal base
- * currency, so two dollars. `ROLE_UNITS` of the priciest reserve here is worth
- * about one (a thousand cbBTC base units) and this adapter reads no oracle, so
- * one headroom above that covers whichever reserve the search settles on.
+ * The reserves the borrow role limits its search to: the two six-decimal dollar
+ * stablecoins this market quotes at about a dollar each. Scoping the search here
+ * is what lets `canBorrow` value ROLE_UNITS without an oracle. Every reserve it
+ * can settle on is a dollar stablecoin, so pricing a token at a dollar never
+ * misprices a volatile reserve, which a fixed base-currency gate did by ignoring
+ * both the reserve and the amount. The oracle read that would price any reserve
+ * is not vendored here. ADR 0007 forbids hand-writing an ABI to add one, so the
+ * fixture stays on the dollar surface it already tests.
  */
-const ROLE_BORROW_HEADROOM_BASE = 200_000_000n;
+const BORROW_STABLECOINS = ["USDC", "USDT0"] as const;
+
+/**
+ * How much more borrowing power the borrow role asks for than ROLE_UNITS is
+ * strictly worth. The value can drift between the read and the borrow, so the
+ * role wants a small cushion over the amount rather than exactly it.
+ */
+const ROLE_BORROW_MARGIN = 2n;
 
 const USDC = reserveFor("USDC");
 const USDT0 = reserveFor("USDT0");
@@ -1070,6 +1081,37 @@ describe("Aave", () => {
       amount: "0.000000000000001",
     });
   });
+
+  it("selects an account the fixed base-currency gate rejected but the amount clears", async () => {
+    // The live borrow role gated on a flat two dollars of borrowing power. The
+    // market candidate reports about 1.16 dollars (115850000 base units), far
+    // more than ROLE_UNITS of USDC is worth (a tenth of a cent) yet under that
+    // flat gate, so the role found nobody and both live borrow tests failed with
+    // no adapter bug behind it. The check values the requested amount now, so an
+    // account with 1.16 dollars of power qualifies for a purchase worth cents.
+    const holder = LIVE_CANDIDATES[0] as Address;
+    const funded = stubRuntime(
+      (owner) => (owner === USDC.aToken ? 10n ** 6n : 0n),
+      (owner) => (owner === holder ? 115_850_000n : 0n),
+    );
+    await expect(resolveRoleOn(funded, "borrow", [USDC], canBorrow)).resolves.toMatchObject({
+      reserve: { symbol: "USDC" },
+      account: holder,
+      units: "1000",
+      amount: "0.001",
+    });
+
+    // And an account below what the amount itself is worth is still refused, with
+    // a reason that names the need the reserve and the amount set rather than a
+    // fixed dollar figure. USDC of ROLE_UNITS needs 200000 base units here.
+    const thin = stubRuntime(
+      (owner) => (owner === USDC.aToken ? 10n ** 6n : 0n),
+      () => 100_000n,
+    );
+    await expect(resolveRoleOn(thin, "borrow", [USDC], canBorrow)).rejects.toThrow(
+      "not the 200000 that ROLE_UNITS USDC needs",
+    );
+  });
 });
 
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
@@ -1283,7 +1325,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
     const live = liveState(runtime, registry);
-    const role = await resolveRole(live, "borrow", reservesPreferring("USDC"), canBorrow(live));
+    const role = await resolveRole(live, "borrow", borrowReserves("USDC"), canBorrow(live));
     const outcome = await simulate(runtime, registry, "borrow", role.account, {
       asset: role.reserve.underlying,
       amount: role.amount,
@@ -1310,7 +1352,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
     const live = liveState(runtime, registry);
-    const role = await resolveRole(live, "repay", reservesPreferring("USDC"), canBorrow(live));
+    const role = await resolveRole(live, "repay", borrowReserves("USDC"), canBorrow(live));
     const params = { asset: role.reserve.underlying, amount: role.amount };
     const [borrow, repay] = await Promise.all([
       registry.action("aave", "borrow", role.account, params),
@@ -1450,8 +1492,31 @@ function reservesPreferring(symbol: string): AaveReserve[] {
   );
 }
 
+/** The stablecoin reserves the borrow role searches, the named one tried first. */
+function borrowReserves(prefer: string): AaveReserve[] {
+  const stablecoins = new Set<string>(BORROW_STABLECOINS);
+  return AAVE_RESERVES.filter((reserve) => stablecoins.has(reserve.symbol)).sort(
+    (left, right) => Number(right.symbol === prefer) - Number(left.symbol === prefer),
+  );
+}
+
+/**
+ * What ROLE_UNITS of a reserve is worth in the market's eight-decimal base
+ * currency, pricing the token at a dollar. That holds because `borrowReserves`
+ * only offers dollar stablecoins. ROLE_UNITS of a six-decimal reserve is 0.001
+ * of a token, so 100000 base units, a tenth of a cent. The value scales with the
+ * reserve's decimals and with ROLE_UNITS, so the borrow check tracks the reserve
+ * and the amount rather than a fixed constant.
+ */
+function borrowValueBase(reserve: AaveReserve): bigint {
+  return (ROLE_UNITS * 100_000_000n) / 10n ** BigInt(reserve.decimals);
+}
+
 /** A runtime whose reads come from one balance function, to search a role offline. */
-function stubRuntime(balance: (owner: Address) => bigint): MossRuntime {
+function stubRuntime(
+  balance: (owner: Address) => bigint,
+  borrowsBase: (owner: Address) => bigint = () => 0n,
+): MossRuntime {
   const client = {
     readContract: async ({
       functionName,
@@ -1464,6 +1529,12 @@ function stubRuntime(balance: (owner: Address) => bigint): MossRuntime {
       if (functionName === "balanceOf") return balance(getAddress(String(args?.[0])));
       if (functionName === "decimals") return 18;
       if (functionName === "symbol") return "STUB";
+      // getUserAccountData returns [collateral, debt, availableBorrows,
+      // liquidationThreshold, ltv, healthFactor]; only borrowing power is
+      // exercised here, so the rest reads back as zero.
+      if (functionName === "getUserAccountData") {
+        return [0n, 0n, borrowsBase(getAddress(String(args?.[0]))), 0n, 0n, 0n];
+      }
       throw new Error(`unexpected read ${functionName}`);
     },
   } as unknown as MossRuntime["client"];
@@ -1505,16 +1576,17 @@ const holdsPosition = (live: LiveState) => async (reserve: AaveReserve, account:
     : `${account} holds ${position} a${reserve.symbol}, not ${ROLE_UNITS}`;
 };
 
-/** Can draw the reserve, which needs the liquidity to lend it. */
+/** Can draw ROLE_UNITS of the reserve, which needs liquidity to lend and borrowing power that covers what the amount is worth. */
 const canBorrow = (live: LiveState) => async (reserve: AaveReserve, account: Address) => {
   const liquidity = await live.balance(reserve.underlying, reserve.aToken);
   if (liquidity < ROLE_UNITS) {
     return `the reserve has ${liquidity} ${reserve.symbol} left to lend, not ${ROLE_UNITS}`;
   }
+  const need = borrowValueBase(reserve) * ROLE_BORROW_MARGIN;
   const { availableBorrowsBase } = await live.account(account);
-  return BigInt(availableBorrowsBase) >= ROLE_BORROW_HEADROOM_BASE
+  return BigInt(availableBorrowsBase) >= need
     ? undefined
-    : `${account} can draw ${availableBorrowsBase} more in base currency, not ${ROLE_BORROW_HEADROOM_BASE}`;
+    : `${account} can draw ${availableBorrowsBase} more in base currency, not the ${need} that ROLE_UNITS ${reserve.symbol} needs`;
 };
 
 /** Holds collateral, which is what an account-health read has to find. */
