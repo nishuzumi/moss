@@ -212,6 +212,28 @@ describe("Kintsu", () => {
     expect(() =>
       registry.parseReceipt(capability, [
         nativeDeposit(ACCOUNT, 1000n),
+        nativeDeposit(ACCOUNT, 1000n),
+        snapshot,
+        minted,
+        deposited,
+      ]),
+    ).toThrow("multiple native transfers");
+    expect(() =>
+      registry.parseReceipt(capability, [
+        {
+          kind: "nativeTransfer",
+          from: ACCOUNT,
+          to: OTHER,
+          value: "1000",
+        },
+        snapshot,
+        minted,
+        deposited,
+      ]),
+    ).toThrow("unexpected recipient");
+    expect(() =>
+      registry.parseReceipt(capability, [
+        nativeDeposit(ACCOUNT, 1000n),
         snapshot,
         minted,
         deposited,
