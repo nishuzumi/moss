@@ -116,3 +116,23 @@ const modeString: Parameters<Kuru["swap"]>[0] = {
   requireExhaustive: "no",
 };
 void kuru.swap(modeString, ctx);
+
+/**
+ * Exhaustive both ways. The arrays above catch a member being removed or narrowed; a `Record` keyed
+ * by the union catches one being *added*, which otherwise reaches consumers with no compile-time
+ * signal — and both of these are wire contracts a caller switches on.
+ */
+const reasonIsExhaustive: Record<KuruUnavailableReason, true> = {
+  transport: true,
+  reverted: true,
+  "unencodable-probe": true,
+  unknown: true,
+};
+const codeIsExhaustive: Record<KuruQuoteErrorCode, true> = {
+  NO_VERIFIED_ROUTE: true,
+  NO_POSITIVE_QUOTE: true,
+  ROUTE_QUOTE_UNAVAILABLE: true,
+  TARGET_OUTPUT_UNSATISFIABLE: true,
+};
+void reasonIsExhaustive;
+void codeIsExhaustive;

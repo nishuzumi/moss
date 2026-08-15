@@ -53,6 +53,8 @@ type MockMarket = {
   quoteFailName?: string;
   /** Raw revert data, so an authenticated Panic can be told from a bare revert. */
   quoteFailData?: string;
+  /** Wraps the revert data the way viem hands it back from some providers: `{ data: { data } }`. */
+  quoteFailDataNested?: boolean;
   /** Full error text, for checking what does NOT reach the wire. */
   quoteFailMessage?: string;
   /** Wraps the failure in N plain outer errors, so the classifier has to walk the cause chain. */
@@ -1164,6 +1166,51 @@ describe("Kuru", () => {
     expect(built.kind).toBe("capability");
   });
 
+  it("reads a Panic that arrives wrapped, and nested under viem's outer errors", async () => {
+    // viem hands revert data back either as the hex or a level down, and the transport error is
+    // itself nested under a ContractFunctionExecutionError. The search authenticates the Panic to
+    // decide whether coming down is worth live calls, so reading only the flat form on the
+    // outermost error would turn a searchable market into an unmeasured one, on those providers
+    // only — the shape that never shows up in a test written against one of them.
+    const PANIC = `0x4e487b71${17n.toString(16).padStart(64, "0")}`;
+    const { registry } = offlineRegistry([
+      {
+        ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 10n, 1n),
+        failAbove: 500_000_000n,
+        quoteFailName: "CallExecutionError",
+        quoteFailData: PANIC,
+        quoteFailDataNested: true,
+        quoteFailDepth: 2,
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "1000",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as { estimatedAmountIn: string }).estimatedAmountIn).toBe("100");
+  });
+
+  it("survives revert data that is the right shape but not hex", async () => {
+    // The payload comes from the provider and is parsed inside the reverse search's catch block,
+    // so an unchecked parse throws our own SyntaxError from within the handler. The quote still
+    // fails, which is why this is invisible from the outside — but the market's refusal, the one
+    // thing worth reporting about it, has been replaced by ours.
+    const { registry } = offlineRegistry([
+      {
+        ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 1n),
+        quoteFails: true,
+        quoteFailName: "CallExecutionError",
+        quoteFailData: `0x4e487b71${"z".repeat(64)}`,
+      },
+    ]);
+    const failed = await quoteError(registry, { amountOut: "1" });
+    expect(failed.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failed.unavailable[0]?.error.name).toBe("CallExecutionError");
+    expect(failed.unavailable[0]?.error.name).not.toBe("SyntaxError");
+  });
+
   it("keeps an RPC error response in the transport category, not in unknown", async () => {
     // viem chains every JSON-RPC error response under RpcRequestError, including the 429 the
     // default endpoint returns after a few dozen sequential calls. Reading that as "unknown" would
@@ -1247,6 +1294,18 @@ async function swapCapability(registry: Registry) {
   return capability;
 }
 
+/** viem nests: the real failure is the cause of an outer error whose name explains nothing. */
+function nest(error: Error, depth: number): Error {
+  let thrown = error;
+  for (let level = 0; level < depth; level += 1) {
+    const outer = new Error("Contract function reverted or failed.");
+    outer.name = "ContractFunctionExecutionError";
+    (outer as { cause?: unknown }).cause = thrown;
+    thrown = outer;
+  }
+  return thrown;
+}
+
 function offlineRegistry(
   markets: readonly MockMarket[] = MARKETS,
   fetchMock = marketDiscoveryFetch(markets),
@@ -1291,10 +1350,14 @@ function offlineRegistry(
       if (entry.failAbove !== undefined) {
         const asked = decodeFunctionData({ abi: KuruOrderbookAbi, data }).args[0] as bigint;
         if (asked > entry.failAbove) {
-          const refusal = new Error("execution reverted") as Error & { data?: string };
+          const refusal = new Error("execution reverted") as Error;
           refusal.name = entry.quoteFailName ?? "CallExecutionError";
-          if (entry.quoteFailData) refusal.data = entry.quoteFailData;
-          throw refusal;
+          if (entry.quoteFailData) {
+            (refusal as { data?: unknown }).data = entry.quoteFailDataNested
+              ? { data: entry.quoteFailData }
+              : entry.quoteFailData;
+          }
+          throw nest(refusal, entry.quoteFailDepth ?? 0);
         }
       }
       if (entry.quoteFails) {
@@ -1306,17 +1369,12 @@ function offlineRegistry(
           data?: string;
         };
         if (entry.quoteFailName) failure.name = entry.quoteFailName;
-        if (entry.quoteFailData) failure.data = entry.quoteFailData;
-        let thrown: Error = failure;
-        for (let depth = 0; depth < (entry.quoteFailDepth ?? 0); depth += 1) {
-          // viem nests: the transport error is the cause of a ContractFunctionExecutionError, and
-          // the outer names say nothing about why the call failed.
-          const outer = new Error("Contract function reverted or failed.") as Error;
-          outer.name = "ContractFunctionExecutionError";
-          (outer as { cause?: unknown }).cause = thrown;
-          thrown = outer;
+        if (entry.quoteFailData) {
+          (failure as { data?: unknown }).data = entry.quoteFailDataNested
+            ? { data: entry.quoteFailData }
+            : entry.quoteFailData;
         }
-        throw thrown;
+        throw nest(failure, entry.quoteFailDepth ?? 0);
       }
       const decoded = decodeFunctionData({ abi: KuruOrderbookAbi, data });
       if (
