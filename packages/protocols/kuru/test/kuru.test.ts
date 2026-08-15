@@ -54,6 +54,8 @@ type MockMarket = {
   quoteFailData?: string;
   /** Full error text, for checking what does NOT reach the wire. */
   quoteFailMessage?: string;
+  /** Wraps the failure in N plain outer errors, so the classifier has to walk the cause chain. */
+  quoteFailDepth?: number;
 };
 
 const MARKETS: readonly MockMarket[] = [
@@ -995,6 +997,68 @@ describe("Kuru", () => {
     expect(failed?.message).toContain("transport");
   });
 
+  it("finds the transport failure nested under viem's outer wrappers", async () => {
+    // viem does not throw the transport error directly: it arrives as the cause of a
+    // ContractFunctionExecutionError, whose own name says nothing about why the call failed.
+    // Reading only the top-level name files every network failure under "unknown".
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      {
+        ...market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
+        quoteFails: true,
+        quoteFailName: "HttpRequestError",
+        quoteFailDepth: 3,
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as KuruQuote).unavailable[0]?.reason).toBe("transport");
+  });
+
+  it("separates a reverting market from one that could not be reached", async () => {
+    // A revert is the market answering — the caller can act on it. A transport failure is the
+    // caller's own link. Collapsing both into one category loses the only distinction that
+    // tells an Agent whether retrying is worth anything.
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      {
+        ...market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
+        quoteFails: true,
+        quoteFailName: "ExecutionRevertedError",
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as KuruQuote).unavailable[0]?.reason).toBe("reverted");
+  });
+
+  it("names a probe past the encodable size as such, not as an unknown failure", async () => {
+    // The search's own refusal to encode is the one gap that is not the market's fault at all, and
+    // the only one a caller can act on by asking for less. Reporting it as "unknown" hides that.
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 10n ** 6n),
+      market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 12n),
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    const gaps = (quote.data as KuruQuote).unavailable;
+    expect(gaps.length).toBeGreaterThan(0);
+    expect(gaps.map((gap) => gap.reason)).toContain("unencodable-probe");
+  });
+
   it("keeps an RPC error response in the transport category, not in unknown", async () => {
     // viem chains every JSON-RPC error response under RpcRequestError, including the 429 the
     // default endpoint returns after a few dozen sequential calls. Reading that as "unknown" would
@@ -1129,7 +1193,16 @@ function offlineRegistry(
         };
         if (entry.quoteFailName) failure.name = entry.quoteFailName;
         if (entry.quoteFailData) failure.data = entry.quoteFailData;
-        throw failure;
+        let thrown: Error = failure;
+        for (let depth = 0; depth < (entry.quoteFailDepth ?? 0); depth += 1) {
+          // viem nests: the transport error is the cause of a ContractFunctionExecutionError, and
+          // the outer names say nothing about why the call failed.
+          const outer = new Error("Contract function reverted or failed.") as Error;
+          outer.name = "ContractFunctionExecutionError";
+          (outer as { cause?: unknown }).cause = thrown;
+          thrown = outer;
+        }
+        throw thrown;
       }
       const decoded = decodeFunctionData({ abi: KuruOrderbookAbi, data });
       if (
