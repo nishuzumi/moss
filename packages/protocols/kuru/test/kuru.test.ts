@@ -1241,7 +1241,10 @@ describe("Kuru", () => {
           amountOut: "1000",
         })
         .then(
-          (quote) => (quote.data as { estimatedAmountIn: string }).estimatedAmountIn,
+          (quote) =>
+            quote.kind === "query"
+              ? (quote.data as { estimatedAmountIn: string }).estimatedAmountIn
+              : null,
           () => null,
         );
     };
