@@ -986,7 +986,8 @@ describe("Kuru", () => {
       calls += 1;
     });
     await quoteError(registry, { amountOut: "1000" });
-    expect(calls).toBeLessThanOrEqual(8);
+    // Exactly the opening probe plus the paid budget; a looser bound would let the budget drift.
+    expect(calls).toBe(1 + 6);
   });
 
   it("does not let a verification failure carry the endpoint out with it", async () => {
@@ -1209,6 +1210,46 @@ describe("Kuru", () => {
     expect(failed.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
     expect(failed.unavailable[0]?.error.name).toBe("CallExecutionError");
     expect(failed.unavailable[0]?.error.name).not.toBe("SyntaxError");
+  });
+
+  it("comes down only for the overflow panic, not for any panic or any revert", async () => {
+    // The descent exists because `Panic(0x11)` means the size overflowed the market's own
+    // arithmetic, so a smaller one may work. No other failure carries that meaning: an assert
+    // (0x01), a division by zero (0x12) or a paused market's custom error say nothing about size,
+    // and spending live calls coming down through them buys nothing. The distinction is invisible
+    // when the market refuses at every size — both paths end in the same report — so it is drawn
+    // here against a market that prices below a threshold and refuses above it.
+    const OVERFLOW = `0x4e487b71${17n.toString(16).padStart(64, "0")}`;
+    const ASSERT = `0x4e487b71${1n.toString(16).padStart(64, "0")}`;
+    // Deliberately carrying the same trailing word as the overflow panic: if the selector is not
+    // checked, a paused market's custom error reads as one, and the search pays to come down
+    // through a failure that has nothing to do with size.
+    const CUSTOM = `0xdeadbeef${17n.toString(16).padStart(64, "0")}`;
+    const priced = async (data: string) => {
+      const { registry } = offlineRegistry([
+        {
+          ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 10n, 1n),
+          failAbove: 500_000_000n,
+          quoteFailName: "CallExecutionError",
+          quoteFailData: data,
+        },
+      ]);
+      return await registry
+        .action("kuru", "quote", ACCOUNT, {
+          tokenIn: USDC_ADDRESS,
+          tokenOut: AUSD_ADDRESS,
+          amountOut: "1000",
+        })
+        .then(
+          (quote) => (quote.data as { estimatedAmountIn: string }).estimatedAmountIn,
+          () => null,
+        );
+    };
+    // The one refusal that justifies searching below it.
+    expect(await priced(OVERFLOW)).toBe("100");
+    // Everything else stops at the first refusal and is reported, not searched through.
+    expect(await priced(ASSERT)).toBeNull();
+    expect(await priced(CUSTOM)).toBeNull();
   });
 
   it("keeps an RPC error response in the transport category, not in unknown", async () => {

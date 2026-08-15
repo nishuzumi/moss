@@ -741,7 +741,9 @@ export class Kuru {
       if (route.length === 1 && high >= MAX_ENCODABLE_PROBE) this.#outOfReach(route, high);
       let next = high * 2n;
       // Doubling past the argument type would be refused for a reason that has nothing to do with
-      // the market, and the answer can sit between here and there.
+      // the market. Asking for the boundary directly says the same thing one step earlier: the
+      // recovery below reaches the identical answer in the identical number of live calls, since
+      // the refusal it saves is one viem makes without touching the network.
       if (route.length === 1 && next > MAX_ENCODABLE_PROBE) next = MAX_ENCODABLE_PROBE;
       const doubled = await this.#quoteRouteForSearch(route, next);
       if (!doubled.ok) {
