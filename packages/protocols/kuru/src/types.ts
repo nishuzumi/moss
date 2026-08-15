@@ -19,9 +19,27 @@ export type KuruUnavailableRoute = {
  * an empty object; the thrown {@link KuruQuoteError} never crosses that boundary and so keeps the
  * live Error and its cause chain. Reporting a string here is what actually reaches the caller.
  */
+/**
+ * Why an evaluation did not complete, as a closed set of stable categories.
+ *
+ * Deliberately not the underlying message. Viem puts the RPC URL and the request body into
+ * `HttpRequestError.message`, so an API key in the endpoint path — the usual shape for hosted
+ * providers — would travel out through a successful Query and into MCP output. The live Error,
+ * with its cause chain, stays on the thrown `KuruQuoteError`, which never crosses that boundary.
+ */
+export type KuruUnavailableReason =
+  /** The request never completed: transport, timeout, provider refusal. */
+  | "transport"
+  /** The market reverted with nothing that attributes the failure to it. */
+  | "reverted"
+  /** Our own probe outgrew what the market can represent, so nothing was asked of the chain. */
+  | "unencodable-probe"
+  /** Anything else: kept distinct so an unclassified failure is not silently called transport. */
+  | "unknown";
+
 export type KuruUnavailableEvaluation = {
   readonly path: readonly TokenRef[];
-  readonly reason: string;
+  readonly reason: KuruUnavailableReason;
 };
 
 /**

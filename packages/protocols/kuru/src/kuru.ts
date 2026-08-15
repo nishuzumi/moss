@@ -2,6 +2,7 @@ import {
   type ActionCtx,
   type AddressValue,
   BasisPoints,
+  BooleanFlag,
   Capability,
   type CapabilityResult,
   type Change,
@@ -29,6 +30,7 @@ import type {
   KuruQuote,
   KuruSwapOutcome,
   KuruUnavailableEvaluation,
+  KuruUnavailableReason,
   KuruUnavailableRoute,
   MarketCandidate,
   PreparedSwap,
@@ -89,6 +91,9 @@ const MAX_KURU_MARKET_ROUTES = 256;
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
 );
+const RequireExhaustive = BooleanFlag.describe(
+  "Whether a swap must refuse when the route comparison was incomplete.",
+);
 const KuruSlippage = BasisPoints.min(50)
   .max(5_000)
   .describe("An integer basis-point count from 50 through 5000; 1 bps equals 0.01%.");
@@ -108,14 +113,28 @@ const swapParams = {
     type: KuruSlippage.default(DEFAULT_SLIPPAGE_BPS),
     description: "Maximum adverse movement allowed between quoting and execution.",
   },
+  requireExhaustive: {
+    type: RequireExhaustive.default(true),
+    description:
+      "Refuse to build a swap when some verified routes could not be evaluated. Default true: a write is not the place to guess. Set false to accept the best of a partial comparison.",
+  },
 } satisfies ParamsSpec;
 
 type InferredSwapParams = InferParams<typeof swapParams>;
-type SwapParams = Omit<InferredSwapParams, "amountIn" | "amountOut" | "slippage"> &
-  Partial<Pick<InferredSwapParams, "amountIn" | "amountOut" | "slippage">>;
+type SwapParams = Omit<
+  InferredSwapParams,
+  "amountIn" | "amountOut" | "slippage" | "requireExhaustive"
+> &
+  Partial<Pick<InferredSwapParams, "amountIn" | "amountOut" | "slippage" | "requireExhaustive">>;
 type KuruSwapParams = Pick<SwapParams, "tokenIn" | "tokenOut"> & {
   slippage?: InferredSwapParams["slippage"];
+  requireExhaustive?: InferredSwapParams["requireExhaustive"];
 } & ({ amountIn: string; amountOut?: never } | { amountIn?: never; amountOut: string });
+
+/** A search probe either priced, or could not be represented at that size. */
+type SearchProbe =
+  | { readonly ok: true; readonly amountOut: bigint }
+  | { readonly ok: false; readonly error: Error };
 
 @Protocol({
   name: "kuru",
@@ -165,6 +184,18 @@ export class Kuru {
   })
   async swap(params: SwapParams, ctx: ActionCtx): Promise<CapabilityResult> {
     const prepared = await this.#prepareSwap(params, ctx.account);
+    // Before any Capability is built, not after: a partial comparison means a route we never
+    // measured might have been the better one, and a write is not the place to guess. `quote`
+    // stays advisory and reports the gaps; a swap refuses unless the caller opts out in so many
+    // words.
+    if (params.requireExhaustive !== false && prepared.unavailable.length > 0) {
+      throw new KuruQuoteError(
+        "ROUTE_QUOTE_UNAVAILABLE",
+        prepared.side,
+        `${prepared.unavailable.length} of the verified routes could not be evaluated, so this swap would execute on an incomplete comparison; pass requireExhaustive: false to accept it`,
+        prepared.unavailable,
+      );
+    }
     const children = [];
     if (params.tokenIn !== NATIVE) {
       children.push(
@@ -524,20 +555,48 @@ export class Kuru {
    * the conclusion is deterministic. Treated as "this route cannot reach the target", which is
    * what it means.
    */
-  async #quoteRouteForSearch(route: Route, amountIn: bigint): Promise<bigint> {
+  /**
+   * Quote a search probe, reporting "this size cannot be represented" as a value rather than a
+   * verdict.
+   *
+   * The refusal used to be classified here as "the target is unreachable". On a single-leg route
+   * that holds: the probe is the market's own size argument, so nothing larger can be priced. On a
+   * multi-leg route it does not. Our probe sizes the FIRST leg; every leg after it is sized by
+   * what the chain returned for the one before, so a cheap first leg can amplify a small probe
+   * past the next leg's `uint96` while a smaller input already reaches the target. Mainnet has
+   * such routes, and calling them unsatisfiable turned a quotable pair into a refusal.
+   */
+  async #quoteRouteForSearch(route: Route, amountIn: bigint): Promise<SearchProbe> {
     try {
-      return await this.#quoteRoute(route, amountIn);
+      return { ok: true, amountOut: await this.#quoteRoute(route, amountIn) };
     } catch (error) {
       if (isProbeBeyondEncodableSize(error) || isMarketArithmeticOverflow(error)) {
-        throw new KuruQuoteError(
-          "TARGET_OUTPUT_UNSATISFIABLE",
-          "amountOut",
-          "reaching this target needs more input than this market can price",
-          [{ path: routeTokens(route), error: asError(error) }],
-        );
+        // Carried on the result, not on the instance: routes are probed concurrently, so a field
+        // would hand one route's failure to another.
+        return { ok: false, error: asError(error) };
       }
       throw error;
     }
+  }
+
+  /**
+   * What an unencodable probe proves, which depends on where it happened.
+   *
+   * One leg: the probe is the market's size argument, the search is monotonic, and nothing larger
+   * can be priced — so the target is out of reach and that is an answer. More than one leg: the
+   * refusal may have come from a downstream leg we never sized directly, so it proves nothing and
+   * the honest report is that the evaluation did not complete.
+   */
+  #unencodableVerdict(route: Route, error: Error): never {
+    if (route.length === 1) {
+      throw new KuruQuoteError(
+        "TARGET_OUTPUT_UNSATISFIABLE",
+        "amountOut",
+        "reaching this target needs more input than this market can price",
+        [{ path: routeTokens(route), error }],
+      );
+    }
+    throw error;
   }
 
   async #requiredInput(
@@ -549,9 +608,24 @@ export class Kuru {
     // ponytail: monotonic reverse quote; replace with an order-book estimator if RPC volume matters.
     let high = scaleUnits(target, outputDecimals, inputDecimals);
     if (high < 1n) high = 1n;
-    // Doubling stops on its own: the size argument is uint96, so #quoteRouteForSearch refuses
-    // to encode a probe past that and reports the route as unsatisfiable.
-    while ((await this.#quoteRouteForSearch(route, high)) < target) high *= 2n;
+
+    // The opening guess assumes a 1:1 price. On a multi-leg route a cheap first leg can push even
+    // that past the next leg's size type, so come down until a probe encodes before concluding
+    // anything: the target may be reachable far below where the first guess landed.
+    let probe = await this.#quoteRouteForSearch(route, high);
+    while (!probe.ok && high > 1n) {
+      high /= 2n;
+      probe = await this.#quoteRouteForSearch(route, high);
+    }
+    if (!probe.ok) this.#unencodableVerdict(route, probe.error);
+
+    while (probe.amountOut < target) {
+      const next = high * 2n;
+      const doubled = await this.#quoteRouteForSearch(route, next);
+      if (!doubled.ok) this.#unencodableVerdict(route, doubled.error);
+      high = next;
+      probe = doubled;
+    }
     let low = 0n;
     while (low + 1n < high) {
       const middle = (low + high) / 2n;
@@ -851,13 +925,38 @@ function requireFollowingRouterTrade(
 
 /** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
 /**
- * Gaps as a Query result can carry them: the Error's message, since the value is about to be
- * JSON-coerced and the Error itself would arrive empty.
+ * Gaps as a Query result can carry them: a stable category, never the underlying message.
+ *
+ * `HttpRequestError.message` from viem carries the RPC URL and the request body. Viem strips the
+ * userinfo, but not the path — and a hosted endpoint usually keeps its API key there, so copying
+ * the message would publish that key whenever another route succeeded and the result left through
+ * a Query. Categories are a closed set, so nothing an upstream library later decides to put in a
+ * message can widen what leaves here. The live Error stays on the thrown `KuruQuoteError`.
  */
 function reportable(
   unavailable: readonly KuruUnavailableRoute[],
 ): readonly KuruUnavailableEvaluation[] {
-  return unavailable.map(({ path, error }) => ({ path, reason: error.message }));
+  return unavailable.map(({ path, error }) => ({ path, reason: categorize(error) }));
+}
+
+/** Map a failure onto the closed reason set, walking the cause chain viem builds. */
+function categorize(error: Error): KuruUnavailableReason {
+  if (isProbeBeyondEncodableSize(error)) return "unencodable-probe";
+  for (
+    let current: unknown = error, depth = 0;
+    current instanceof Error && depth < 16;
+    depth += 1
+  ) {
+    const { name } = current;
+    if (name === "HttpRequestError" || name === "TimeoutError" || name === "SocketClosedError") {
+      return "transport";
+    }
+    if (name === "ExecutionRevertedError" || name === "ContractFunctionRevertedError") {
+      return "reverted";
+    }
+    current = current.cause;
+  }
+  return "unknown";
 }
 
 function asError(reason: unknown): Error {

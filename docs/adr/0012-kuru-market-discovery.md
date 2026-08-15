@@ -8,6 +8,8 @@ The filtered-markets HTTP request is bounded by a timeout, maximum response size
 
 The public quote is advisory. Capability construction repeats discovery and quoting against current state, selects the path itself, and derives current slippage protection. An Agent cannot supply a market address, path, or quote identifier to `swap`; stale or manipulated routing data therefore cannot enter the Capability request.
 
+A comparison that could not be completed is reported, and a write refuses it by default. Some verified routes fail to evaluate on mainnet as a matter of course — an empty revert attributes nothing, and the same three markets do it on every run — so a quote answers with the winner and lists the candidates it could not measure, rather than refusing a pair that prices. A swap is not advisory: `requireExhaustive` defaults to true and stops Capability construction when any candidate went unmeasured, because the route that failed might have been the better one and a write is not the place to guess. A caller who values availability over exhaustiveness opts out explicitly. The reported gap carries a stable category, never the underlying error text, which in viem holds the RPC URL and request body and would publish an endpoint key through an otherwise successful Query.
+
 Quote results stay at the Agent-facing level. Exact-input quotes return the fixed input, estimated output, and minimum output; target-output quotes return the estimated input, maximum input, and minimum target output. Both return the selected token path in human display units, but do not expose raw integers, market addresses, or SDK structures.
 
 The Protocol implements the small HTTP request with the platform `fetch`; it does not depend on the full Kuru SDK, whose ethers v5 and HTTP stack would duplicate Moss's viem-based runtime.
@@ -18,6 +20,8 @@ The Kuru package also owns its fixed Router deployment and the private zero-addr
 
 ## Considered Options
 
+- **Fail closed everywhere** — rejected because an incomplete comparison is the normal state for a liquid pair on mainnet, so refusing advisory quotes would make it unquotable for a reason no caller can act on.
+- **Report the gap and never refuse** — rejected because a Capability spends funds on a route chosen from a subset, and the transaction tree has nowhere to carry the caveat the caller would need.
 - **Static market addresses** — rejected because new markets require code releases and the adapter silently supports only an allowlist.
 - **Index `MarketRegistered` on every call** — valid and fully on-chain, but duplicates an indexer inside a request path when Kuru already exposes the same candidate lookup used by its SDK.
 - **Trust API results directly** — rejected because an unavailable or compromised discovery service must not choose unverified transaction targets.

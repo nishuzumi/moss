@@ -5,6 +5,7 @@ import type {
   KuruQuoteError,
   KuruQuoteErrorCode,
   KuruUnavailableEvaluation,
+  KuruUnavailableReason,
 } from "../src/index.js";
 
 declare const kuru: Kuru;
@@ -81,3 +82,37 @@ quote.unavailable = [];
 // @ts-expect-error a gap reports a message, not the live Error the thrown form keeps
 const liveError: Error | undefined = quote.unavailable[0]?.error;
 void liveError;
+
+// ── The reason set is closed on purpose ──────────────────────────────────────
+// A caller branches on it, and nothing an upstream library puts in an Error message may widen it.
+
+const everyReason: readonly KuruUnavailableReason[] = [
+  "transport",
+  "reverted",
+  "unencodable-probe",
+  "unknown",
+];
+void everyReason;
+
+// @ts-expect-error the reason set does not admit arbitrary strings
+const madeUpReason: KuruUnavailableReason = "something-else";
+void madeUpReason;
+
+// The gap carries the category type itself, so a consumer can switch on it exhaustively.
+const reported: KuruUnavailableReason | undefined = quote.unavailable[0]?.reason;
+void reported;
+
+// ── requireExhaustive is opt-out, not opt-in ─────────────────────────────────
+void kuru.swap(
+  { tokenIn: NATIVE, tokenOut: USDC_ADDRESS, amountIn: "1", requireExhaustive: false },
+  ctx,
+);
+
+const modeString: Parameters<Kuru["swap"]>[0] = {
+  tokenIn: NATIVE,
+  tokenOut: USDC_ADDRESS,
+  amountIn: "1",
+  // @ts-expect-error it is a boolean, not a mode string
+  requireExhaustive: "no",
+};
+void kuru.swap(modeString, ctx);

@@ -51,6 +51,8 @@ type MockMarket = {
   quoteFailName?: string;
   /** Raw revert data, so an authenticated Panic can be told from a bare revert. */
   quoteFailData?: string;
+  /** Full error text, for checking what does NOT reach the wire. */
+  quoteFailMessage?: string;
 };
 
 const MARKETS: readonly MockMarket[] = [
@@ -756,6 +758,129 @@ describe("Kuru", () => {
     expect(error.cause).toBe(error.unavailable[0]?.error);
   });
 
+  it("reports a stable category, never the underlying message, so an endpoint key cannot leak", async () => {
+    // viem puts the RPC URL and the request body into HttpRequestError.message, and strips only the
+    // userinfo — a hosted endpoint keeps its API key in the path. Copying the message would publish
+    // that key through any successful quote that had a gap beside it.
+    const SECRET = "https://rpc.example/v2/SUPERSECRETKEY";
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      {
+        ...market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
+        quoteFails: true,
+        quoteFailName: "HttpRequestError",
+        quoteFailMessage: `HTTP request failed.\n\nURL: ${SECRET}\nRequest body: {"method":"eth_call"}`,
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    const data = quote.data as KuruQuote;
+    expect(data.unavailable).toHaveLength(1);
+    expect(data.unavailable[0]?.reason).toBe("transport");
+
+    const serialized = JSON.stringify(data);
+    expect(serialized).not.toContain("SUPERSECRETKEY");
+    expect(serialized).not.toContain("rpc.example");
+    expect(serialized).not.toContain("Request body");
+  });
+
+  it("does not call a multi-leg encode refusal proof that the target is out of reach", async () => {
+    // The opening guess assumes a 1:1 price. Here the first leg amplifies it past the second leg's
+    // uint96 while a far smaller input already clears the target, so refusing on that probe would
+    // report an unreachable target for a route that prices one seven orders of magnitude below.
+    const amplifying = [
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 10n ** 13n),
+      market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 1n),
+    ];
+    const { registry } = offlineRegistry(amplifying);
+
+    const forward = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "0.000001",
+    });
+    if (forward.kind !== "query") throw new Error("expected query");
+    expect(
+      Number((forward.data as { estimatedAmountOut: string }).estimatedAmountOut),
+    ).toBeGreaterThan(1);
+
+    // The same route, asked in reverse for a target it clears easily.
+    const reverse = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "1",
+    });
+    expect(reverse.kind).toBe("query");
+  });
+
+  it("reports a multi-leg ceiling as unavailable, not as an unreachable target", async () => {
+    // Doubling runs into the SECOND leg's size limit before the target is met: the first leg
+    // amplifies the probe while the second prices it at almost nothing. We never sized that leg,
+    // so the refusal proves nothing about the target — the honest answer is that the evaluation
+    // did not complete, and calling it unsatisfiable would be a verdict we did not earn.
+    const { registry } = offlineRegistry([
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 10n ** 6n),
+      market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 12n),
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failure.unavailable.length).toBeGreaterThan(0);
+  });
+
+  it("still calls a single-leg encode refusal an unreachable target", async () => {
+    // One leg is the case where the refusal does prove it: the probe IS the market's size argument,
+    // the search is monotonic, and nothing larger can be priced.
+    const DUST = 10n ** 30n;
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, DUST),
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
+  });
+
+  it("refuses a swap built on a partial comparison, unless the caller opts out", async () => {
+    const partial = [
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      {
+        ...market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
+        quoteFails: true,
+      },
+    ];
+
+    const { registry } = offlineRegistry(partial);
+    // quote stays advisory: it answers, and says what it could not measure.
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as KuruQuote).unavailable.length).toBeGreaterThan(0);
+
+    // the write refuses by default
+    await expect(
+      registry.action("kuru", "swap", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toMatchObject({ code: "ROUTE_QUOTE_UNAVAILABLE" });
+
+    // and executes when the caller says so in as many words
+    const { registry: opted } = offlineRegistry(partial);
+    const capability = await opted.action("kuru", "swap", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+      requireExhaustive: false,
+    });
+    expect(capability.kind).toBe("capability");
+  });
+
   it("reports no verified route separately from a quote failure", async () => {
     // Discovery finished and produced nothing: a different claim from any quote outcome.
     // A market that exists but connects neither leg of the requested pair, so discovery
@@ -856,7 +981,9 @@ function offlineRegistry(
       if (entry.quoteFails) {
         // Some tests need a specific error shape, because the classifier keys on viem's error
         // names — a plain Error would let it accept anything a failed call throws.
-        const failure = new Error(`quote unavailable for ${entry.address}`) as Error & {
+        const failure = new Error(
+          entry.quoteFailMessage ?? `quote unavailable for ${entry.address}`,
+        ) as Error & {
           data?: string;
         };
         if (entry.quoteFailName) failure.name = entry.quoteFailName;

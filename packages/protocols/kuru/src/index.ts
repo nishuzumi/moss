@@ -10,4 +10,5 @@ export type {
   KuruQuote,
   KuruSwapOutcome,
   KuruUnavailableEvaluation,
+  KuruUnavailableReason,
 } from "./types.js";
