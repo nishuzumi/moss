@@ -18,9 +18,12 @@
 //   metaMorphoAbi is the MetaMorpho V1.0 artifact and omits UpdateLostAssets,
 //   which every V1.1 vault on Monad emits on deposit and withdrawal. A Receipt
 //   has to cover every Change, so the missing event is load-bearing.
-//   verification: the Monad-mainnet test simulates a real deposit and a real
-//   withdrawal on a live vault and decodes every emitted event through these
-//   ABIs, so a signature that did not match the deployed contract fails.
+//   verification: the Monad-mainnet test simulates a real deposit on a live
+//   vault and decodes every event it emits through these ABIs, so a signature
+//   that did not match the deployed contract fails there. The withdrawal path
+//   has no live run: its fixtures are encoded from these same ABIs, so they
+//   cannot catch a signature mismatch. The compiled chain above is what binds
+//   the withdrawal events to Morpho's own source.
 
 // IMetaMorphoV1_1.sol, compiled in full.
 export const MetaMorphoV1_1Abi = [

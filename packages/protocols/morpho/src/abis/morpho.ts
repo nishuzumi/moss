@@ -16,8 +16,10 @@
 //   V1.1 vault emits, so that one is compiled (see ./metamorpho-v1-1.ts).
 //   verification: the addresses these ABIs are used against come from the
 //   canonical Monad protocol registry and are bytecode-checked live; the
-//   Monad-mainnet test decodes every Morpho Blue and IRM event that a real
-//   deposit and a real withdrawal emit through exactly these ABIs.
+//   Monad-mainnet test decodes every Morpho Blue and IRM event a real deposit
+//   emits through exactly these ABIs. There is no live withdrawal run. That
+//   side is covered offline by fixtures encoded from these same ABIs, so it
+//   corroborates the parser rather than the deployed signatures.
 //   caveat:   the explorer cross-check (pnpm test:abi:online) needs a
 //   MONADSCAN_API_KEY and a verified source page; neither was available when
 //   this package landed, so the tarball digest plus the live decode are the
