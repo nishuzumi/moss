@@ -1,0 +1,36 @@
+{
+  "recordedAtBlock": "91024325",
+  "vendor": {
+    "package": "@clober/v2-sdk",
+    "version": "1.0.3",
+    "tarballSha256": "971c3819199cad74f3d5c61d62a632791dafbd2c246d1772268ed84541656de7"
+  },
+  "controller": {
+    "address": "0x19b68a2b909D96c05B623050C276FBD457De8e83",
+    "runtimeCodeKeccak256": "0xfd258f62bdafb9acbe6b48199278ea71a20a56361c81a9b159a65fe37e5a19f8",
+    "requiredSelectors": {
+      "spend": "0xc0e8e89a",
+      "bookManager": "0x3f322bc9"
+    }
+  },
+  "bookManager": {
+    "address": "0x6657d192273731C3cAc646cc82D5F28D0CBE8CCC",
+    "runtimeCodeKeccak256": "0x668af96ac2fe5181a06a8df16ebfa377c7c17625ebbeee2f57d6b25b3edb63f6",
+    "requiredSelectors": {
+      "getBookKey": "0x9b22917d"
+    },
+    "requiredTopics": {
+      "Take": "0xc4c20b9c4a5ada3b01b7a391a08dd81a1be01dd8ef63170dd9da44ecee3db11b"
+    }
+  },
+  "bookViewer": {
+    "proxy": "0xe424c211e2Ed8a5B6d1C57FA493C41715568D238",
+    "proxyRuntimeCodeKeccak256": "0x9b18fe280da61292ca9f1cfa9b0a354525a4f933d3cfb086cf1e5f2565452ecb",
+    "implementation": "0x3dc8156a2524d524e5825e7d73250fD0Aa4D8828",
+    "implementationRuntimeCodeKeccak256": "0xdc7447cd0998ce231feb8dd9a3b6ded6e1c4981e8e14c1c1a71c32c0f4194639",
+    "requiredSelectors": {
+      "getExpectedOutput": "0x0202121a",
+      "bookManager": "0x3f322bc9"
+    }
+  }
+}

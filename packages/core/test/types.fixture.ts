@@ -4,14 +4,20 @@ import {
   type Change,
   type InferParams,
   type MossRuntime,
+  type Nestable,
+  nestable,
   type ParamsSpec,
   PositionSide,
   Protocol,
+  Query,
   Receipt,
   type ReceiptResult,
   Registry,
   type RiskLabel,
+  type SelfRef,
+  type TransactionNode,
   tokenMetadata,
+  UnsignedIntegerString,
 } from "../src/index.js";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111" as const;
@@ -142,3 +148,87 @@ void debtRisk;
 void invalidRisk;
 void metadataKind;
 void metadataDecimals;
+
+const amountParams = {
+  amount: {
+    type: UnsignedIntegerString,
+    description: "Allowance in the fixture token's smallest unit.",
+  },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "self-ref-fixture",
+  category: "token",
+  description: "Compile-time self reference fixture.",
+  contracts: {},
+})
+class SelfRefFixture {
+  declare self: SelfRef<SelfRefFixture, "approve">;
+
+  @Capability<SelfRefFixture, typeof amountParams>({
+    intent: "Approve {amount} of the fixture token",
+    verb: "approve",
+    params: amountParams,
+    receipt: "approvalReceipt",
+    risk: ["approval"],
+  })
+  async approve(_params: InferParams<typeof amountParams>): Promise<Nestable<TransactionNode[]>> {
+    return nestable([]);
+  }
+
+  @Capability<SelfRefFixture, typeof amountParams>({
+    intent: "Transfer {amount} of the fixture token",
+    verb: "transfer",
+    params: amountParams,
+    receipt: "approvalReceipt",
+    risk: ["fundOut"],
+  })
+  async transfer(_params: InferParams<typeof amountParams>): Promise<TransactionNode[]> {
+    return [];
+  }
+
+  /** Capability-shaped, never decorated: core carries it on no surface. */
+  async undecoratedHelper(_params: { amount: string }): Promise<TransactionNode[]> {
+    return [];
+  }
+
+  @Query({ intent: "Read the fixture allowance", params: amountParams })
+  async quote(_params: InferParams<typeof amountParams>): Promise<{ price: string }> {
+    return { price: "1" };
+  }
+
+  @Receipt()
+  approvalReceipt(_changes: readonly Change[]): ReceiptResult<{ operation: "approve" }> {
+    return { kind: "receipt", outcome: { operation: "approve" }, text: "approve", changes: [] };
+  }
+}
+
+declare const selfRef: SelfRefFixture["self"];
+// A declared Capability nests through the builder with its parsed params.
+void selfRef.approve({ amount: "1" });
+// @ts-expect-error the nested call keeps the method's parameter contract.
+void selfRef.approve({ amount: 1 });
+// @ts-expect-error only the named subset of the class is exposed.
+void selfRef.transfer;
+// @ts-expect-error SelfRef rejects method names the class does not have.
+type BadSelfRef = SelfRef<SelfRefFixture, "burn">;
+// @ts-expect-error a Capability that never returns nestable() did not declare itself nestable.
+type UndeclaredSelfRef = SelfRef<SelfRefFixture, "transfer">;
+// @ts-expect-error a Capability-shaped method with no @Capability is not nestable either.
+type UndecoratedSelfRef = SelfRef<SelfRefFixture, "undecoratedHelper">;
+// @ts-expect-error a Query reads state and is not nestable, so self cannot name one.
+type QuerySelfRef = SelfRef<SelfRefFixture, "quote">;
+// @ts-expect-error a Receipt parser is pure and is not nestable either.
+type ReceiptSelfRef = SelfRef<SelfRefFixture, "approvalReceipt">;
+
+void SelfRefFixture;
+declare const badSelfRef: BadSelfRef;
+void badSelfRef;
+declare const undeclaredSelfRef: UndeclaredSelfRef;
+void undeclaredSelfRef;
+declare const undecoratedSelfRef: UndecoratedSelfRef;
+void undecoratedSelfRef;
+declare const querySelfRef: QuerySelfRef;
+void querySelfRef;
+declare const receiptSelfRef: ReceiptSelfRef;
+void receiptSelfRef;

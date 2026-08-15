@@ -1,13 +1,26 @@
 import { isAddress, isHex } from "viem";
 import type {
   CapabilityNode,
+  CapabilityResult,
   Change,
   JsonSafeValue,
+  Nestable,
   ReceiptChange,
   ReceiptResult,
   TransactionNode,
   UnsignedTx,
 } from "./types.js";
+
+/**
+ * Declares a Capability's result nestable through its own Protocol's `self`.
+ * The marker is compile-time only, so nesting is a decision each Capability
+ * states where it is written rather than an assertion the caller makes about it:
+ * `SelfRef` names only declared Capabilities, and Registry still refuses at the
+ * call site anything that is not a decorated Capability.
+ */
+export function nestable<R extends CapabilityResult>(result: R): Nestable<R> {
+  return result as Nestable<R>;
+}
 
 export function toJsonSafe(value: unknown): JsonSafeValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -385,63 +398,85 @@ function assertBoundedParams(value: unknown, path: string, budget: TreeBudget): 
   }
 }
 
-function assertJsonSafe(value: unknown, path: string, seen = new WeakSet<object>()): void {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError(`${path} contains a non-finite number`);
-    return;
-  }
-  if (typeof value !== "object") {
-    throw new TypeError(`${path} contains a non-JSON-safe ${typeof value}`);
-  }
-  if (seen.has(value)) throw new TypeError(`${path} contains a cycle`);
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (const [index, entry] of value.entries()) {
-      assertJsonSafe(entry, `${path}[${index}]`, seen);
-    }
-  } else {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new TypeError(`${path} contains a non-plain object`);
-    }
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
-    for (const [key, entry] of Object.entries(value)) {
-      assertJsonSafe(entry, `${path}.${key}`, seen);
-    }
-  }
-  seen.delete(value);
-}
+type ReceiptFrame =
+  | { task: "receipt"; node: unknown; path: string; depth: number }
+  | { task: "change"; child: ReceiptChange; path: string }
+  | { task: "leave"; node: object };
 
-function flattenReceipt(
-  receipt: ReceiptResult,
-  path = "Receipt",
-  seen = new WeakSet<object>(),
-): ReceiptChange[] {
-  if (!receipt || typeof receipt !== "object" || receipt.kind !== "receipt") {
-    throw new Error(`${path} is not a Receipt`);
-  }
-  if (seen.has(receipt)) throw new Error(`${path} contains a Receipt cycle`);
-  seen.add(receipt);
-  assertJsonSafe(receipt.outcome, `${path}.outcome`);
-  requireText(receipt.text, `${path}.text`);
-  if (!Array.isArray(receipt.changes)) throw new Error(`${path}.changes must be an array`);
+/**
+ * Validates and flattens one Receipt tree with an explicit stack, keeping the
+ * depth-first order of the previous recursive traversal. The parameter budgets
+ * from CAPABILITY_TREE_LIMITS are enforced cumulatively across every outcome
+ * and ReceiptChange data in the whole tree, beside a Receipt nesting bound, so
+ * an adversarially deep Receipt fails with a typed CapabilityTreeError and a
+ * tree path instead of an untyped RangeError, the same way the input side does.
+ */
+function flattenReceipt(receipt: ReceiptResult): ReceiptChange[] {
   const leaves: ReceiptChange[] = [];
-  for (const [index, child] of receipt.changes.entries()) {
-    const childPath = `${path}.changes[${index}]`;
-    if (child?.kind === "change") {
-      requireText(child.text, `${childPath}.text`);
-      assertJsonSafe(child.data, `${childPath}.data`);
-      leaves.push(child);
-    } else if (child?.kind === "receipt") {
-      leaves.push(...flattenReceipt(child, childPath, seen));
-    } else {
-      throw new Error(`${childPath} is not a Receipt or ReceiptChange`);
+  const ancestors = new WeakSet<object>();
+  const budget: TreeBudget = {
+    capabilities: 0,
+    parameterNodes: 0,
+    parameterCharacters: 0,
+    calldataBytes: 0,
+  };
+  const stack: ReceiptFrame[] = [{ task: "receipt", node: receipt, path: "Receipt", depth: 1 }];
+
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    if (!frame) break;
+    if (frame.task === "leave") {
+      ancestors.delete(frame.node);
+      continue;
     }
+    if (frame.task === "change") {
+      requireText(frame.child.text, `${frame.path}.text`);
+      assertBoundedParams(frame.child.data, `${frame.path}.data`, budget);
+      leaves.push(frame.child);
+      continue;
+    }
+    const { node, path, depth } = frame;
+    if (!node || typeof node !== "object" || (node as ReceiptResult).kind !== "receipt") {
+      throw new Error(`${path} is not a Receipt`);
+    }
+    if (ancestors.has(node)) throw new Error(`${path} contains a Receipt cycle`);
+    if (depth > CAPABILITY_TREE_LIMITS.maxCapabilityDepth) {
+      throw new CapabilityTreeError(
+        "CAPABILITY_DEPTH",
+        path,
+        `Receipt depth exceeds ${CAPABILITY_TREE_LIMITS.maxCapabilityDepth}`,
+      );
+    }
+    ancestors.add(node);
+    const current = node as ReceiptResult;
+    assertBoundedParams(current.outcome, `${path}.outcome`, budget);
+    requireText(current.text, `${path}.text`);
+    if (!Array.isArray(current.changes)) throw new Error(`${path}.changes must be an array`);
+    // Bound the fanout before materializing child frames, so an over-wide
+    // changes array fails with a typed error rather than allocating a frame per
+    // child and then spreading an unbounded array into push() (a RangeError).
+    // Mirrors the array lookahead in assertBoundedParams.
+    if (budget.parameterNodes + current.changes.length > CAPABILITY_TREE_LIMITS.maxParameterNodes) {
+      throw new CapabilityTreeError(
+        "PARAMETER_COUNT",
+        path,
+        `total parameter nodes exceed ${CAPABILITY_TREE_LIMITS.maxParameterNodes}`,
+      );
+    }
+    const children: ReceiptFrame[] = [];
+    for (const [index, child] of current.changes.entries()) {
+      const childPath = `${path}.changes[${index}]`;
+      if (child?.kind === "change") {
+        children.push({ task: "change", child, path: childPath });
+      } else if (child?.kind === "receipt") {
+        children.push({ task: "receipt", node: child, path: childPath, depth: depth + 1 });
+      } else {
+        throw new Error(`${childPath} is not a Receipt or ReceiptChange`);
+      }
+    }
+    stack.push({ task: "leave", node });
+    stack.push(...children.toReversed());
   }
-  seen.delete(receipt);
   return leaves;
 }
 

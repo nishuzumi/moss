@@ -66,6 +66,17 @@ export class MyProtocol {
 
 Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
 
+Nesting one of the Protocol's own Capabilities goes through the injected `self` reference, declared over the named Capabilities it nests: `declare self: SelfRef<MyProtocol, "approve">`. It behaves exactly like a dependency reference (validated params, core-stamped node, Registry-resolved Receipt parser). Never hand-assemble a `CapabilityNode` in a Protocol package. A Capability declares itself nestable where it is written, by returning `nestable(...)`:
+
+```ts
+@Capability<MyProtocol, typeof approveParams>({ /* ... */ })
+approve(params: ApproveParams): Nestable<TransactionNode[]> {
+  return nestable([this.router.approve(/* protocol arguments */)]);
+}
+```
+
+`self` names only declared Capabilities, so a Query, a Receipt parser, a Capability that never declared itself, or a plain helper shaped like a Capability will not compile. TypeScript cannot see a decorator, so core also refuses at the call site: reaching any other method of the class through `self` throws a named framework error rather than returning undefined. Reaching for `self` from a Query or a Receipt parser throws for the same reason. `declare self` is the only valid form: core owns the property, so a contract or dependency key named `self` is rejected up front and an initialized `self` field is rejected at construction. Core admits each nested call against the same `CAPABILITY_TREE_LIMITS` depth and count budget the finished tree is checked against, so a Capability that nests itself is stopped at the limit rather than after the work is done.
+
 `labels` names fixed Package addresses independently of Handles. Registry renders the example above as `Package(Myprotocol:Router)`, validates the combined payload inside the Core-owned wrapper as a safe 1–32 character name, and exposes it through declared dependency and Receipt parser caller scopes. Receipt parsers still emit raw evidence-backed addresses; Registry owns presentation.
 
 ## 3. Define parameter contracts

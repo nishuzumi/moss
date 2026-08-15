@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
 import {
   type AddressValue,
+  CAPABILITY_TREE_LIMITS,
   Capability,
   type CapabilityNode,
+  type CapabilityResult,
   type Change,
   flattenCapabilityTree,
   type Handle,
   type InferParams,
   type ReceiptResult as MossReceipt,
   type MossRuntime,
+  type Nestable,
+  nestable,
   type ParamsSpec,
   PositiveDecimalString,
   Protocol,
@@ -18,6 +22,7 @@ import {
   Query,
   Receipt,
   Registry,
+  type SelfRef,
   type TransactionNode,
   transaction,
   UnsignedIntegerString,
@@ -165,6 +170,229 @@ class ComposedProtocol {
 }
 
 class UndecoratedDependency {}
+
+const forgeParams = {
+  method: {
+    type: z.string().min(1).describe("A method name of the Protocol, as a non-empty string."),
+    description: "Method the Capability reaches for through self.",
+  },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "selfnesting",
+  category: "token",
+  description: "Fixture Protocol nesting its own Capability through self.",
+  contracts: {},
+})
+class SelfNestingProtocol {
+  declare self: SelfRef<SelfNestingProtocol, "approve">;
+
+  @Capability<SelfNestingProtocol, typeof noParams>({
+    intent: "Compose a self-nested approval",
+    verb: "swap",
+    params: noParams,
+    receipt: "swapReceipt",
+    risk: ["fundOut"],
+  })
+  async swap(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    selfKeys = Object.keys(this.self);
+    return [
+      await this.self.approve({ token: "1", amount: "10" }),
+      transaction(ctx.account, VAULT, { data: "0xabcd" }),
+    ];
+  }
+
+  @Capability<SelfNestingProtocol, typeof approvalParams>({
+    intent: "Approve fixture token",
+    verb: "transfer",
+    params: approvalParams,
+    receipt: "approvalReceipt",
+    risk: ["approval"],
+  })
+  async approve(
+    params: InferParams<typeof approvalParams>,
+    ctx: { account: AddressValue },
+  ): Promise<Nestable<TransactionNode[]>> {
+    if (typeof params.amount !== "string") throw new Error("self call skipped parameter parsing");
+    return nestable([transaction(ctx.account, VAULT, { data: "0x1234" })]);
+  }
+
+  @Capability<SelfNestingProtocol, typeof forgeParams>({
+    intent: "Reach for {method} through self",
+    verb: "swap",
+    params: forgeParams,
+    receipt: "swapReceipt",
+    risk: ["fundOut"],
+  })
+  async forge(params: InferParams<typeof forgeParams>): Promise<CapabilityResult> {
+    // NestableNames rejects both names this is called with, so only a cast gets
+    // here. Core still has to refuse instead of answering with undefined.
+    const forged = this.self as unknown as Record<
+      string,
+      (input: unknown) => Promise<CapabilityNode>
+    >;
+    const nested = forged[params.method];
+    if (!nested) throw new Error("self exposed the method as undefined");
+    return [await nested({ token: "1", amount: "10" })];
+  }
+
+  /** Capability-shaped and never decorated, so no surface carries it. */
+  async undecoratedHelper(_params: { amount: string }): Promise<TransactionNode[]> {
+    return [];
+  }
+
+  @Query({ intent: "Read fixture approval data", params: approvalParams })
+  async inspect(params: InferParams<typeof approvalParams>) {
+    return { amount: params.amount };
+  }
+
+  @Receipt()
+  swapReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    return receiptFor("swap", changes);
+  }
+
+  @Receipt()
+  approvalReceipt(changes: readonly Change[]): MossReceipt<{ operation: "approve" }> {
+    return receiptFor("approve", changes);
+  }
+}
+
+/** Capability method names `self` exposed on the last SelfNestingProtocol build. */
+let selfKeys: string[] = [];
+let descendCalls = 0;
+let leafCalls = 0;
+
+const roundParams = {
+  remaining: { type: UnsignedIntegerString, description: "Remaining nesting rounds." },
+} satisfies ParamsSpec;
+
+@Protocol({
+  name: "selfrecursion",
+  category: "token",
+  description: "Fixture Protocol whose Capabilities nest through self without bound.",
+  contracts: {},
+})
+class SelfRecursiveProtocol {
+  declare self: SelfRef<SelfRecursiveProtocol, "descend" | "leaf">;
+
+  @Capability<SelfRecursiveProtocol, typeof roundParams>({
+    intent: "Nest one more copy of itself",
+    verb: "swap",
+    params: roundParams,
+    receipt: "runReceipt",
+    risk: ["fundOut"],
+  })
+  async descend(
+    params: InferParams<typeof roundParams>,
+    ctx: { account: AddressValue },
+  ): Promise<Nestable<CapabilityResult>> {
+    descendCalls += 1;
+    const own = transaction(ctx.account, VAULT, { data: "0x01" });
+    const remaining = Number(params.remaining);
+    if (remaining <= 0) return nestable([own]);
+    return nestable([await this.self.descend({ remaining: String(remaining - 1) }), own]);
+  }
+
+  @Capability<SelfRecursiveProtocol, typeof roundParams>({
+    intent: "Nest a flat run of leaf Capabilities",
+    verb: "swap",
+    params: roundParams,
+    receipt: "runReceipt",
+    risk: ["fundOut"],
+  })
+  async spread(
+    params: InferParams<typeof roundParams>,
+    ctx: { account: AddressValue },
+  ): Promise<CapabilityResult> {
+    const children: (CapabilityNode | TransactionNode)[] = [];
+    for (let round = 0; round < Number(params.remaining); round += 1) {
+      children.push(await this.self.leaf({ remaining: "0" }));
+    }
+    children.push(transaction(ctx.account, VAULT, { data: "0x02" }));
+    return children;
+  }
+
+  @Capability<SelfRecursiveProtocol, typeof roundParams>({
+    intent: "Own one leaf transaction",
+    verb: "swap",
+    params: roundParams,
+    receipt: "runReceipt",
+    risk: ["fundOut"],
+  })
+  async leaf(
+    _: InferParams<typeof roundParams>,
+    ctx: { account: AddressValue },
+  ): Promise<Nestable<CapabilityResult>> {
+    leafCalls += 1;
+    return nestable([transaction(ctx.account, VAULT, { data: "0x03" })]);
+  }
+
+  @Receipt()
+  runReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    return receiptFor("swap", changes);
+  }
+}
+
+@Protocol({
+  name: "selfsurface",
+  category: "token",
+  description: "Fixture Protocol reaching for self outside a Capability.",
+  contracts: {},
+})
+class SelfSurfaceProtocol {
+  declare self: SelfRef<SelfSurfaceProtocol, "noop">;
+
+  @Capability<SelfSurfaceProtocol, typeof noParams>({
+    intent: "Own one transaction",
+    verb: "swap",
+    params: noParams,
+    receipt: "noopReceipt",
+    risk: ["fundOut"],
+  })
+  async noop(
+    _: InferParams<typeof noParams>,
+    ctx: { account: AddressValue },
+  ): Promise<Nestable<TransactionNode[]>> {
+    return nestable([transaction(ctx.account, VAULT, { data: "0x04" })]);
+  }
+
+  @Query({ intent: "Reach for self from a Query", params: noParams })
+  async peek() {
+    return { nested: typeof this.self.noop };
+  }
+
+  @Receipt()
+  noopReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    if (typeof this.self.noop === "function") throw new Error("unreachable");
+    return receiptFor("swap", changes);
+  }
+}
+
+@Protocol({
+  name: "selffield",
+  category: "token",
+  description: "Fixture Protocol that initializes self itself.",
+  contracts: {},
+})
+class SelfFieldProtocol {
+  self = { claimed: true };
+
+  @Capability<SelfFieldProtocol, typeof noParams>({
+    intent: "Own one transaction",
+    verb: "swap",
+    params: noParams,
+    receipt: "fieldReceipt",
+    risk: ["fundOut"],
+  })
+  async run(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT, { data: "0x05" })];
+  }
+
+  @Receipt()
+  fieldReceipt(changes: readonly Change[]): MossReceipt<{ operation: "swap" }> {
+    return receiptFor("swap", changes);
+  }
+}
 
 @Protocol({
   name: "broken-dependency",
@@ -404,6 +632,122 @@ describe("framework core seam", () => {
       "0x1234",
       "0xabcd",
     ]);
+  });
+
+  it("routes a Protocol's own nested Capability through core (self-injection)", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfNestingProtocol);
+
+    const result = await registry.action("selfnesting", "swap", ACCOUNT, {});
+    if (result.kind !== "capability") throw new Error("expected capability");
+
+    // The nested node must be stamped by core, not hand-assembled.
+    expect(result.children[0]).toMatchObject({
+      kind: "capability",
+      protocol: "selfnesting",
+      method: "approve",
+      params: { token: "1", amount: "10" },
+    });
+    expect(flattenCapabilityTree(result).map(({ transaction: tx }) => tx.data)).toEqual([
+      "0x1234",
+      "0xabcd",
+    ]);
+
+    // Registry must resolve the nested node's Receipt parser.
+    const changes: Change[] = [
+      { kind: "event", address: VAULT, topics: [], data: "0x" },
+      { kind: "event", address: VAULT, topics: [], data: "0x" },
+    ];
+    const nested = result.children[0];
+    if (nested?.kind !== "capability") throw new Error("expected nested capability");
+    expect(registry.parseReceipt(nested, [changes[0] as Change]).outcome).toEqual({
+      operation: "approve",
+    });
+    expect(registry.parseReceipt(result, [changes[1] as Change]).outcome).toEqual({
+      operation: "swap",
+    });
+  });
+
+  it("bounds self nesting during construction, before the over-limit method runs", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfRecursiveProtocol);
+
+    descendCalls = 0;
+    await expect(
+      registry.action("selfrecursion", "descend", ACCOUNT, { remaining: "100" }),
+    ).rejects.toMatchObject({ name: "CapabilityTreeError", code: "CAPABILITY_DEPTH" });
+    // The depth budget is spent, never exceeded: the call past the limit is
+    // rejected instead of parsing params and running the Protocol method.
+    expect(descendCalls).toBe(CAPABILITY_TREE_LIMITS.maxCapabilityDepth);
+
+    leafCalls = 0;
+    await expect(
+      registry.action("selfrecursion", "spread", ACCOUNT, { remaining: "100" }),
+    ).rejects.toMatchObject({ name: "CapabilityTreeError", code: "CAPABILITY_COUNT" });
+    expect(leafCalls).toBe(CAPABILITY_TREE_LIMITS.maxCapabilities - 1);
+  });
+
+  it("injects self as a Capability-only surface and rejects it anywhere else", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfNestingProtocol, SelfSurfaceProtocol, SelfFieldProtocol);
+
+    selfKeys = [];
+    await registry.action("selfnesting", "swap", ACCOUNT, {});
+    // Queries read state and Receipt parsers stay pure, so neither is nestable,
+    // and a method with no @Capability is on no surface at all.
+    expect([...selfKeys].sort()).toEqual(["approve", "forge", "swap"]);
+
+    await expect(registry.action("selfsurface", "peek", ACCOUNT, {})).rejects.toThrow(
+      'cannot reach "self.noop" from a Query',
+    );
+    const node = await registry.action("selfsurface", "noop", ACCOUNT, {});
+    if (node.kind !== "capability") throw new Error("expected capability");
+    expect(() => registry.parseReceipt(node, [])).toThrow(
+      'cannot reach "self.noop" from a Receipt',
+    );
+
+    await expect(registry.action("selffield", "run", ACCOUNT, {})).rejects.toThrow(
+      'must leave "self" to core',
+    );
+  });
+
+  it("refuses a method that is not a Capability when self is reached past a cast", async () => {
+    const registry = new Registry(runtime);
+    registry.use(SelfNestingProtocol);
+
+    // `NestableNames` rejects all three names at compile time (types.fixture.ts).
+    // A cast is the only way to reach them, and core refuses by name rather than
+    // handing back undefined: an undecorated helper, a Query and a Receipt parser
+    // are on no `self` surface.
+    await expect(
+      registry.action("selfnesting", "forge", ACCOUNT, { method: "undecoratedHelper" }),
+    ).rejects.toThrow('cannot nest "self.undecoratedHelper", which is not a @Capability');
+    await expect(
+      registry.action("selfnesting", "forge", ACCOUNT, { method: "inspect" }),
+    ).rejects.toThrow('cannot nest "self.inspect", which is not a @Capability');
+    await expect(
+      registry.action("selfnesting", "forge", ACCOUNT, { method: "approvalReceipt" }),
+    ).rejects.toThrow('cannot nest "self.approvalReceipt", which is not a @Capability');
+  });
+
+  it("reserves self against contract and dependency injection keys", () => {
+    expect(() =>
+      Protocol({
+        name: "reserved-contract",
+        category: "token",
+        description: "Fixture claiming self as a contract.",
+        contracts: { self: { abi: VaultAbi, addr: VAULT } },
+      }),
+    ).toThrow('cannot declare a contract named "self"');
+    expect(() =>
+      Protocol({
+        name: "reserved-dependency",
+        category: "token",
+        description: "Fixture claiming self as a dependency.",
+        contracts: {},
+        protocols: { self: ApprovalProtocol },
+      }),
+    ).toThrow('cannot declare a dependency named "self"');
   });
 
   it("rejects inherited markers, undecorated dependencies, and invalid Capability metadata", () => {
