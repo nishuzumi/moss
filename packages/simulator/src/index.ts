@@ -54,29 +54,20 @@ export interface TransactionSimulation {
 export interface SimulateOutcome {
   results: TransactionSimulation[];
   halted?: { transactionIndex: number; reason: string };
+  /**
+   * The exact base block this simulate() invocation resolved once and reused
+   * for every trace, gas estimate, and state diff in the run (ADR 0002). It is
+   * filled from the run's already-resolved block — reading it never queries
+   * the chain. Absent when base-block resolution failed, so no fabricated or
+   * stale block is ever reported. Scoped to this outcome: repeated or
+   * overlapping simulate() calls each carry their own block, and the value is
+   * retained even when the run later reverts or halts.
+   */
+  simulatorPinnedBlock?: Hex;
 }
 
 export interface Simulator {
   simulate(root: CapabilityNode): Promise<SimulateOutcome>;
-  /**
-   * The base block pinned by the most recent simulate() invocation, or
-   * undefined when no invocation has successfully pinned one yet.
-   *
-   * Semantics:
-   * - Exact identity: the returned block is the one the run resolved once and
-   *   reused for every trace, gas estimate, and state diff (ADR 0002). It is
-   *   never re-queried and never falls back to `latest`.
-   * - Per-run freshness: the exposed state resets at the start of each
-   *   simulate() invocation, so after a failed base-block resolution the
-   *   previous run's block is never reported.
-   * - Post-pin halts: once a run has resolved its base block, the block stays
-   *   available even when the run later halts (trace failure, revert, receipt
-   *   failure, or state-chain failure).
-   * - Availability: the value reflects the most recent invocation that
-   *   completed block pinning. Overlapping concurrent simulate() calls on the
-   *   same instance are not concurrency-safe.
-   */
-  getPinnedBlockNumber?(): Promise<Hex | undefined>;
 }
 
 export interface SimulatorOptions {
@@ -91,19 +82,8 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
   const gasBudget = options.gasPerTx ?? DEFAULT_SIMULATION_GAS;
   const prefund: `0x${string}` = `0x${(options.prefundWei ?? DEFAULT_PREFUND_WEI).toString(16)}`;
 
-  // Base block pinned by the most recent simulate() run. Fail-closed:
-  // undefined until a run resolves and pins its block (ADR 0002).
-  let pinnedBlock: Hex | undefined;
-
   return {
-    async getPinnedBlockNumber(): Promise<Hex | undefined> {
-      return pinnedBlock;
-    },
-
     async simulate(root): Promise<SimulateOutcome> {
-      // Reset the exposed pinned block before resolving the new base block so
-      // a resolution failure can never leak the previous run's block.
-      pinnedBlock = undefined;
       const executable = flattenCapabilityTree(root);
       const overrides: StateOverrides = {};
       const results: TransactionSimulation[] = [];
@@ -130,8 +110,8 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
       }
 
       // This is the exact block every trace, gas estimate, and state diff in
-      // the run is pinned to; keep it exposed even if the run halts later.
-      pinnedBlock = block;
+      // the run is pinned to; every outcome returned from here on carries it,
+      // even when the run halts later.
 
       for (const [transactionIndex, { capability, transaction }] of executable.entries()) {
         const sender = transaction.from.toLowerCase() as keyof StateOverrides;
@@ -157,7 +137,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "TRACE_FAILED", message: reason }],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return { results, halted: { transactionIndex, reason }, simulatorPinnedBlock: block };
         }
 
         if (frame.error) {
@@ -171,7 +151,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "REVERTED", message: `transaction reverted: ${reason}` }],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return { results, halted: { transactionIndex, reason }, simulatorPinnedBlock: block };
         }
 
         let changes: readonly Change[];
@@ -191,7 +171,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [warning],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return { results, halted: { transactionIndex, reason }, simulatorPinnedBlock: block };
         }
 
         let receipt: Receipt;
@@ -217,7 +197,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             ],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return { results, halted: { transactionIndex, reason }, simulatorPinnedBlock: block };
         }
 
         const gas = await estimateGasWithOverrides(runtime.client, call, block, overrides);
@@ -244,7 +224,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
               warnings: [{ code: "STATE_CHAIN_FAILED", message: reason }],
               gas: gas?.toString() ?? null,
             });
-            return { results, halted: { transactionIndex, reason } };
+            return { results, halted: { transactionIndex, reason }, simulatorPinnedBlock: block };
           }
         }
         results.push({
@@ -258,7 +238,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
           gas: gas?.toString() ?? null,
         });
       }
-      return { results };
+      return { results, simulatorPinnedBlock: block };
     },
   };
 }
