@@ -16,6 +16,7 @@ import {
   encodeAbiParameters,
   encodeEventTopics,
   encodeFunctionResult,
+  formatUnits,
   getAddress,
 } from "viem";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -881,6 +882,140 @@ describe("Kuru", () => {
     expect(capability.kind).toBe("capability");
   });
 
+  it("refuses a target that rounds below the token's smallest unit", async () => {
+    // PositiveDecimalString accepts "0.0000001", but USDC has six decimals, so the target parses to
+    // zero — and a swap with a zero minimum output has no floor left to protect it. Both sides are
+    // refused, each in its own terms: the input side has nothing to sell, the output side nothing
+    // to ask for.
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+    ]);
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "0.0000001",
+      }),
+    ).rejects.toThrow(/rounds to zero/);
+    await expect(
+      registry.action("kuru", "swap", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "0.0000001",
+      }),
+    ).rejects.toThrow(/rounds to zero/);
+
+    // The input side already refuses, because nothing can be sold.
+    const noInput = await quoteError(registry, { amountIn: "0.0000001" });
+    expect(noInput.code).toBe("NO_POSITIVE_QUOTE");
+  });
+
+  it("offers requireExhaustive on the write only, not on the advisory quote", async () => {
+    // A parameter an Agent can see but that does nothing is worse than no parameter: `quote`
+    // reports the gaps and answers regardless, so only `swap` carries the refusal switch.
+    const { registry } = offlineRegistry();
+    const [quoted, swapped] = registry.load([
+      { protocol: "kuru", method: "quote" },
+      { protocol: "kuru", method: "swap" },
+    ]);
+    expect(quoted?.params).not.toHaveProperty("requireExhaustive");
+    expect(swapped?.params.requireExhaustive).toMatchObject({
+      type: { type: "boolean", default: true },
+    });
+  });
+
+  it("searches the band the opening guess jumped over, instead of concluding from below it", async () => {
+    // Halving lands anywhere in the top half of the encodable range, and doubling from there goes
+    // straight back to the size that already refused — so an answer sitting between the two is
+    // never probed. It bites when the route's gain is small: at 1.2x the halved probe falls short
+    // of the target while the ceiling clears it comfortably.
+    const CEILING = 2n ** 96n - 1n;
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 6n, 5n),
+    ]);
+    // Just above what the market can encode, so the opening guess is refused outright.
+    const target = formatUnits((CEILING * 11n) / 10n, 6);
+
+    const reverse = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: target,
+    });
+    if (reverse.kind !== "query") throw new Error("expected query");
+    // The answer is target/1.2, comfortably below the ceiling — the route prices it.
+    expect(
+      Number((reverse.data as { estimatedAmountIn: string }).estimatedAmountIn),
+    ).toBeGreaterThan(0);
+  });
+
+  it("does not spend a live call per halving step when the market itself panics", async () => {
+    // An encode refusal is free — viem never asks the chain. A Panic is a real eth_call, so
+    // searching down through it would turn one refusal into a log2 sweep against the node.
+    let calls = 0;
+    const panicking = {
+      ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 18, 18, 1n, 1n),
+      quoteFails: true,
+      quoteFailName: "ContractFunctionExecutionError",
+      quoteFailData: `0x4e487b71${17n.toString(16).padStart(64, "0")}`,
+    };
+    const { registry } = offlineRegistry([panicking], marketDiscoveryFetch([panicking]), () => {
+      calls += 1;
+    });
+    await quoteError(registry, { amountOut: "1000" });
+    expect(calls).toBeLessThan(5);
+  });
+
+  it("does not let a verification failure carry the endpoint out with it", async () => {
+    // #verifyMarket is the one on-chain read outside the quoting path. It used to throw viem's
+    // error straight through, and viem's message carries the RPC URL and the request body — the
+    // same disclosure the reported gaps were sanitized to prevent, reached through discovery.
+    const SECRET = "https://rpc.example/v2/SUPERSECRETKEY";
+    const markets = [market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n)];
+    const { registry } = offlineRegistry(markets, marketDiscoveryFetch(markets), undefined, () => {
+      const failure = new Error(
+        `HTTP request failed.\n\nURL: ${SECRET}\nRequest body: {"method":"eth_call"}`,
+      );
+      failure.name = "HttpRequestError";
+      throw failure;
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      })
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect(failed?.message).not.toContain("SUPERSECRETKEY");
+    expect(failed?.message).not.toContain("rpc.example");
+    expect(failed?.message).toMatch(/verification could not be completed/);
+    expect(failed?.message).toContain("transport");
+  });
+
+  it("keeps an RPC error response in the transport category, not in unknown", async () => {
+    // viem chains every JSON-RPC error response under RpcRequestError, including the 429 the
+    // default endpoint returns after a few dozen sequential calls. Reading that as "unknown" would
+    // hide the likeliest real gap on the default configuration.
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      {
+        ...market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
+        quoteFails: true,
+        quoteFailName: "RpcRequestError",
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as KuruQuote).unavailable[0]?.reason).toBe("transport");
+  });
+
   it("reports no verified route separately from a quote failure", async () => {
     // Discovery finished and produced nothing: a different claim from any quote outcome.
     // A market that exists but connects neither leg of the requested pair, so discovery
@@ -946,6 +1081,10 @@ async function swapCapability(registry: Registry) {
 function offlineRegistry(
   markets: readonly MockMarket[] = MARKETS,
   fetchMock = marketDiscoveryFetch(markets),
+  /** Called for every simulated eth_call, so a test can count what a search actually costs. */
+  onCall: () => void = () => {},
+  /** Called before the Router's verifiedMarket read, so a test can fail discovery itself. */
+  onVerify: () => void = () => {},
 ) {
   const byAddress = new Map(markets.map((entry) => [entry.address.toLowerCase(), entry]));
   vi.stubGlobal("fetch", fetchMock);
@@ -958,6 +1097,7 @@ function offlineRegistry(
       args: readonly unknown[];
     }) => {
       if (functionName !== "verifiedMarket") throw new Error(`unexpected read ${functionName}`);
+      onVerify();
       const entry = byAddress.get(String(args[0]).toLowerCase());
       if (!entry) throw new Error(`unknown market ${String(args[0])}`);
       if (entry.verified === false) return [0, 0n, ZERO, 0n, ZERO, 0n, 0, 0n, 0n, 0n, 0n];
@@ -976,6 +1116,7 @@ function offlineRegistry(
       ];
     },
     call: async ({ to, account, data }: { to: string; account: string; data: Hex }) => {
+      onCall();
       const entry = byAddress.get(to.toLowerCase());
       if (!entry) throw new Error(`unexpected call ${to}`);
       if (entry.quoteFails) {

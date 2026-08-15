@@ -15,9 +15,11 @@ export type KuruUnavailableRoute = {
 /**
  * The same gap as {@link KuruUnavailableRoute}, carrying a message instead of the Error.
  *
- * A Query result is passed through the framework's JSON-safe coercion, which reduces an Error to
- * an empty object; the thrown {@link KuruQuoteError} never crosses that boundary and so keeps the
- * live Error and its cause chain. Reporting a string here is what actually reaches the caller.
+ * Reporting a category rather than an Error is the whole defence, not a convenience. The
+ * framework's JSON-safe coercion blanks a *plain* Error to `{}`, but viem's errors carry the RPC
+ * URL and the request body in enumerable fields, so one placed in a Query result would be
+ * published in full — measured at 335 bytes including the endpoint key. Nothing behind this
+ * catches it.
  */
 /**
  * Why an evaluation did not complete, as a closed set of stable categories.

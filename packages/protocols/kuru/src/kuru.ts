@@ -59,7 +59,7 @@ export type { KuruUnavailableRoute } from "./types.js";
 export class KuruQuoteError extends Error {
   readonly code: KuruQuoteErrorCode;
   readonly side: KuruQuote["amountSide"];
-  readonly unavailable: readonly KuruUnavailableRoute[];
+  declare readonly unavailable: readonly KuruUnavailableRoute[];
 
   constructor(
     code: KuruQuoteErrorCode,
@@ -71,8 +71,13 @@ export class KuruQuoteError extends Error {
     this.name = "KuruQuoteError";
     this.code = code;
     this.side = side;
-    this.unavailable = unavailable;
-    if (unavailable[0]) this.cause = unavailable[0].error;
+    // Non-enumerable on purpose. viem's errors carry the RPC URL and the request body in
+    // enumerable fields, so a consumer's JSON.stringify(error) or a structured logger would
+    // republish an endpoint credential. Both stay reachable for programmatic inspection.
+    Object.defineProperty(this, "unavailable", { value: unavailable, enumerable: false });
+    if (unavailable[0]) {
+      Object.defineProperty(this, "cause", { value: unavailable[0].error, enumerable: false });
+    }
   }
 }
 
@@ -98,7 +103,7 @@ const KuruSlippage = BasisPoints.min(50)
   .max(5_000)
   .describe("An integer basis-point count from 50 through 5000; 1 bps equals 0.01%.");
 
-const swapParams = {
+const quoteParams = {
   tokenIn: { type: TokenReference, description: "Asset offered to the swap." },
   tokenOut: { type: TokenReference, description: "Asset requested from the swap." },
   amountIn: {
@@ -113,19 +118,31 @@ const swapParams = {
     type: KuruSlippage.default(DEFAULT_SLIPPAGE_BPS),
     description: "Maximum adverse movement allowed between quoting and execution.",
   },
+} satisfies ParamsSpec;
+
+// Only the write carries it. Declaring it on `quote` as well would put a parameter in front of an
+// Agent that does nothing there: a quote reports the gaps and answers regardless.
+const swapParams = {
+  ...quoteParams,
   requireExhaustive: {
     type: RequireExhaustive.default(true),
     description:
-      "Refuse to build a swap when some verified routes could not be evaluated. Default true: a write is not the place to guess. Set false to accept the best of a partial comparison.",
+      "Refuse to build the swap when some verified routes could not be evaluated. Default true: a write is not the place to guess. Set false to accept the best of a partial comparison.",
   },
 } satisfies ParamsSpec;
 
+type InferredQuoteParams = InferParams<typeof quoteParams>;
 type InferredSwapParams = InferParams<typeof swapParams>;
+type QuoteParams = Omit<InferredQuoteParams, "amountIn" | "amountOut" | "slippage"> &
+  Partial<Pick<InferredQuoteParams, "amountIn" | "amountOut" | "slippage">>;
 type SwapParams = Omit<
   InferredSwapParams,
   "amountIn" | "amountOut" | "slippage" | "requireExhaustive"
 > &
   Partial<Pick<InferredSwapParams, "amountIn" | "amountOut" | "slippage" | "requireExhaustive">>;
+type KuruQuoteParams = Pick<QuoteParams, "tokenIn" | "tokenOut"> & {
+  slippage?: InferredQuoteParams["slippage"];
+} & ({ amountIn: string; amountOut?: never } | { amountIn?: never; amountOut: string });
 type KuruSwapParams = Pick<SwapParams, "tokenIn" | "tokenOut"> & {
   slippage?: InferredSwapParams["slippage"];
   requireExhaustive?: InferredSwapParams["requireExhaustive"];
@@ -134,7 +151,7 @@ type KuruSwapParams = Pick<SwapParams, "tokenIn" | "tokenOut"> & {
 /** A search probe either priced, or could not be represented at that size. */
 type SearchProbe =
   | { readonly ok: true; readonly amountOut: bigint }
-  | { readonly ok: false; readonly error: Error };
+  | { readonly ok: false; readonly error: Error; readonly free: boolean };
 
 @Protocol({
   name: "kuru",
@@ -148,9 +165,9 @@ export class Kuru {
   declare router: Handle<typeof KuruRouterAbi>;
   declare erc20: ProtocolRef<ERC20>;
 
-  quote(params: KuruSwapParams, ctx: ActionCtx): Promise<KuruQuote>;
-  @Query({ intent: "Quote the best Kuru swap path", params: swapParams, tags: ["clob", "quote"] })
-  async quote(params: SwapParams, ctx: ActionCtx): Promise<KuruQuote> {
+  quote(params: KuruQuoteParams, ctx: ActionCtx): Promise<KuruQuote>;
+  @Query({ intent: "Quote the best Kuru swap path", params: quoteParams, tags: ["clob", "quote"] })
+  async quote(params: QuoteParams, ctx: ActionCtx): Promise<KuruQuote> {
     const prepared = await this.#prepareSwap(params, ctx.account);
     const path = routeTokens(prepared.route);
     if (prepared.side === "amountIn") {
@@ -324,7 +341,7 @@ export class Kuru {
     };
   }
 
-  async #prepareSwap(params: SwapParams, account: AddressValue): Promise<PreparedSwap> {
+  async #prepareSwap(params: QuoteParams, account: AddressValue): Promise<PreparedSwap> {
     if (sameToken(params.tokenIn, params.tokenOut)) {
       throw new ParameterError("tokenIn and tokenOut must differ");
     }
@@ -371,6 +388,15 @@ export class Kuru {
     }
 
     const minimumAmountOut = parseUnits(side.amount, outputDecimals);
+    // A target below the token's smallest unit rounds to zero, and a swap whose minimum output is
+    // zero carries no slippage protection at all — it can be emptied and still satisfy its own
+    // floor. `PositiveDecimalString` accepts "0.0000001"; the token's decimals decide whether that
+    // is a quantity or nothing.
+    if (minimumAmountOut === 0n) {
+      throw new ParameterError(
+        `amountOut ${side.amount} is below the smallest unit this token can represent (${outputDecimals} decimals), so it rounds to zero`,
+      );
+    }
     const quoted = await this.#quoteTargetOutput(
       routes,
       minimumAmountOut,
@@ -393,8 +419,22 @@ export class Kuru {
 
   async #discoverRoutes(tokenIn: TokenRef, tokenOut: TokenRef, account: AddressValue) {
     const candidates = await fetchMarketCandidates(tokenIn, tokenOut);
+    // Verification is the one on-chain read outside the quoting path, and it used to escape raw:
+    // a provider hiccup here threw viem's error, whose message carries the RPC URL and request
+    // body, straight past every sanitizer this adapter has. Same credential, same wire, reached
+    // through discovery instead of quoting.
     const markets = await Promise.all(
-      candidates.map((candidate) => this.#verifyMarket(candidate, account)),
+      candidates.map(async (candidate) => {
+        try {
+          return await this.#verifyMarket(candidate, account);
+        } catch (error) {
+          if (error instanceof KuruQuoteError || isOurOwnRefusal(error)) throw error;
+          throw sanitized(
+            `Kuru market verification could not be completed for ${candidate.address} (${categorize(asError(error))})`,
+            error,
+          );
+        }
+      }),
     );
     const routes: Route[] = [];
     const addRoute = (route: Route): void => {
@@ -545,17 +585,6 @@ export class Kuru {
   }
 
   /**
-   * #quoteRoute for the reverse search, where an input too large for the market to represent is
-   * an answer rather than a fault.
-   *
-   * The doubling probe overflows the market's size type long before the 255-attempt guard can
-   * fire, so that guard was unreachable in practice and the overflow surfaced as a viem
-   * IntegerOutOfRangeError — indistinguishable, to the caller above, from an RPC failure. It is
-   * not the same thing: the value came from our own search, nothing was asked of the chain, and
-   * the conclusion is deterministic. Treated as "this route cannot reach the target", which is
-   * what it means.
-   */
-  /**
    * Quote a search probe, reporting "this size cannot be represented" as a value rather than a
    * verdict.
    *
@@ -570,10 +599,15 @@ export class Kuru {
     try {
       return { ok: true, amountOut: await this.#quoteRoute(route, amountIn) };
     } catch (error) {
-      if (isProbeBeyondEncodableSize(error) || isMarketArithmeticOverflow(error)) {
-        // Carried on the result, not on the instance: routes are probed concurrently, so a field
-        // would hand one route's failure to another.
-        return { ok: false, error: asError(error) };
+      // Carried on the result, not on the instance: routes are probed concurrently, so a field
+      // would hand one route's failure to another. The two refusals are told apart because one is
+      // free and the other is not — viem refuses to encode without asking the chain anything,
+      // while a market Panic costs a live eth_call. Only the free one is worth searching with.
+      if (isProbeBeyondEncodableSize(error)) {
+        return { ok: false, error: asError(error), free: true };
+      }
+      if (isMarketArithmeticOverflow(error)) {
+        return { ok: false, error: asError(error), free: false };
       }
       throw error;
     }
@@ -613,9 +647,30 @@ export class Kuru {
     // that past the next leg's size type, so come down until a probe encodes before concluding
     // anything: the target may be reachable far below where the first guess landed.
     let probe = await this.#quoteRouteForSearch(route, high);
-    while (!probe.ok && high > 1n) {
-      high /= 2n;
-      probe = await this.#quoteRouteForSearch(route, high);
+    if (!probe.ok && probe.free) {
+      // The opening guess assumes a 1:1 price and can sit above what the route can encode. Come
+      // down to something that encodes, then find the actual ceiling between the two: halving
+      // alone leaves the band it jumped over unexplored, and the answer often lives there, so
+      // concluding from the halved probe reports an unreachable target for a route that prices.
+      const refused = high;
+      while (high > 1n && !probe.ok) {
+        high /= 2n;
+        probe = await this.#quoteRouteForSearch(route, high);
+      }
+      if (!probe.ok) this.#unencodableVerdict(route, probe.error);
+      let below = high;
+      let above = refused;
+      while (below + 1n < above) {
+        const middle = (below + above) / 2n;
+        const at = await this.#quoteRouteForSearch(route, middle);
+        if (at.ok) {
+          below = middle;
+          probe = at;
+        } else {
+          above = middle;
+        }
+      }
+      high = below;
     }
     if (!probe.ok) this.#unencodableVerdict(route, probe.error);
 
@@ -699,8 +754,10 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
   let payload: unknown;
   try {
     payload = JSON.parse(text);
-  } catch (error) {
-    throw new Error(`Kuru market discovery returned invalid JSON: ${errorMessage(error)}`);
+  } catch {
+    // Not the parser's message: V8 embeds the opening characters of the body in it, which is
+    // remote-controlled text on its way to an Agent.
+    throw new Error("Kuru market discovery returned invalid JSON");
   }
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
     throw new Error("Kuru market discovery returned an invalid response");
@@ -940,6 +997,24 @@ function reportable(
 }
 
 /** Map a failure onto the closed reason set, walking the cause chain viem builds. */
+/** An Error whose message is ours, keeping the original reachable but never enumerable. */
+function sanitized(message: string, cause: unknown): Error {
+  const error = new Error(message);
+  Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+  return error;
+}
+
+/**
+ * Whether this adapter wrote the message itself.
+ *
+ * Every refusal this package raises names Kuru first — an unverified market, invalid decimals, a
+ * discovery bound. Anything else arrived from below, where viem puts the endpoint URL and the
+ * request body into the text, and must not be passed on as it stands.
+ */
+function isOurOwnRefusal(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("Kuru ");
+}
+
 function categorize(error: Error): KuruUnavailableReason {
   if (isProbeBeyondEncodableSize(error)) return "unencodable-probe";
   for (
@@ -948,7 +1023,16 @@ function categorize(error: Error): KuruUnavailableReason {
     depth += 1
   ) {
     const { name } = current;
-    if (name === "HttpRequestError" || name === "TimeoutError" || name === "SocketClosedError") {
+    // `RpcRequestError` is what viem chains under every JSON-RPC *error response*, including the
+    // 429 the default endpoint returns after a few dozen sequential calls — runtime.ts documents
+    // that. Without it the likeliest real gap on the default configuration would read "unknown".
+    if (
+      name === "HttpRequestError" ||
+      name === "TimeoutError" ||
+      name === "SocketClosedError" ||
+      name === "RpcRequestError" ||
+      name.endsWith("RpcError")
+    ) {
       return "transport";
     }
     if (name === "ExecutionRevertedError" || name === "ContractFunctionRevertedError") {
