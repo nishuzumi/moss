@@ -98,6 +98,25 @@ export type CapabilityResult =
   | TransactionNode
   | readonly (CapabilityNode | TransactionNode)[];
 
+declare const NESTABLE: unique symbol;
+
+/**
+ * Compile-time marker carried by a Capability result declared nestable.
+ * `nestable()` is the only way to produce it.
+ */
+export interface NestableResult {
+  readonly [NESTABLE]: undefined;
+}
+
+/**
+ * A Capability result its own Protocol may nest through `self`. Returning
+ * `nestable(...)` is the declaration: a Capability whose result is shaped like a
+ * `CapabilityResult` but never declared stays outside `self`, because a
+ * decorator is invisible to the type system and shape alone is not a statement
+ * of intent.
+ */
+export type Nestable<R extends CapabilityResult = CapabilityResult> = R & NestableResult;
+
 export type ProtocolRef<T> = {
   [K in keyof T as T[K] extends (...args: infer _Args) => infer _Result ? K : never]: T[K] extends (
     params: infer Params,
@@ -110,6 +129,41 @@ export type ProtocolRef<T> = {
         : (params: Params) => Promise<Awaited<Result>>
     : never;
 };
+
+/**
+ * Names of the Capabilities a Protocol declared nestable, the only names `self`
+ * accepts. A Capability declares itself by returning `nestable(...)`, so a
+ * Query, a Receipt parser, a Capability that never declared itself, and an
+ * undecorated helper that happens to return a `CapabilityResult` are all
+ * rejected here instead of at the call site.
+ *
+ * Core's injected keys are excluded by name rather than by shape: `self` holds
+ * a `SelfRef` over the same class, so resolving its type here would make this
+ * constraint circular.
+ */
+export type NestableNames<T> = {
+  [K in Exclude<keyof T, "self" | "runtime">]: T[K] extends (
+    params: never,
+    ...rest: never[]
+  ) => infer Result
+    ? Awaited<Result> extends NestableResult
+      ? K
+      : never
+    : never;
+}[Exclude<keyof T, "self" | "runtime">] &
+  string;
+
+/**
+ * A Protocol's reference to a named subset of its OWN Capabilities, injected as
+ * `self` by `@Protocol`. Calling one nests that Capability through Registry's
+ * builder, so the nested node gets the same Zod parameter validation and the
+ * same protocol and method stamping as any dependency call.
+ *
+ * The methods are named explicitly rather than taken wholesale: `ProtocolRef<T>`
+ * over the whole class would map the `self` property back through itself, which
+ * TypeScript rejects as an infinitely deep instantiation.
+ */
+export type SelfRef<T, Methods extends NestableNames<T> & keyof T> = ProtocolRef<Pick<T, Methods>>;
 
 export type Change =
   | {

@@ -1,10 +1,12 @@
 import * as erc from "@themoss/erc";
 import * as aave from "@themoss/protocol-aave";
 import * as apriori from "@themoss/protocol-apriori";
+import * as clober from "@themoss/protocol-clober";
 import * as kuru from "@themoss/protocol-kuru";
 import * as monadCards from "@themoss/protocol-monad-cards";
 import * as nadfun from "@themoss/protocol-nadfun";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
+import * as uniswap from "@themoss/protocol-uniswap";
 import * as system from "@themoss/system";
 
 /** Protocol modules selected by the default MCP CLI application. */
@@ -13,8 +15,10 @@ export const defaultProtocolModules = [
   erc,
   aave,
   apriori,
+  clober,
   kuru,
   monadCards,
   nadfun,
   pancakeswap,
+  uniswap,
 ] as const;

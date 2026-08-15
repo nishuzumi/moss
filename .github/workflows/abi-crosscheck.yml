@@ -1,12 +1,11 @@
 name: ABI cross-check
 
-# Online + keyed by design (ADR 0007): runs every package's `test:abi:online`
-# suite (root script: `pnpm -r --if-present test:abi:online`). A protocol
-# package opts in by shipping that script; today that is kuru, which verifies
-# its vendored Router ABI against the explorer-verified implementation and
-# asserts the pinned proxy targets have not been upgraded. Fork PRs never
-# receive the secret — this workflow has no pull_request trigger at all;
-# offline `pnpm test` remains the only gate they need.
+# Online by design (ADR 0007): runs every package's `test:abi:online` suite
+# (root script: `pnpm -r --if-present test:abi:online`). A protocol opts in by
+# shipping that script. Suites may use an explorer-verified implementation or
+# the documented deployment-evidence fallback when source is not verified.
+# Fork PRs never receive repository secrets — this workflow has no pull_request
+# trigger at all; offline `pnpm test` remains the only gate they need.
 on:
   push:
     branches: [main]
@@ -82,9 +81,9 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # A missing MONADSCAN_API_KEY fails the suite instead of skipping, so a
-      # misconfigured secret cannot produce a green run.
-      - name: Explorer cross-check
+      # Explorer-backed suites fail if MONADSCAN_API_KEY is missing rather than
+      # skipping; deployment-evidence suites do not require the key.
+      - name: ABI and deployment evidence
         env:
           MONADSCAN_API_KEY: ${{ secrets.MONADSCAN_API_KEY }}
         run: pnpm test:abi:online
