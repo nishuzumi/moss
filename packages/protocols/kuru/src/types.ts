@@ -13,16 +13,13 @@ export type KuruUnavailableRoute = {
 };
 
 /**
- * The same gap as {@link KuruUnavailableRoute}, carrying a message instead of the Error.
+ * Why an evaluation did not complete, as a closed set of stable categories.
  *
  * Reporting a category rather than an Error is the whole defence, not a convenience. The
  * framework's JSON-safe coercion blanks a *plain* Error to `{}`, but viem's errors carry the RPC
  * URL and the request body in enumerable fields, so one placed in a Query result would be
  * published in full — measured at 335 bytes including the endpoint key. Nothing behind this
  * catches it.
- */
-/**
- * Why an evaluation did not complete, as a closed set of stable categories.
  *
  * Deliberately not the underlying message. Viem puts the RPC URL and the request body into
  * `HttpRequestError.message`, so an API key in the endpoint path — the usual shape for hosted

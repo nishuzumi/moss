@@ -8,9 +8,13 @@ Distinguish Kuru quote failures instead of collapsing them into one message. Exp
 that did not complete with the token path of the route it belonged to. A successful quote carries
 the same provenance in `unavailable`, as a stable category rather than the underlying error text,
 which in viem holds the RPC endpoint and request body. Discovery failures are sanitized the same
-way, and the live errors kept for programmatic inspection are no longer enumerable. The reverse
-search no longer reads an unencodable probe as proof a target is out of reach when the refusal came
-from a leg it never sized, and searches the band an unencodable opening guess jumped over. `swap`
-gains `requireExhaustive`, defaulting to true: a write refuses an incomplete comparison unless the
-caller opts out. A target that rounds below the token's smallest unit is refused rather than quoted
-with a zero floor.
+way, and the live errors kept for programmatic inspection are non-enumerable.
+
+The reverse search now concludes a target is out of reach only after pricing the largest size the
+market can be asked for. A refusal from the market itself, or from a leg the search never sized,
+is reported as an unmeasured route instead — previously either could produce a definitive answer,
+and beside a route that happened to price it produced a worse quote that looked exhaustive.
+
+`swap` gains `requireExhaustive`, defaulting to true: a write refuses an incomplete comparison
+unless the caller opts out. A target that rounds below the token's smallest unit is refused rather
+than quoted with a zero floor.

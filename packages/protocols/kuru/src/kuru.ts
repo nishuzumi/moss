@@ -92,6 +92,19 @@ const KURU_MARKET_DISCOVERY_TIMEOUT_MS = 10_000;
 const MAX_KURU_MARKET_DISCOVERY_BYTES = 1_000_000;
 const MAX_KURU_MARKET_CANDIDATES = 256;
 const MAX_KURU_MARKET_ROUTES = 256;
+/** The markets take their size as `uint96`, so this is the largest probe one leg can be asked. */
+const MAX_ENCODABLE_PROBE = 2n ** 96n - 1n;
+/**
+ * Live calls the search will spend coming down from a size the market itself refused.
+ *
+ * An encode refusal is free and has an exact boundary. A `Panic` is neither, so coming down
+ * through one is a paid sweep against the node. Bounded because a market that refuses everywhere
+ * would otherwise turn a single quote into a log2 sweep — and running out of budget costs only
+ * accuracy of reporting, since the route is then reported as unmeasured rather than answered.
+ */
+const MAX_PAID_DESCENT_PROBES = 6;
+/** Doubling steps the reverse search may take before it gives up rather than climb forever. */
+const MAX_SEARCH_STEPS = 128;
 
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
@@ -614,23 +627,88 @@ export class Kuru {
   }
 
   /**
-   * What an unencodable probe proves, which depends on where it happened.
+   * Comes down from a size the route would not price, to the largest one it will.
    *
-   * One leg: the probe is the market's size argument, the search is monotonic, and nothing larger
-   * can be priced — so the target is out of reach and that is an answer. More than one leg: the
-   * refusal may have come from a downstream leg we never sized directly, so it proves nothing and
-   * the honest report is that the evaluation did not complete.
+   * The two refusals prove different things, so they are searched differently. viem's encode
+   * refusal is deterministic and its boundary is known exactly: on a single leg the probe *is* the
+   * market's `uint96` size argument, so one probe at that type's maximum settles where the ceiling
+   * is. A market `Panic` is the market's own arithmetic giving out at that size — it says nothing
+   * about smaller ones and offers no boundary to jump to, so it has to be searched for, in live
+   * calls, which is why the paid descent is bounded.
+   *
+   * Returns null when no priceable size was found. That is not an answer about the target: nothing
+   * was measured, so the route is reported as unevaluated.
    */
-  #unencodableVerdict(route: Route, error: Error): never {
-    if (route.length === 1) {
-      throw new KuruQuoteError(
-        "TARGET_OUTPUT_UNSATISFIABLE",
-        "amountOut",
-        "reaching this target needs more input than this market can price",
-        [{ path: routeTokens(route), error }],
-      );
+  async #largestPriceable(
+    route: Route,
+    refusedAt: bigint,
+    refusal: Extract<SearchProbe, { ok: false }>,
+  ): Promise<{ high: bigint; probe: Extract<SearchProbe, { ok: true }> } | null> {
+    let above = refusedAt;
+    let probe: SearchProbe = refusal;
+
+    if (refusal.free && route.length === 1 && refusedAt > MAX_ENCODABLE_PROBE) {
+      const at = await this.#quoteRouteForSearch(route, MAX_ENCODABLE_PROBE);
+      if (at.ok) return { high: MAX_ENCODABLE_PROBE, probe: at };
+      above = MAX_ENCODABLE_PROBE;
+      probe = at;
     }
-    throw error;
+
+    // Only the paid steps are budgeted. viem refuses to encode without asking the chain anything,
+    // so coming down through those costs nothing and stopping early would throw away a route we
+    // could still measure; a market Panic is a live call each time, and that is what needs a limit.
+    let high = above;
+    let paid = 0;
+    while (high > 1n && !probe.ok) {
+      if (!probe.free) {
+        if (paid >= MAX_PAID_DESCENT_PROBES) break;
+        paid += 1;
+      }
+      high /= 2n;
+      probe = await this.#quoteRouteForSearch(route, high);
+    }
+    if (!probe.ok) return null;
+
+    // Halving alone leaves the band it jumped over unexplored, and the answer often lives there.
+    let below = high;
+    let ceiling = above;
+    let priced = probe;
+    while (below + 1n < ceiling) {
+      const middle = (below + ceiling) / 2n;
+      const at = await this.#quoteRouteForSearch(route, middle);
+      if (at.ok) {
+        below = middle;
+        priced = at;
+      } else {
+        ceiling = middle;
+      }
+    }
+    return { high: below, probe: priced };
+  }
+
+  /**
+   * The one thing this search may declare out of reach, and the only evidence that establishes it.
+   *
+   * The route priced the largest size its market can be asked for — the `uint96` maximum, not a
+   * guess — and still fell short. Nothing above it can be requested at all, so no further probe
+   * exists. A market's own refusal never gets here: its arithmetic failing at one size says
+   * nothing about the next, and reporting that as a definitive no is the mistake this search
+   * exists to avoid.
+   */
+  #outOfReach(route: Route, priced: bigint): never {
+    throw new KuruQuoteError(
+      "TARGET_OUTPUT_UNSATISFIABLE",
+      "amountOut",
+      "reaching this target needs more input than this market can price",
+      [
+        {
+          path: routeTokens(route),
+          error: new Error(
+            `Kuru priced the largest encodable size (${priced}) and it did not reach the target`,
+          ),
+        },
+      ],
+    );
   }
 
   async #requiredInput(
@@ -643,41 +721,42 @@ export class Kuru {
     let high = scaleUnits(target, outputDecimals, inputDecimals);
     if (high < 1n) high = 1n;
 
-    // The opening guess assumes a 1:1 price. On a multi-leg route a cheap first leg can push even
-    // that past the next leg's size type, so come down until a probe encodes before concluding
-    // anything: the target may be reachable far below where the first guess landed.
+    // The opening guess assumes a 1:1 price, so on any route that gains it is already too large.
+    // A refusal there is evidence about the guess, not about the target: come down to a size the
+    // route will price before concluding anything at all.
     let probe = await this.#quoteRouteForSearch(route, high);
-    if (!probe.ok && probe.free) {
-      // The opening guess assumes a 1:1 price and can sit above what the route can encode. Come
-      // down to something that encodes, then find the actual ceiling between the two: halving
-      // alone leaves the band it jumped over unexplored, and the answer often lives there, so
-      // concluding from the halved probe reports an unreachable target for a route that prices.
-      const refused = high;
-      while (high > 1n && !probe.ok) {
-        high /= 2n;
-        probe = await this.#quoteRouteForSearch(route, high);
-      }
-      if (!probe.ok) this.#unencodableVerdict(route, probe.error);
-      let below = high;
-      let above = refused;
-      while (below + 1n < above) {
-        const middle = (below + above) / 2n;
-        const at = await this.#quoteRouteForSearch(route, middle);
-        if (at.ok) {
-          below = middle;
-          probe = at;
-        } else {
-          above = middle;
-        }
-      }
-      high = below;
+    if (!probe.ok) {
+      const found = await this.#largestPriceable(route, high, probe);
+      if (!found) throw probe.error;
+      high = found.high;
+      probe = found.probe;
     }
-    if (!probe.ok) this.#unencodableVerdict(route, probe.error);
 
-    while (probe.amountOut < target) {
-      const next = high * 2n;
+    // An explicit backstop, as upstream had. Termination otherwise rests entirely on viem refusing
+    // to encode above `uint96`, which is a property of a dependency rather than of this search.
+    for (let steps = 0; probe.amountOut < target; steps += 1) {
+      if (steps >= MAX_SEARCH_STEPS) {
+        throw new Error("Kuru reverse search did not converge on an input for this target");
+      }
+      if (route.length === 1 && high >= MAX_ENCODABLE_PROBE) this.#outOfReach(route, high);
+      let next = high * 2n;
+      // Doubling past the argument type would be refused for a reason that has nothing to do with
+      // the market, and the answer can sit between here and there.
+      if (route.length === 1 && next > MAX_ENCODABLE_PROBE) next = MAX_ENCODABLE_PROBE;
       const doubled = await this.#quoteRouteForSearch(route, next);
-      if (!doubled.ok) this.#unencodableVerdict(route, doubled.error);
+      if (!doubled.ok) {
+        const found = await this.#largestPriceable(route, next, doubled);
+        if (!found || found.high <= high) throw doubled.error;
+        high = found.high;
+        probe = found.probe;
+        if (probe.amountOut < target) {
+          if (route.length === 1 && high >= MAX_ENCODABLE_PROBE) this.#outOfReach(route, high);
+          // The route prices nothing larger, but a market that gives out at one size proves
+          // nothing about the next, so this is an unmeasured route rather than an answer.
+          throw doubled.error;
+        }
+        continue;
+      }
       high = next;
       probe = doubled;
     }
@@ -1100,14 +1179,23 @@ const PANIC_ARITHMETIC_OVERFLOW = 0x11n;
  */
 function isMarketArithmeticOverflow(error: unknown): boolean {
   for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
-    const data = (current as { data?: unknown }).data;
+    // viem hands revert data back either as the hex itself or wrapped a level down, and its own
+    // `getRevertErrorData` unwraps exactly this shape. Reading only the string form would miss a
+    // real Panic on whichever providers use the object one, and miss it silently.
+    const raw = (current as { data?: unknown }).data;
+    const data = typeof raw === "object" && raw !== null ? (raw as { data?: unknown }).data : raw;
     if (
       typeof data === "string" &&
       data.startsWith(PANIC_SELECTOR) &&
-      data.length === PANIC_SELECTOR.length + 64 &&
-      BigInt(`0x${data.slice(PANIC_SELECTOR.length)}`) === PANIC_ARITHMETIC_OVERFLOW
+      data.length === PANIC_SELECTOR.length + 64
     ) {
-      return true;
+      // The tail comes from the provider. `BigInt` throws on anything that is not hex, and this
+      // runs inside the search's catch block, so an unchecked parse would replace the market's
+      // real failure with a SyntaxError and lose the reason the probe failed at all.
+      const tail = data.slice(PANIC_SELECTOR.length);
+      if (/^[0-9a-fA-F]{64}$/.test(tail) && BigInt(`0x${tail}`) === PANIC_ARITHMETIC_OVERFLOW) {
+        return true;
+      }
     }
     current = current.cause;
   }
