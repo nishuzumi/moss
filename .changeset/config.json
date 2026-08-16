@@ -15,6 +15,7 @@
       "@themoss/protocol-monad-cards",
       "@themoss/protocol-nadfun",
       "@themoss/protocol-pancakeswap",
+      "@themoss/protocol-pendle",
       "@themoss/protocol-uniswap",
       "@themoss/mcp-server"
     ]

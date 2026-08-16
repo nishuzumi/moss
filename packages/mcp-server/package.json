@@ -31,6 +31,7 @@
     "@themoss/protocol-monad-cards": "workspace:*",
     "@themoss/protocol-nadfun": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
+    "@themoss/protocol-pendle": "workspace:*",
     "@themoss/protocol-uniswap": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",

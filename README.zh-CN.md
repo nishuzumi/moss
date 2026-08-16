@@ -31,6 +31,7 @@ Moss 当前只支持 Monad 主网，chain ID 为 `143`。
 ERC-1155 `transfer` 接收 collection、token ID、amount 和 recipient。token ID 与 amount 使用十进制 uint256 字符串（允许零）。该 Capability 只构建一笔 `safeTransferFrom`，目前不暴露批量转账构建；Receipt 仍会解析 `TransferSingle` 和 `TransferBatch` Change，并保留批量条目的原始顺序，不做聚合。
 | Monad Cards | `@themoss/protocol-monad-cards` | — | `totalMinted` |
 | PancakeSwap V2 / V3 | `@themoss/protocol-pancakeswap` | `swap` | `quote` |
+| Pendle | `@themoss/protocol-pendle` | `swap` | `quote`、`markets` |
 | Uniswap v4 | `@themoss/protocol-uniswap` | `swap`、`permit2Approve` | `quote` |
 
 ## 快速开始
@@ -117,6 +118,10 @@ if (simulation.halted || simulation.results.some((item) => item.warnings.length)
 模拟器按真实执行顺序，把成功的 Event 与 native MON transfer 记录为不可变 Change。Receipt 叶子必须保留原始 Change 对象，并保持相同长度与顺序。
 
 交易回滚、trace 失败、Receipt 失败或覆盖不一致都会产生终止性 Warning。library 暴露完整 Receipt tree 与结构化 Outcome；MCP 只把验证后的有序叶子 text 和 Warning 返回给 Agent。
+
+调用方提供的 `stateOverrides` 只会为 `debug_traceCall` 构造合成初始状态。基于这些
+override 的成功模拟只能证明交易在该指定状态下的行为与 Receipt 解析结果，不能证明真实账户当前
+拥有足够余额、allowance 或支付能力。
 
 ## 仓库结构
 
