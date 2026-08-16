@@ -69,6 +69,22 @@ pnpm --filter @themoss/example-agent-swap wallet -- send /absolute/path/to/capab
 
 The wallet refuses trees for a different sender. It also requires the local RPC to report Monad chain ID `143`.
 
+## Troubleshooting
+
+### Foundry setup
+
+Check that the Monad Anvil binary is installed. The output should identify the Monad build:
+
+```bash
+anvil --version
+```
+
+If the fork command fails, confirm that Foundry was installed with:
+
+```bash
+foundryup --network monad
+```
+
 ## Reset the fork
 
 The fork is disposable local state. Stop it with `pkill anvil`; the next `fork` command starts from the current Monad mainnet tip and funds the development account again.
