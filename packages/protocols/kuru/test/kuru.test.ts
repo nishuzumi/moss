@@ -61,6 +61,10 @@ type MockMarket = {
   quoteFailDepth?: number;
   /** Prices below this size and refuses above it — the shape a real market that gives out has. */
   failAbove?: bigint;
+  /** Defaults to 10^baseDecimals; mainnet markets do not all agree with their token's decimals. */
+  sizePrecision?: bigint;
+  /** Defaults to 10^quoteDecimals, likewise. */
+  pricePrecision?: bigint;
 };
 
 const MARKETS: readonly MockMarket[] = [
@@ -1300,6 +1304,50 @@ describe("Kuru", () => {
     expect(fromAbove.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
   });
 
+  it("takes the ceiling from the market's precision, not from the size argument's width", async () => {
+    // `uint96` bounds the market's `size`, and a caller's amount is not that number. `#quoteFill`
+    // scales one into the other by the market's own precision, and mainnet markets do not set that
+    // to their token's decimals — a live MON/USDC market reports sizePrecision 1e9 against 18 base
+    // decimals. Selling into it, an amount a billion times larger than the size limit still
+    // encodes, so measuring the amount against the size limit rejects a target the route reaches.
+    const markets = [
+      { ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 2n), sizePrecision: 10n ** 9n },
+    ];
+    const { registry } = offlineRegistry(markets);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "80000000000",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    // Two in per one out, so 160e9 MON — well past 2^96-1 base units, and encodable regardless.
+    expect((quote.data as { estimatedAmountIn: string }).estimatedAmountIn).toBe("160000000000");
+  });
+
+  it("takes it from the buy side's precision too, where the ceiling is lower than the size limit", async () => {
+    // The other direction scales by pricePrecision against the quote token's decimals, and the same
+    // live market reports 1e8 against 6 — so here the largest encodable amount is a hundred times
+    // *smaller* than the size limit. Measuring against the size limit means never establishing the
+    // real maximum: every probe above it is refused, and the route is reported unmeasured instead
+    // of answered. The target is genuinely out of reach, and saying so requires pricing the max.
+    const markets = [
+      {
+        ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 2n, 1n),
+        pricePrecision: 10n ** 8n,
+        // Set far apart from the price precision on purpose: reading the wrong one for this
+        // direction puts the ceiling nowhere near the truth, and the verdict changes with it.
+        sizePrecision: 10n ** 3n,
+      },
+    ];
+    const { registry } = offlineRegistry(markets);
+    const failure = await quoteError(registry, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      amountOut: "400000000000000000000",
+    });
+    expect(failure.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
+  });
+
   it("keeps an RPC error response in the transport category, not in unknown", async () => {
     // viem chains every JSON-RPC error response under RpcRequestError, including the 429 the
     // default endpoint returns after a few dozen sequential calls. Reading that as "unknown" would
@@ -1419,8 +1467,8 @@ function offlineRegistry(
       if (!entry) throw new Error(`unknown market ${String(args[0])}`);
       if (entry.verified === false) return [0, 0n, ZERO, 0n, ZERO, 0n, 0, 0n, 0n, 0n, 0n];
       return [
-        10 ** entry.quoteDecimals,
-        10n ** BigInt(entry.baseDecimals),
+        Number(entry.pricePrecision ?? 10n ** BigInt(entry.quoteDecimals)),
+        entry.sizePrecision ?? 10n ** BigInt(entry.baseDecimals),
         entry.base,
         BigInt(entry.baseDecimals),
         entry.quote,
@@ -1479,22 +1527,30 @@ function offlineRegistry(
         throw new Error("Kuru quotes must use the zero-address preview sender");
       }
       const size = decoded.args[0];
-      const result =
-        decoded.functionName === "placeAndExecuteMarketBuy"
-          ? convertUnits(
-              size,
-              entry.quoteDecimals,
-              entry.baseDecimals,
-              entry.buyNumerator,
-              entry.buyDenominator,
-            )
-          : convertUnits(
-              size,
-              entry.baseDecimals,
-              entry.quoteDecimals,
-              entry.sellNumerator,
-              entry.sellDenominator,
-            );
+      // The contract is handed a `size`, not an amount, and derives one from the other with the
+      // market's own precision. Undoing that here keeps the fixture honest when a market's
+      // precision disagrees with its token's decimals, which on mainnet is the normal case.
+      const isBuy = decoded.functionName === "placeAndExecuteMarketBuy";
+      const precision = isBuy
+        ? (entry.pricePrecision ?? 10n ** BigInt(entry.quoteDecimals))
+        : (entry.sizePrecision ?? 10n ** BigInt(entry.baseDecimals));
+      const unit = 10n ** BigInt(isBuy ? entry.quoteDecimals : entry.baseDecimals);
+      const amountIn = (size * unit) / precision;
+      const result = isBuy
+        ? convertUnits(
+            amountIn,
+            entry.quoteDecimals,
+            entry.baseDecimals,
+            entry.buyNumerator,
+            entry.buyDenominator,
+          )
+        : convertUnits(
+            amountIn,
+            entry.baseDecimals,
+            entry.quoteDecimals,
+            entry.sellNumerator,
+            entry.sellDenominator,
+          );
       return {
         data: encodeFunctionResult({
           abi: KuruOrderbookAbi,
@@ -1518,7 +1574,10 @@ function offlineRegistry(
  */
 async function quoteError(
   registry: ReturnType<typeof offlineRegistry>["registry"],
-  amount: { amountIn: string } | { amountOut: string },
+  amount: ({ amountIn: string } | { amountOut: string }) & {
+    tokenIn?: string;
+    tokenOut?: string;
+  },
 ): Promise<KuruQuoteError> {
   try {
     await registry.action("kuru", "quote", ACCOUNT, {

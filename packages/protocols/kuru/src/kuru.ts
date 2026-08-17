@@ -92,8 +92,8 @@ const KURU_MARKET_DISCOVERY_TIMEOUT_MS = 10_000;
 const MAX_KURU_MARKET_DISCOVERY_BYTES = 1_000_000;
 const MAX_KURU_MARKET_CANDIDATES = 256;
 const MAX_KURU_MARKET_ROUTES = 256;
-/** The markets take their size as `uint96`, so this is the largest probe one leg can be asked. */
-const MAX_ENCODABLE_PROBE = 2n ** 96n - 1n;
+/** The markets take their `size` argument as `uint96`. This bounds that argument, not an amount. */
+const MAX_ENCODABLE_SIZE = 2n ** 96n - 1n;
 /**
  * Live calls the search will spend coming down from a size the market itself refused.
  *
@@ -647,10 +647,11 @@ export class Kuru {
     let above = refusedAt;
     let probe: SearchProbe = refusal;
 
-    if (refusal.free && route.length === 1 && refusedAt > MAX_ENCODABLE_PROBE) {
-      const at = await this.#quoteRouteForSearch(route, MAX_ENCODABLE_PROBE);
-      if (at.ok) return { high: MAX_ENCODABLE_PROBE, probe: at };
-      above = MAX_ENCODABLE_PROBE;
+    const legCeiling = route.length === 1 && route[0] ? maxEncodableInput(route[0]) : null;
+    if (refusal.free && legCeiling !== null && refusedAt > legCeiling) {
+      const at = await this.#quoteRouteForSearch(route, legCeiling);
+      if (at.ok) return { high: legCeiling, probe: at };
+      above = legCeiling;
       probe = at;
     }
 
@@ -732,19 +733,22 @@ export class Kuru {
       probe = found.probe;
     }
 
+    // Derived from this leg's own precision, not assumed equal to the size argument's maximum.
+    const ceiling = route.length === 1 && route[0] ? maxEncodableInput(route[0]) : null;
+
     // An explicit backstop, as upstream had. Termination otherwise rests entirely on viem refusing
     // to encode above `uint96`, which is a property of a dependency rather than of this search.
     for (let steps = 0; probe.amountOut < target; steps += 1) {
       if (steps >= MAX_SEARCH_STEPS) {
         throw new Error("Kuru reverse search did not converge on an input for this target");
       }
-      if (route.length === 1 && high >= MAX_ENCODABLE_PROBE) this.#outOfReach(route, high);
+      if (ceiling !== null && high >= ceiling) this.#outOfReach(route, high);
       let next = high * 2n;
       // Doubling past the argument type would be refused for a reason that has nothing to do with
       // the market. Asking for the boundary directly says the same thing one step earlier: the
       // recovery below reaches the identical answer in the identical number of live calls, since
       // the refusal it saves is one viem makes without touching the network.
-      if (route.length === 1 && next > MAX_ENCODABLE_PROBE) next = MAX_ENCODABLE_PROBE;
+      if (ceiling !== null && next > ceiling) next = ceiling;
       const doubled = await this.#quoteRouteForSearch(route, next);
       if (!doubled.ok) {
         const found = await this.#largestPriceable(route, next, doubled);
@@ -752,7 +756,7 @@ export class Kuru {
         high = found.high;
         probe = found.probe;
         if (probe.amountOut < target) {
-          if (route.length === 1 && high >= MAX_ENCODABLE_PROBE) this.#outOfReach(route, high);
+          if (ceiling !== null && high >= ceiling) this.#outOfReach(route, high);
           // The route prices nothing larger, but a market that gives out at one size proves
           // nothing about the next, so this is an unmeasured route rather than an answer.
           throw doubled.error;
@@ -960,6 +964,26 @@ function routeLeg(market: VerifiedMarket, input: TokenRef): RouteLeg | undefined
     };
   }
   return undefined;
+}
+
+/**
+ * The largest input this leg can be asked for, in the input token's base units.
+ *
+ * `uint96` bounds the market's `size` argument, and a caller's amount is not that number. The two
+ * coincide only when the market's precision equals the token's decimals, which is not how mainnet
+ * markets are configured: one live MON/USDC market reports `sizePrecision` 1e9 against 18 base
+ * decimals, and `pricePrecision` 1e8 against 6 quote decimals. `#quoteFill` scales an amount into a
+ * size, so the ceiling has to be scaled back the same way — otherwise the search decides against
+ * the wrong quantity, a billion times too small selling into that market and a hundred times too
+ * large buying from it.
+ */
+function maxEncodableInput(leg: RouteLeg): bigint {
+  const { pricePrecision, sizePrecision, baseDecimals, quoteDecimals } = leg.market.params;
+  const precision = leg.isBuy ? pricePrecision : sizePrecision;
+  const unit = 10n ** BigInt(leg.isBuy ? quoteDecimals : baseDecimals);
+  if (precision <= 0n) return MAX_ENCODABLE_SIZE;
+  // `size` is floor(amountIn * precision / unit), so this is the largest amount that still fits.
+  return ((MAX_ENCODABLE_SIZE + 1n) * unit - 1n) / precision;
 }
 
 function routeTokens(route: Route): readonly TokenRef[] {
