@@ -757,9 +757,11 @@ export class Kuru {
         high = found.high;
         probe = found.probe;
         if (probe.amountOut < target) {
-          if (ceiling !== null && high >= ceiling) this.#outOfReach(route, high);
-          // The route prices nothing larger, but a market that gives out at one size proves
-          // nothing about the next, so this is an unmeasured route rather than an answer.
+          // Deliberately no out-of-reach verdict here. Reaching this point means a probe at or
+          // below the ceiling was refused, and the recovery only ever returns a size that priced,
+          // so the ceiling itself was never reached — the verdict belongs on the way up, where it
+          // is decided against a size the route actually priced. What is left is a market that
+          // gives out at one size, which proves nothing about the next: an unmeasured route.
           throw doubled.error;
         }
         continue;
