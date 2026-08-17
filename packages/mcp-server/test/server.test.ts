@@ -10,6 +10,7 @@ import {
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
+import * as pendle from "@themoss/protocol-pendle";
 import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
@@ -69,6 +70,16 @@ describe("moss MCP server", () => {
     expect(receipt.text).toContain("Trusted(USDC)");
   });
 
+  it("resolves Pendle Router errors from Protocol metadata without an MCP selector table", () => {
+    const { registry } = createMossServer({ runtime, protocols: defaultProtocolModules });
+    const contract = registry.resolveContract("pendle", pendle.PENDLE_ROUTER_ADDRESS);
+
+    expect(contract?.abi).toContainEqual(
+      expect.objectContaining({ type: "error", name: "MarketZeroNetLPFee" }),
+    );
+    expect(contract?.customErrorMessages.MarketZeroNetLPFee).toContain("LP fee rounds to zero");
+  });
+
   it("discovers and loads the Protocols selected by the default CLI composition", async () => {
     const client = await connectedClient();
     const discovered = parseText(
@@ -84,6 +95,11 @@ describe("moss MCP server", () => {
       expect.arrayContaining([
         expect.objectContaining({
           protocol: "pancakeswap-v2",
+          method: "swap",
+          kind: "capability",
+        }),
+        expect.objectContaining({
+          protocol: "pendle",
           method: "swap",
           kind: "capability",
         }),
@@ -203,6 +219,21 @@ describe("moss MCP server", () => {
     expect(supplyLoaded[0]?.params.vault).toMatchObject({
       description: expect.stringContaining("Morpho factory created it"),
     });
+
+    const pendleLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "pendle", method: "swap" },
+            { protocol: "pendle", method: "quote" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: Record<string, unknown>; description: string }> }[];
+    expect(pendleLoaded[0]?.params.slippageBps?.type).toMatchObject({ default: 50 });
+    expect(pendleLoaded[0]?.params.amountIn?.description).toContain("may spend");
+    expect(pendleLoaded[1]?.params.amountIn?.description).toContain("price");
   });
 
   it("round-trips a Capability tree through action JSON", async () => {

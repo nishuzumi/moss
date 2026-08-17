@@ -33,7 +33,35 @@ Monad retains logs inside a failed child frame even though the frame reports `er
   `debug_traceCallMany`, `trace_callMany`, and `eth_callMany` all remain
   unavailable (`-32601`) on `rpc.monad.xyz` and `rpc-mainnet.monadinfra.com`.
 - Monad's `debug_traceCall` **enforces sender balance** (discovered 2026-07-07: a 2-MON transfer from an underfunded address is rejected with `insufficient balance`, unlike geth's default). The simulator therefore pre-funds the transaction sender via a balance override — matching `eth_simulateV1`'s validation-off semantics. Simulation answers "what would this transaction do", not "can the account afford it"; affordability is the wallet's question at signing time.
+- Library callers may also provide `SimulatorOptions.stateOverrides` for deterministic read-only
+  protocol tests. Those overrides are a synthetic prestate used only by `debug_traceCall`; a
+  successful result proves execution and Receipt behavior under that supplied state, not the live
+  account's current token balance, allowance, or affordability. The simulator clones the supplied
+  overrides before state chaining and never mutates the caller's object.
+- Reverts are described from the transaction target's ABI as declared by the Capability's registered
+  Protocol. A custom error is decoded and rendered with its arguments; a `require(cond, "...")` is
+  Solidity's built-in `Error(string)`, which decodes against any ABI, so it is rendered as the emitted
+  message itself rather than wrapped — the node already supplies that text, and re-enveloping it
+  loses readability.
+- A Protocol may attach a human explanation to either kind. `customErrorMessages` is keyed by error
+  name and Registry rejects a name none of the Protocol's contract ABIs declare; `stringRevertMessages`
+  is keyed by the exact emitted message, which appears in no ABI, so Registry can only require it to be
+  text — a Protocol declaring one owns a test proving the literal appears in its pinned vendored
+  source, derived from source instead of from an ABI but still derived. An explanation may read a
+  decoded argument through `{argName}`; the rendered identity already carries every argument, so one
+  earns its place by framing a value rather than restating it, and an unrecognised placeholder is left
+  as written so the mistake is visible.
+- Explanations are scoped by name, not by deployment or signature. Two contracts of one Protocol
+  declaring the same error name share one explanation, which is accepted over a per-contract map
+  because an explanation only ever renders when the matched target's own ABI decodes an error of that
+  name — a target that does not declare it simply never looks it up.
+- Scoping lookup by both Capability Protocol and target deployment prevents the same four-byte selector from another
+  contract or Protocol being misattributed. Unknown targets, selectors, and malformed data retain
+  the raw trace reason.
 - When `debug_traceCall` is unavailable or cannot supply provably ordered Change evidence, simulate fails loudly — it never silently skips evidence or falls back to an approximate ordering.
-- Exact ordering is reconstructed in one recursive pass over call-frame `position` data; protocol ABI semantics enter only in the Receipt parser.
+- Exact ordering is reconstructed in one recursive pass over call-frame `position` data. Protocol
+  ABI semantics affect diagnostic custom-error decoding as described above, but ordered `Change`
+  extraction remains protocol-agnostic; Protocol-specific Receipt semantics enter only in the
+  Receipt parser.
 - All simulation requests set an explicit, modest `gas` value; provider free tiers reject calls that fall back to the node's block-gas-limit default.
 - Trace `gasUsed` appears to report the gas limit rather than actual consumption; gas estimates go through `eth_estimateGas` separately.

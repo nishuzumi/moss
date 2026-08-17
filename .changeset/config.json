@@ -9,6 +9,7 @@
       "@themoss/simulator",
       "@themoss/erc",
       "@themoss/system",
+      "@themoss/protocol-aave",
       "@themoss/protocol-apriori",
       "@themoss/protocol-clober",
       "@themoss/protocol-kuru",
@@ -16,6 +17,7 @@
       "@themoss/protocol-morpho",
       "@themoss/protocol-nadfun",
       "@themoss/protocol-pancakeswap",
+      "@themoss/protocol-pendle",
       "@themoss/protocol-uniswap",
       "@themoss/mcp-server"
     ]
