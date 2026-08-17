@@ -1348,6 +1348,35 @@ describe("Kuru", () => {
     expect(failure.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
   });
 
+  it("jumps straight to the leg's ceiling instead of searching down to it", async () => {
+    // When the opening guess is both above what the leg can be asked for and unencodable, the
+    // boundary is known exactly and one probe settles it. Measuring that boundary in the size
+    // argument's units instead reaches the same verdict by halving and re-probing all the way
+    // down, which is dozens of live calls for an answer already in hand.
+    let calls = 0;
+    const markets = [
+      {
+        ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 2n, 1n),
+        pricePrecision: 10n ** 8n,
+        sizePrecision: 10n ** 3n,
+      },
+    ];
+    const { registry } = offlineRegistry(markets, marketDiscoveryFetch(markets), () => {
+      calls += 1;
+    });
+    await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: NATIVE,
+        amountOut: "1000000000000000000000000",
+      })
+      .then(
+        () => null,
+        () => null,
+      );
+    expect(calls).toBe(1);
+  });
+
   it("keeps an RPC error response in the transport category, not in unknown", async () => {
     // viem chains every JSON-RPC error response under RpcRequestError, including the 429 the
     // default endpoint returns after a few dozen sequential calls. Reading that as "unknown" would
