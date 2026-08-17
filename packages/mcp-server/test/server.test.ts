@@ -10,6 +10,7 @@ import {
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
+import * as pendle from "@themoss/protocol-pendle";
 import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
@@ -69,6 +70,16 @@ describe("moss MCP server", () => {
     expect(receipt.text).toContain("Trusted(USDC)");
   });
 
+  it("resolves Pendle Router errors from Protocol metadata without an MCP selector table", () => {
+    const { registry } = createMossServer({ runtime, protocols: defaultProtocolModules });
+    const contract = registry.resolveContract("pendle", pendle.PENDLE_ROUTER_ADDRESS);
+
+    expect(contract?.abi).toContainEqual(
+      expect.objectContaining({ type: "error", name: "MarketZeroNetLPFee" }),
+    );
+    expect(contract?.customErrorMessages.MarketZeroNetLPFee).toContain("LP fee rounds to zero");
+  });
+
   it("discovers and loads the Protocols selected by the default CLI composition", async () => {
     const client = await connectedClient();
     const discovered = parseText(
@@ -84,6 +95,11 @@ describe("moss MCP server", () => {
       expect.arrayContaining([
         expect.objectContaining({
           protocol: "pancakeswap-v2",
+          method: "swap",
+          kind: "capability",
+        }),
+        expect.objectContaining({
+          protocol: "pendle",
           method: "swap",
           kind: "capability",
         }),
@@ -107,6 +123,52 @@ describe("moss MCP server", () => {
       type: { default: 50, description: expect.stringContaining("1 bps equals 0.01%") },
       description: expect.stringContaining("adverse movement"),
     });
+
+    const cloberCoordinates = parseText(
+      await client.callTool({
+        name: "discover",
+        arguments: { protocol: "clober" },
+      }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(cloberCoordinates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "clober", method: "quote", kind: "query" }),
+        expect.objectContaining({ protocol: "clober", method: "swap", kind: "capability" }),
+      ]),
+    );
+    expect(cloberCoordinates).toHaveLength(2);
+
+    const cloberLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "clober", method: "quote" },
+            { protocol: "clober", method: "swap" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    const [cloberQuote, cloberSwap] = cloberLoaded;
+    const quoteAmount = cloberQuote?.params.amountIn;
+    const swapAmount = cloberSwap?.params.amountIn;
+    const quoteSlippage = cloberQuote?.params.slippage;
+    const swapSlippage = cloberSwap?.params.slippage;
+    if (!quoteAmount || !swapAmount || !quoteSlippage || !swapSlippage) {
+      throw new Error("missing Clober parameter metadata");
+    }
+    expect(quoteAmount).toMatchObject({
+      type: { description: expect.stringMatching(/display units.*decimals/) },
+      description: expect.stringContaining("Viewer quote"),
+    });
+    expect(swapAmount).toMatchObject({
+      type: quoteAmount.type,
+      description: expect.stringContaining("Controller.spend"),
+    });
+    expect(quoteSlippage.description).toContain("returned minimumAmountOut");
+    expect(swapSlippage.description).toContain("Controller.spend");
+    expect(quoteAmount.description).not.toBe(swapAmount.description);
+    expect(quoteSlippage.description).not.toBe(swapSlippage.description);
 
     const monadCards = parseText(
       await client.callTool({ name: "discover", arguments: { protocol: "monad-cards" } }),
@@ -135,6 +197,20 @@ describe("moss MCP server", () => {
     expect(unstakeLoaded[0]?.params.controller).toMatchObject({
       description: expect.stringContaining("controller"),
     });
+    const pendleLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "pendle", method: "swap" },
+            { protocol: "pendle", method: "quote" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: Record<string, unknown>; description: string }> }[];
+    expect(pendleLoaded[0]?.params.slippageBps?.type).toMatchObject({ default: 50 });
+    expect(pendleLoaded[0]?.params.amountIn?.description).toContain("may spend");
+    expect(pendleLoaded[1]?.params.amountIn?.description).toContain("price");
   });
 
   it("round-trips a Capability tree through action JSON", async () => {

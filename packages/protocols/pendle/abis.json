@@ -1,0 +1,98 @@
+{
+  "marketFactory": {
+    "proxy": "0xA3cb62a49b66eB2536cf6F3C7AC82293784888A3",
+    "implementation": "0x50fE28D319E62794d95E522863384D4F849Ba1C9",
+    "allowedMismatches": [
+      {
+        "signature": "function VERSION()",
+        "detail": "expected outputs=(uint256) stateMutability=pure, actual outputs=(uint256) stateMutability=view",
+        "reason": "The vendored IPMarketFactory declares VERSION() pure; deployed PendleMarketFactoryV7Upg implements it view. Read-only relaxation, and Moss never calls VERSION() (the verifier uses isValidMarket/factory/readTokens/expiry/token support/decimals)."
+      }
+    ]
+  },
+  "selectorProxies": {
+    "note": "Router and RouterStatic are selector proxies with a zero ERC-1967 slot. The online ABI suite pins the facets reached by every vendored function selector, fetches those facet ABIs from Monadscan, and compares selector semantics plus the available facet union. The point-lookup registries cannot enumerate facets that no vendored selector reaches.",
+    "router": {
+      "address": "0x888888888889758F76e7103c6CbF23ABbF58F946",
+      "expectedFacets": [
+        "0x2fb6d0753602bf397fce38ec8ee3a811ca07b3fd",
+        "0xc66eedcff0ec9eacbbf721519e5a03c4d82fe49b",
+        "0xac1700293346b0befc71bcb7e14bf1c38a5c2a97",
+        "0x9815ca631062c29f80f5a29783ddd51e08a702db",
+        "0x1f593511d7c670fba0e2601315f6444c10bc9177",
+        "0xbb0dd79794e58795b08b599297ec55a6afb6ab58",
+        "0x171b480b1a2ebc1ace52e46e0bd73e7e08413ec2"
+      ]
+    },
+    "routerStatic": {
+      "address": "0x6813d43782395A1F2AAb42f39aeEDE03ac655e09",
+      "allowedActualOnly": [
+        {
+          "signature": "error MarketExchangeRateBelowOne(int256)",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketExpired()",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketInsufficientPtForTrade(int256,int256)",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketProportionMustNotEqualOne()",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketProportionTooHigh(int256,int256)",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketRateScalarBelowZero(int256)",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketZeroAmountsInput()",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketZeroAmountsOutput()",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketZeroLnImpliedRate()",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error MarketZeroTotalPtOrTotalAsset(int256,int256)",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "error RouterNotAllSyUsed(uint256,uint256)",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        },
+        {
+          "signature": "function genApproxParamsToSwapExactSyForPt(address,uint256,uint256)",
+          "reason": "The concrete routed facet exposes this helper in its verified ABI, but the deployed selector registry does not route it as part of the RouterStatic interface."
+        },
+        {
+          "signature": "error YCExpired()",
+          "reason": "The concrete routed facets declare this custom error, while the vendored IPRouterStatic composite intentionally contains only the shared RouterStatic functions and events."
+        }
+      ],
+      "allowedMissing": [
+        {
+          "signature": "function increaseLockPositionStatic(address,uint128,uint128)",
+          "reason": "The upstream cross-chain IPRouterStatic composite declares this vePENDLE quote, but the deployed Monad RouterStatic selector registry has no facet for it. Moss does not call this function."
+        }
+      ],
+      "expectedFacets": [
+        "0x617aa12a6661a65225220d2f2643ee7702274f9e",
+        "0xd26c81ea7c3934c4d3443468d76663cb10cd2acf",
+        "0x8317937bb2f43d5acefbc52d54efdd0f6077ab45",
+        "0x45daf404c12f6bef1419245b158820c852cb1fae",
+        "0xd5f595506f3bd5b742372285333c935ed04ff108"
+      ]
+    }
+  }
+}

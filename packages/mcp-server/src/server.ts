@@ -116,6 +116,7 @@ export function createMossServer(opts: MossServerOptions): {
     ...opts.protocols,
   );
   const simulator = createTraceSimulator(runtime, {
+    resolveContract: (protocol, target) => registry.resolveContract(protocol, target),
     receipt: (capability, changes) => registry.parseReceipt(capability, changes),
   });
   const { version } = createRequire(import.meta.url)("../package.json") as { version: string };

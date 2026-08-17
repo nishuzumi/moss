@@ -1,4 +1,5 @@
 import {
+  type Address,
   type CapabilityNode,
   type Change,
   flattenCapabilityTree,
@@ -6,9 +7,11 @@ import {
   type MossRuntime,
   type Receipt,
   ReceiptCoverageError,
+  type ResolvedProtocolContract,
   type UnsignedTx,
   verifyReceiptCoverage,
 } from "@themoss/core";
+import { decodeErrorResult } from "viem";
 import { ChangeOrderError, extractChanges } from "./changes.js";
 import { mergeDiff } from "./overrides.js";
 import {
@@ -24,6 +27,7 @@ import {
 } from "./trace.js";
 
 export { ChangeOrderError, extractChanges } from "./changes.js";
+export type { StateOverride, StateOverrides } from "./trace.js";
 export { SimulatorUnavailableError };
 
 export type WarningCode =
@@ -54,6 +58,13 @@ export interface TransactionSimulation {
 export interface SimulateOutcome {
   results: TransactionSimulation[];
   halted?: { transactionIndex: number; reason: string };
+  /**
+   * Addresses the caller gave a synthetic prestate through `stateOverrides`, absent when it gave
+   * none. A run that reports them proves behavior under state that was supplied rather than read,
+   * so an absent `halted` does not mean the live account could afford the transaction — check this
+   * before treating a clean outcome as safe to sign.
+   */
+  syntheticState?: readonly Address[];
 }
 
 export interface Simulator {
@@ -63,19 +74,99 @@ export interface Simulator {
 export interface SimulatorOptions {
   gasPerTx?: bigint;
   prefundWei?: bigint;
+  /**
+   * Synthetic prestate supplied only to debug_traceCall. A successful simulation proves behavior
+   * and Receipt parsing under this supplied state; it does not prove the live account's current
+   * balance, allowance, or affordability.
+   */
+  stateOverrides?: StateOverrides;
+  /** Resolves the ABI and optional error explanations declared by this Capability's Protocol. */
+  resolveContract?: (protocol: string, target: Address) => ResolvedProtocolContract | undefined;
   receipt: (capability: CapabilityNode, changes: readonly Change[]) => Receipt;
 }
 
 const DEFAULT_PREFUND_WEI = 10n ** 24n;
 
+function printableRevertValue(value: unknown): string {
+  if (typeof value === "bigint") return value.toString();
+  const encoded = JSON.stringify(value, (_, nested) =>
+    typeof nested === "bigint" ? nested.toString() : nested,
+  );
+  return encoded ?? String(value);
+}
+
+function decodeRevertReason(contract: ResolvedProtocolContract, data: Hex): string | undefined {
+  try {
+    const decoded = decodeErrorResult({ abi: contract.abi, data });
+    const args = (decoded.args ?? []) as readonly unknown[];
+    const renderedArgs = args.map((value, index) => {
+      const name = "inputs" in decoded.abiItem ? decoded.abiItem.inputs[index]?.name : undefined;
+      const rendered = printableRevertValue(value);
+      return name ? `${name}=${rendered}` : rendered;
+    });
+    // viem resolves Solidity's built-in `Error(string)` against any ABI, so a `require` message
+    // decodes here too, under the name "Error" for every one of them.
+    if (decoded.errorName === "Error" && typeof args[0] === "string") {
+      const reason = args[0];
+      // Nothing to say and nothing to look up; the trace reason is more useful than an empty line.
+      if (reason.length === 0) return undefined;
+      const explanation = Object.hasOwn(contract.stringRevertMessages, reason)
+        ? contract.stringRevertMessages[reason]
+        : undefined;
+      return explanation ? `${reason}: ${explanation}` : reason;
+    }
+    const identity = `${decoded.errorName}(${renderedArgs.join(", ")})`;
+    // Keyed on the name alone, never the arguments, so one entry covers every occurrence.
+    const template = Object.hasOwn(contract.customErrorMessages, decoded.errorName)
+      ? contract.customErrorMessages[decoded.errorName]
+      : undefined;
+    if (!template) return identity;
+    // An unrecognised name is left as written, because a silently blank sentence hides the mistake.
+    const explanation = template.replace(/\{(\w+)\}/g, (whole, name: string) => {
+      const index =
+        "inputs" in decoded.abiItem
+          ? decoded.abiItem.inputs.findIndex((input) => input?.name === name)
+          : -1;
+      return index >= 0 ? printableRevertValue(args[index]) : whole;
+    });
+    return `${identity}: ${explanation}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOptions): Simulator {
   const gasBudget = options.gasPerTx ?? DEFAULT_SIMULATION_GAS;
   const prefund: `0x${string}` = `0x${(options.prefundWei ?? DEFAULT_PREFUND_WEI).toString(16)}`;
 
+  // Snapshot the caller's prestate once so later mutation cannot make execution disagree with the
+  // disclosed synthetic addresses. The sender prefund below is applied to every run and predates
+  // this option, so reporting it would make the field meaningless.
+  const initialOverrides: StateOverrides = Object.fromEntries(
+    Object.entries(options.stateOverrides ?? {}).map(([address, override]) => [
+      address.toLowerCase(),
+      {
+        ...override,
+        ...(override.stateDiff ? { stateDiff: { ...override.stateDiff } } : {}),
+      },
+    ]),
+  ) as StateOverrides;
+  const syntheticState = Object.freeze(Object.keys(initialOverrides)) as readonly Address[];
+  const finish = (outcome: SimulateOutcome): SimulateOutcome =>
+    syntheticState.length > 0 ? { ...outcome, syntheticState } : outcome;
+
   return {
     async simulate(root): Promise<SimulateOutcome> {
       const executable = flattenCapabilityTree(root);
-      const overrides: StateOverrides = {};
+      const overrides: StateOverrides = Object.fromEntries(
+        Object.entries(initialOverrides).map(([address, override]) => [
+          address,
+          {
+            ...override,
+            ...(override.stateDiff ? { stateDiff: { ...override.stateDiff } } : {}),
+          },
+        ]),
+      ) as StateOverrides;
       const results: TransactionSimulation[] = [];
 
       // Pin one base block for the whole run so per-transaction evidence and
@@ -96,7 +187,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             gas: null,
           });
         }
-        return { results, halted: { transactionIndex: 0, reason } };
+        return finish({ results, halted: { transactionIndex: 0, reason } });
       }
 
       for (const [transactionIndex, { capability, transaction }] of executable.entries()) {
@@ -123,11 +214,20 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "TRACE_FAILED", message: reason }],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         if (frame.error) {
-          const reason = frame.revertReason ?? frame.error;
+          let decodedReason: string | undefined;
+          if (frame.output && options.resolveContract) {
+            try {
+              const contract = options.resolveContract(capability.protocol, transaction.to);
+              if (contract) decodedReason = decodeRevertReason(contract, frame.output);
+            } catch {
+              // Registry metadata must not hide the original trace failure.
+            }
+          }
+          const reason = decodedReason ?? frame.revertReason ?? frame.error;
           results.push({
             protocol: capability.protocol,
             method: capability.method,
@@ -137,7 +237,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "REVERTED", message: `transaction reverted: ${reason}` }],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         let changes: readonly Change[];
@@ -157,7 +257,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [warning],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         let receipt: Receipt;
@@ -183,7 +283,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             ],
             gas: null,
           });
-          return { results, halted: { transactionIndex, reason } };
+          return finish({ results, halted: { transactionIndex, reason } });
         }
 
         const gas = await estimateGasWithOverrides(runtime.client, call, block, overrides);
@@ -210,7 +310,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
               warnings: [{ code: "STATE_CHAIN_FAILED", message: reason }],
               gas: gas?.toString() ?? null,
             });
-            return { results, halted: { transactionIndex, reason } };
+            return finish({ results, halted: { transactionIndex, reason } });
           }
         }
         results.push({
@@ -224,7 +324,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
           gas: gas?.toString() ?? null,
         });
       }
-      return { results };
+      return finish({ results });
     },
   };
 }
