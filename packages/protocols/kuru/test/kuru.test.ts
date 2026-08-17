@@ -1255,6 +1255,51 @@ describe("Kuru", () => {
     expect(await priced(CUSTOM)).toBeNull();
   });
 
+  it("prices the band between the halved probe and the size that refused", async () => {
+    // Coming down through a market Panic halves, so it lands anywhere in the top half of what the
+    // route will price — the answer usually sits above it. Doubling from there returns to the size
+    // that already refused, so without searching that band the route is thrown out as unmeasured
+    // even though it prices the target comfortably.
+    const { registry } = offlineRegistry([
+      {
+        ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 10n, 1n),
+        failAbove: 700_000_000n,
+        quoteFailName: "CallExecutionError",
+        quoteFailData: `0x4e487b71${17n.toString(16).padStart(64, "0")}`,
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "6000",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    // 600 in, 6000 out, and the market refuses above 700 — the answer lives inside the band the
+    // halving jumped over, and nowhere else.
+    expect((quote.data as { estimatedAmountIn: string }).estimatedAmountIn).toBe("600");
+  });
+
+  it("does not call a multi-leg route unsatisfiable when it reaches the argument ceiling", async () => {
+    // The ceiling belongs to the probe we control, which is the first leg's size. On one leg that
+    // proves the target is out of reach: nothing larger can be asked. On two it proves nothing —
+    // the second leg was sized by the chain, never by us, and was never taken to its own limit.
+    // Here the first leg deflates hard enough that the search reaches the uint96 maximum while the
+    // second leg is still nowhere near its own, so the honest answer is an unmeasured route.
+    const { registry } = offlineRegistry([
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 10n ** 13n, 1n),
+      market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 10n),
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+
+    // The same route reached from the other side: an opening guess already past the ceiling, so
+    // the verdict is considered on the way up rather than after a recovery. Both places decide it,
+    // and a guard on only one of them leaves the other free to answer.
+    const CEILING = 2n ** 96n - 1n;
+    const fromAbove = await quoteError(registry, { amountOut: formatUnits(CEILING * 2n, 6) });
+    expect(fromAbove.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+  });
+
   it("keeps an RPC error response in the transport category, not in unknown", async () => {
     // viem chains every JSON-RPC error response under RpcRequestError, including the 429 the
     // default endpoint returns after a few dozen sequential calls. Reading that as "unknown" would
