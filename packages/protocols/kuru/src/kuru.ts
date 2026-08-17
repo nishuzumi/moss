@@ -690,13 +690,14 @@ export class Kuru {
   /**
    * The one thing this search may declare out of reach, and the only evidence that establishes it.
    *
-   * The route priced the largest size its market can be asked for — the `uint96` maximum, not a
-   * guess — and still fell short. Nothing above it can be requested at all, so no further probe
+   * The route priced the largest input its market can be asked for — derived from the `uint96`
+   * maximum of the size argument and the market's own precision, not guessed — and still fell
+   * short. Nothing above it can be requested at all, so no further probe
    * exists. A market's own refusal never gets here: its arithmetic failing at one size says
    * nothing about the next, and reporting that as a definitive no is the mistake this search
    * exists to avoid.
    */
-  #outOfReach(route: Route, priced: bigint): never {
+  #outOfReach(route: Route, pricedInput: bigint): never {
     throw new KuruQuoteError(
       "TARGET_OUTPUT_UNSATISFIABLE",
       "amountOut",
@@ -705,7 +706,7 @@ export class Kuru {
         {
           path: routeTokens(route),
           error: new Error(
-            `Kuru priced the largest encodable size (${priced}) and it did not reach the target`,
+            `Kuru priced the largest input this market can be asked for (${pricedInput} base units) and it did not reach the target`,
           ),
         },
       ],
