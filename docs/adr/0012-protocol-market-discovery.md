@@ -32,10 +32,13 @@ Each Protocol owns its own service URL, request bounds, and verification predica
 
 These were weighed for Kuru and apply unchanged to any Protocol reaching this decision.
 
-- **Fail closed everywhere** — rejected because an incomplete comparison is the normal state for a liquid pair on mainnet, so refusing advisory quotes would make it unquotable for a reason no caller can act on.
-- **Report the gap and never refuse** — rejected because a Capability spends funds on a route chosen from a subset, and the transaction tree has nowhere to carry the caveat the caller would need.
 - **Static market addresses** — rejected because new markets require code releases and the adapter silently supports only an allowlist.
 - **Index `MarketRegistered` on every call** — valid and fully on-chain, but duplicates an indexer inside a request path when Kuru already exposes the same candidate lookup used by its SDK.
 - **Trust API results directly** — rejected because an unavailable or compromised discovery service must not choose unverified transaction targets.
 - **Configure the Kuru API through Runtime** — rejected because a protocol-specific endpoint would couple Core to Kuru without a current need for user configuration.
 - **Fall back to bundled markets** — rejected because stale addresses would silently restore the static allowlist this decision removes.
+
+These two were weighed for Kuru alone. They turn on comparing several candidates for one swap, which a Protocol that quotes a single explicit market never does.
+
+- **Fail closed everywhere** — rejected because an incomplete comparison is the normal state for a liquid pair on mainnet, so refusing advisory quotes would make it unquotable for a reason no caller can act on.
+- **Report the gap and never refuse** — rejected because a Capability spends funds on a route chosen from a subset, and the transaction tree has nowhere to carry the caveat the caller would need.
