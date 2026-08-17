@@ -15,6 +15,7 @@ export default defineConfig({
       "@themoss/core": src("../core/src/index.ts"),
       "@themoss/simulator": src("../simulator/src/index.ts"),
       "@themoss/erc": src("../erc/src/index.ts"),
+      "@themoss/protocol-aave": src("../protocols/aave/src/index.ts"),
       "@themoss/protocol-apriori": src("../protocols/apriori/src/index.ts"),
       "@themoss/protocol-clober": src("../protocols/clober/src/index.ts"),
       "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),

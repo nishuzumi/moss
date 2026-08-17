@@ -9,6 +9,7 @@
       "@themoss/simulator",
       "@themoss/erc",
       "@themoss/system",
+      "@themoss/protocol-aave",
       "@themoss/protocol-apriori",
       "@themoss/protocol-clober",
       "@themoss/protocol-kuru",

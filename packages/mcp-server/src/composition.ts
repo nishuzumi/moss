@@ -1,4 +1,5 @@
 import * as erc from "@themoss/erc";
+import * as aave from "@themoss/protocol-aave";
 import * as apriori from "@themoss/protocol-apriori";
 import * as clober from "@themoss/protocol-clober";
 import * as kuru from "@themoss/protocol-kuru";
@@ -13,6 +14,7 @@ import * as system from "@themoss/system";
 export const defaultProtocolModules = [
   system,
   erc,
+  aave,
   apriori,
   clober,
   kuru,
