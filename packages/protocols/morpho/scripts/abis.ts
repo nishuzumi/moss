@@ -56,10 +56,13 @@ export const digest = (bytes: Buffer): string => createHash("sha256").update(byt
 export function verifyVendored(packageRoot: string): string[] {
   const mismatches: string[] = [];
   for (const source of readVendorInfo(packageRoot).sources) {
-    const path = join("abis-src", source.dir, "abis.js");
-    const actual = digest(readFileSync(join(packageRoot, path)));
+    // The reported path stays POSIX-shaped on every platform. VENDOR.json, the
+    // generated header and this line all name the same file, so a Windows
+    // separator would make the provenance record depend on the checkout.
+    const label = `abis-src/${source.dir}/abis.js`;
+    const actual = digest(readFileSync(join(packageRoot, "abis-src", source.dir, "abis.js")));
     if (actual !== source.fileSha256) {
-      mismatches.push(`${path}: ${actual} != ${source.fileSha256}`);
+      mismatches.push(`${label}: ${actual} != ${source.fileSha256}`);
     }
   }
   return mismatches;
