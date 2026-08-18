@@ -18,6 +18,7 @@ export default defineConfig({
       "@themoss/protocol-aave": src("../protocols/aave/src/index.ts"),
       "@themoss/protocol-apriori": src("../protocols/apriori/src/index.ts"),
       "@themoss/protocol-clober": src("../protocols/clober/src/index.ts"),
+      "@themoss/protocol-kintsu": src("../protocols/kintsu/src/index.ts"),
       "@themoss/protocol-kuru": src("../protocols/kuru/src/index.ts"),
       "@themoss/protocol-nadfun": src("../protocols/nadfun/src/index.ts"),
       "@themoss/protocol-pancakeswap": src("../protocols/pancakeswap/src/index.ts"),
