@@ -9,12 +9,15 @@
  * of them, because Moss requires exact ordered coverage of every Change.
  *
  * Vault identity (the open design question in issue #13): a vault address is a
- * parameter, and the adapter refuses it unless the canonical MetaMorpho V1.1
+ * parameter that the adapter refuses unless the canonical MetaMorpho V1.1
  * factory says it created that vault. Morpho vaults are permissionlessly
- * created, so a hardcoded catalog would go stale the week it landed, and the
+ * created, so a hardcoded catalog would go stale the week it landed, while the
  * factory is an on-chain authority rather than an API snapshot. `vaultInfo`
  * exposes the curation surface (owner, curator, guardian, timelock, fee) so an
- * Agent can judge a vault it was handed rather than assume it is safe.
+ * Agent can judge a vault it was handed rather than assume it is safe. That same
+ * permissionless model is why a Receipt never names the underlying token: only a
+ * live `asset()` read can authenticate it, and a Receipt parser has no chain
+ * access. See `#flowReceipt`.
  *
  * v1 scope (intentionally narrow):
  *   - `supply` and `withdraw` in units of the vault's underlying asset.
@@ -122,7 +125,6 @@ const vaultInfoParams = { vault: vaultParameter } satisfies ParamsSpec;
 export type MorphoVaultFlowOutcome = {
   operation: "supply" | "withdraw";
   vault: AddressValue;
-  asset: AddressValue;
   owner: AddressValue;
   receiver: AddressValue;
   assets: string;
@@ -363,13 +365,23 @@ export class Morpho {
    * The ERC-20 side is correlated by candidate set, not by first match. The
    * parser collects every Transfer that fits the operation's share shape and
    * every Transfer that fits its asset shape, then requires exactly one of
-   * each. A vault's asset is a permissionless parameter and the parser cannot
-   * read `asset()` here, so an ABI-compatible Transfer with the right endpoints
-   * and amount is not proof of the token's identity. Two candidates mean either
-   * that the evidence cannot say which token the operation moved or that two
-   * movements would collapse into one Outcome. Both fail closed. Transfers that
-   * fit neither shape stay ordinary ERC-20 evidence through the dependency
-   * Receipt.
+   * each. Two candidates mean either that the evidence cannot say which movement
+   * the flow made or that two movements would collapse into one Outcome. Both
+   * fail closed. Transfers that fit neither shape stay ordinary ERC-20 evidence
+   * through the dependency Receipt.
+   *
+   * The Outcome names the vault, the owner, the receiver, the assets and the
+   * shares, every one of them read from the vault's own ERC-4626 event. It does
+   * not name the underlying token. A MetaMorpho vault takes its asset as a
+   * permissionless constructor parameter, the ERC-4626 event does not carry it
+   * and a Receipt parser cannot read `asset()`, so the only thing available here
+   * is whichever contract emitted a matching Transfer. A non-compliant
+   * underlying can stay silent while another token emits the same shape, which
+   * leaves the candidate unique without making it the asset. Claiming it would
+   * put a caller-chosen address in the Outcome and in the Agent-facing text, so
+   * the claim is not made at all. `vaultInfo` and `position` report the asset
+   * from a live `asset()` read, where the identity is authenticated at the
+   * moment it is used.
    *
    * Market evidence is bound to this flow, not only to its emitter: a Morpho
    * Blue event has to be the direction the operation produces and has to name
@@ -549,14 +561,13 @@ export class Morpho {
           same(transfer.to, confirmed.receiver) &&
           transfer.value === confirmed.assets,
     );
-    const [assetMove, ...extraAssetMoves] = assetMoves;
-    if (!assetMove) {
+    if (assetMoves.length === 0) {
       throw new Error(
         `Morpho ${operation} Receipt requires a ${confirmed.assets} asset transfer ` +
           `${direction} ${confirmed.vault}`,
       );
     }
-    if (extraAssetMoves.length > 0) {
+    if (assetMoves.length > 1) {
       throw new Error(
         `Morpho ${operation} Receipt requires exactly one asset movement, got ` +
           `${assetMoves.length} candidate Transfers of ${confirmed.assets} ${direction} vault ` +
@@ -565,10 +576,11 @@ export class Morpho {
       );
     }
 
+    // The Outcome names no token. The one candidate above is the movement this
+    // flow requires, never proof of which token made it: see #flowReceipt.
     const outcome: MorphoVaultFlowOutcome = {
       operation,
       vault: confirmed.vault,
-      asset: assetMove.token,
       owner: confirmed.owner,
       receiver: confirmed.receiver,
       assets: confirmed.assets.toString(),
@@ -578,7 +590,7 @@ export class Morpho {
       kind: "receipt",
       outcome,
       text:
-        `Morpho ${operation}: ${outcome.assets} ${outcome.asset} ${direction} vault ` +
+        `Morpho ${operation}: ${outcome.assets} assets ${direction} vault ` +
         `${outcome.vault} for ${outcome.owner}, ${outcome.shares} shares`,
       changes: parsed,
     };

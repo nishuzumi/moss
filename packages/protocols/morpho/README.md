@@ -130,17 +130,27 @@ deposits.
 - The ERC-4626 caller has to be the share owner, which is the only shape
   `supply` and `withdraw` build. OpenZeppelin v5 spends a share allowance
   without emitting anything, so a third-party caller leaves nothing in the log
-  to check it against. A receiver that is not the owner is fine on withdraw
-  because the asset transfer proves it, and the Outcome names it.
+  to check it against. A receiver other than the owner is fine on withdraw: the
+  vault's own event names it, the Outcome reports it from there and the asset
+  movement has to agree with it.
 - ERC-20 evidence is correlated by candidate set rather than by first match. The
   parser collects every Transfer that fits the operation's share shape and every
-  Transfer that fits its asset shape, then requires exactly one of each. A
-  Receipt parser cannot read the vault's `asset()`, and vault assets are
-  permissionless, so a Transfer with the right endpoints and amount does not
-  prove which token moved. A decoy token or a duplicated movement makes the set
-  ambiguous. The Receipt then fails closed and names the candidates it found
-  instead of attributing the operation to one of them. Transfers that fit
-  neither shape stay ordinary ERC-20 evidence through the dependency Receipt.
+  Transfer that fits its asset shape, then requires exactly one of each. A decoy
+  token or a duplicated movement makes the set ambiguous. The Receipt then fails
+  closed and names the candidates it found instead of attributing the operation
+  to one of them. Transfers that fit neither shape stay ordinary ERC-20 evidence
+  through the dependency Receipt.
+- **A Receipt never names the vault's underlying token.** A MetaMorpho vault
+  takes its asset as a permissionless constructor parameter, the ERC-4626 event
+  does not carry it and a Receipt parser cannot read `asset()`, so a matching
+  Transfer is the only thing available. A non-compliant underlying can stay
+  silent while some other token emits the same shape, which leaves one candidate
+  that is not the asset. Claiming it would put a caller-chosen address in the
+  Outcome and in the Agent-facing text, so the Outcome carries the vault, the
+  owner, the receiver, the assets and the shares out of the vault's own event
+  while saying nothing about the token. `vaultInfo` and `position` report the
+  asset from a live `asset()` read, which is where that identity can be
+  authenticated.
 - `vaultInfo` reports `depositCapacityForAccount` next to
   `depositCapacityAccount`. ERC-4626 scopes `maxDeposit` to a receiver, so that
   number is one account's ceiling and not a vault-global cap.

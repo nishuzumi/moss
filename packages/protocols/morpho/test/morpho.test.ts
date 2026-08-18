@@ -454,7 +454,6 @@ describe("Morpho supply Receipt", () => {
     expect(receipt.outcome).toEqual({
       operation: "supply",
       vault: VAULT,
-      asset: ASSET,
       owner: OWNER,
       receiver: OWNER,
       assets: ASSETS.toString(),
@@ -582,7 +581,28 @@ describe("Morpho supply Receipt", () => {
     const { registry, capability } = await buildSupply();
     const changes = [...supplyChanges(), transfer(DECOY_TOKEN, OTHER, VAULT, ASSETS)];
     const receipt = registry.parseReceipt(capability, changes);
-    expect(receipt.outcome).toMatchObject({ asset: ASSET });
+    expect(receipt.outcome).toMatchObject({ assets: ASSETS.toString(), vault: VAULT });
+    expect(leafChanges(receipt)).toEqual(changes);
+  });
+
+  // The Receipt claims no token identity, so a silent underlying plus one
+  // same-shape decoy cannot put the decoy in the Outcome or in the Agent-facing
+  // text. Uniqueness is evidence that one movement happened, never proof of
+  // which contract made it. Change 6 is the asset moving in.
+  it("names no token when only a decoy emits the asset movement", async () => {
+    const { registry, capability } = await buildSupply();
+    const changes = supplyChanges().map((change, index) =>
+      index === 6 ? transfer(DECOY_TOKEN, OWNER, VAULT, ASSETS) : change,
+    );
+    const receipt = registry.parseReceipt(capability, changes);
+
+    expect(receipt.outcome).not.toHaveProperty("asset");
+    expect(Object.values(receipt.outcome as Record<string, unknown>)).not.toContain(DECOY_TOKEN);
+    expect(receipt.text).not.toContain(DECOY_TOKEN);
+    expect(receipt.text).toBe(
+      `Morpho supply: ${ASSETS} assets into vault ${VAULT} for ${OWNER}, ${SHARES} shares`,
+    );
+    // The decoy is still preserved as ordinary ERC-20 evidence, in place.
     expect(leafChanges(receipt)).toEqual(changes);
   });
 
@@ -640,7 +660,6 @@ describe("Morpho withdraw Receipt", () => {
     expect(receipt.outcome).toEqual({
       operation: "withdraw",
       vault: VAULT,
-      asset: ASSET,
       owner: OWNER,
       receiver: OWNER,
       assets: ASSETS.toString(),
@@ -733,6 +752,24 @@ describe("Morpho withdraw Receipt", () => {
     expect(() => registry.parseReceipt(capability, repeatAt(withdrawChanges(), 2))).toThrow(
       "exactly one vault share movement",
     );
+  });
+
+  // The other direction of the same rule. Change 6 is the asset leaving the
+  // vault for the receiver.
+  it("names no token when only a decoy emits the asset movement", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const changes = withdrawChanges().map((change, index) =>
+      index === 6 ? transfer(DECOY_TOKEN, VAULT, OWNER, ASSETS) : change,
+    );
+    const receipt = registry.parseReceipt(capability, changes);
+
+    expect(receipt.outcome).not.toHaveProperty("asset");
+    expect(Object.values(receipt.outcome as Record<string, unknown>)).not.toContain(DECOY_TOKEN);
+    expect(receipt.text).not.toContain(DECOY_TOKEN);
+    expect(receipt.text).toBe(
+      `Morpho withdraw: ${ASSETS} assets out of vault ${VAULT} for ${OWNER}, ${SHARES} shares`,
+    );
+    expect(leafChanges(receipt)).toEqual(changes);
   });
 });
 

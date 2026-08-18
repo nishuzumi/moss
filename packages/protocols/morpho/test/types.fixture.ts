@@ -141,10 +141,13 @@ class ReceiptNameFixture extends Morpho {
 const author = null as unknown as Morpho;
 const authored = author.supplyReceipt([]);
 authored.outcome.shares satisfies string;
+authored.outcome.vault satisfies string;
 // @ts-expect-error Package-authored ReceiptResult has no Core-owned Protocol provenance.
 authored.protocol;
 // @ts-expect-error The Outcome is typed; there is no free-form share field.
 authored.outcome.sharesOut;
+// @ts-expect-error The Outcome names no underlying token: only a live asset() read authenticates one.
+authored.outcome.asset;
 
 void validParams;
 void invalidAmount;
