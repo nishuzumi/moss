@@ -5,10 +5,12 @@
 //   source:   @morpho-org/blue-sdk-viem@5.2.1 (npm), lib/esm/abis.js
 //             verbatim copy in ../../abis-src/blue-sdk-viem/abis.js
 //             tarball sha256 4a3f13983234d66e1737f6d8cfd030a0c0b5a2546bfb60ec6b715e4c8c5dc74c
+//             file sha256    861ef9ad2a0d69fd2463dbd2fb1e65322f2c8dc051760e6c3b40a293dce881f5
 //   source:   @morpho-org/morpho-ts@2.8.0 (npm), lib/esm/abis.js
 //             verbatim copy in ../../abis-src/morpho-ts/abis.js
 //             tarball sha256 be0bb0e608b73d44983f20735503f9352ef52d289b11b40ef8a0479cab6eb1b1
-//   vendored: 2026-08-01 (release-age guard: 7d)
+//             file sha256    05d7cd18e557db6f787f78f9c41922712295cae8d7ea7036f1fe8887e1b9cfa5
+//   vendored: 2026-08-18 (release-age guard: 7d)
 //   scope:    only the Morpho Blue side. Morpho Blue and the Adaptive Curve IRM
 //   are immutable, single-version deployments, so the SDK artifact cannot drift
 //   from the deployed code. The MetaMorpho V1.1 vault ABI is NOT taken from this

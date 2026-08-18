@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ENTRY_DIR, generate, type VendorInfo, type VendorSource } from "./abis.js";
+import { digest, ENTRY_DIR, generate, type VendorInfo, type VendorSource } from "./abis.js";
 
 const ENTRY_PACKAGE = "@morpho-org/blue-sdk-viem";
 /** The sibling package the entry module re-exports the vault ABIs from. */
@@ -126,11 +126,13 @@ async function vendor(
   execSync(`tar -xzf "${tarball}" -C "${extracted}"`);
   const target = join(packageRoot, "abis-src", dir);
   mkdirSync(target, { recursive: true });
-  writeFileSync(
-    join(target, "abis.js"),
-    readFileSync(join(extracted, "package", VENDORED_PATH), "utf8"),
-  );
-  return { name, version, tarballSha256, path: VENDORED_PATH, dir };
+  // Copied as bytes, never as decoded text: ADR 0007 asks for the published
+  // file verbatim, so a reviewer can digest the committed copy against the
+  // tarball. Decoding to a string and writing it back would let an encoding or
+  // newline round trip change the bytes while the copy still looked verbatim.
+  const published = readFileSync(join(extracted, "package", VENDORED_PATH));
+  writeFileSync(join(target, "abis.js"), published);
+  return { name, version, tarballSha256, fileSha256: digest(published), path: VENDORED_PATH, dir };
 }
 
 try {

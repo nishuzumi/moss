@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { generate } from "../scripts/abis.js";
+import { generate, readVendorInfo, verifyVendored } from "../scripts/abis.js";
 import { readSources, verifySources } from "../scripts/contracts.js";
 import { MetaMorphoEventsAbi, MetaMorphoV1_1Abi } from "../src/index.js";
 
@@ -16,6 +17,52 @@ describe("vendored abi provenance chain", () => {
   it("src/abis/morpho.ts derives byte-for-byte from abis-src/", async () => {
     const committed = readFileSync(join(packageRoot, "src", "abis", "morpho.ts"), "utf8");
     expect(committed).toBe(await generate(packageRoot));
+  });
+
+  // ADR 0007 asks for the published file verbatim. A tarball digest cannot show
+  // that on its own, because it authenticates the archive rather than the one
+  // file taken out of it, so each copy carries its own digest as well.
+  it("every vendored upstream file still matches its recorded sha256", () => {
+    expect(verifyVendored(packageRoot)).toEqual([]);
+  });
+
+  it("records both digests for every vendored source", () => {
+    const { sources } = readVendorInfo(packageRoot);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) {
+      expect(source.fileSha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(source.tarballSha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+
+  it("reports a vendored file whose bytes drifted from the record", () => {
+    const root = mkdtempSync(join(tmpdir(), "moss-morpho-vendor-"));
+    try {
+      mkdirSync(join(root, "abis-src", "blue-sdk-viem"), { recursive: true });
+      writeFileSync(join(root, "abis-src", "blue-sdk-viem", "abis.js"), "export const a = [];\n");
+      writeFileSync(
+        join(root, "abis-src", "VENDOR.json"),
+        JSON.stringify({
+          sources: [
+            {
+              name: "@morpho-org/blue-sdk-viem",
+              version: "0.0.0",
+              tarballSha256: "0".repeat(64),
+              fileSha256: "0".repeat(64),
+              path: "lib/esm/abis.js",
+              dir: "blue-sdk-viem",
+            },
+          ],
+          vendoredAt: "2026-08-18",
+          releaseAgeGuardDays: 7,
+        }),
+      );
+      expect(verifyVendored(root)).toEqual([
+        expect.stringContaining("abis-src/blue-sdk-viem/abis.js:"),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

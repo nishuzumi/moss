@@ -11,6 +11,8 @@
  * verbatim and staged into a throwaway module layout so that bare re-export
  * resolves against the committed copy instead of node_modules.
  */
+
+import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +26,14 @@ export interface VendorSource {
   version: string;
   /** sha256 of the npm tarball the copy was extracted from. */
   tarballSha256: string;
+  /**
+   * sha256 of the vendored file's own bytes, as published inside that tarball.
+   * ADR 0007 wants the copy verbatim, and a tarball digest alone cannot show
+   * that: it authenticates the archive, not the one file taken out of it. This
+   * digest closes that gap offline, so any later reformat or edit of the
+   * committed copy fails a test instead of passing review as upstream bytes.
+   */
+  fileSha256: string;
   /** Path inside the tarball (below `package/`) that was copied verbatim. */
   path: string;
   /** Directory under abis-src/ holding the verbatim copy. */
@@ -34,6 +44,25 @@ export interface VendorInfo {
   sources: VendorSource[];
   vendoredAt: string;
   releaseAgeGuardDays: number;
+}
+
+export const digest = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Every committed abis-src/ file whose bytes no longer match the digest
+ * VENDOR.json recorded for it, as `path: actual != recorded` lines. Empty means
+ * each copy is still the published file byte for byte.
+ */
+export function verifyVendored(packageRoot: string): string[] {
+  const mismatches: string[] = [];
+  for (const source of readVendorInfo(packageRoot).sources) {
+    const path = join("abis-src", source.dir, "abis.js");
+    const actual = digest(readFileSync(join(packageRoot, path)));
+    if (actual !== source.fileSha256) {
+      mismatches.push(`${path}: ${actual} != ${source.fileSha256}`);
+    }
+  }
+  return mismatches;
 }
 
 export interface AbiExport {
@@ -97,6 +126,10 @@ async function loadUpstream(packageRoot: string, vendor: VendorInfo) {
 
 export async function generate(packageRoot: string): Promise<string> {
   const vendor = readVendorInfo(packageRoot);
+  const mismatches = verifyVendored(packageRoot);
+  if (mismatches.length > 0) {
+    throw new Error(`vendored abis-src/ does not match VENDOR.json:\n  ${mismatches.join("\n  ")}`);
+  }
   const upstream = await loadUpstream(packageRoot, vendor);
 
   const provenance = vendor.sources
@@ -104,7 +137,8 @@ export async function generate(packageRoot: string): Promise<string> {
       (source) =>
         `//   source:   ${source.name}@${source.version} (npm), ${source.path}\n` +
         `//             verbatim copy in ../../abis-src/${source.dir}/abis.js\n` +
-        `//             tarball sha256 ${source.tarballSha256}`,
+        `//             tarball sha256 ${source.tarballSha256}\n` +
+        `//             file sha256    ${source.fileSha256}`,
     )
     .join("\n");
 
