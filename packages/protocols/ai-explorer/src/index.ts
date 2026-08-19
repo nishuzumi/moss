@@ -1,2 +1,2 @@
-export { AnalysisRegistryAbi } from "./abis/analysisRegistry.js";
-export { AIExplorerProtocol, ANALYSIS_REGISTRY_ADDRESS } from "./adapter.js";
+export { AnalysisRegistryAbi } from "./abis/analysis-registry.js";
+export { AIExplorerProtocol, ANALYSIS_REGISTRY_ADDRESS, MAX_SUMMARY_LENGTH } from "./adapter.js";

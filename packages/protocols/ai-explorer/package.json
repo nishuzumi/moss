@@ -11,7 +11,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
     "typecheck": "tsc --noEmit",
@@ -19,7 +21,8 @@
   },
   "dependencies": {
     "@themoss/core": "workspace:*",
-    "viem": "^2.54.3"
+    "viem": "^2.54.3",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

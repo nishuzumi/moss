@@ -1,40 +1,58 @@
-# Moss Protocol package template
+# @themoss/protocol-ai-explorer
 
-Copy this package when starting a Protocol integration, then replace every `CHANGEME` marker.
+Moss protocol adapter for the AI Monad Explorer on-chain analysis registry.
 
-## Usage
+The registry (`AnalysisRegistry.sol`) stores caller-supplied records about
+transaction hashes: `submitAnalysis(txHash, aiSummary)` appends a record
+keyed by `msg.sender`, and getters read records back. The adapter exposes
+`submit` (Capability), `getAnalysis`, and `totalAnalyses` (Queries).
+
+## Provenance boundary
+
+This package records **assertions, not verified facts**. The contract stores
+whatever strings callers submit; an on-chain record proves only that someone
+submitted that text for that hash at that timestamp. It does NOT prove the
+hash exists, that the text was AI-generated, or that either is trustworthy.
+The adapter's wording and Receipt outcomes stay inside that boundary.
+
+- ABI: vendored from the pinned Foundry artifact
+  `github.com/Chichuzxy/ai-monad-explorer@8757c1a613e3fde9678c1eab892502ba7e199dc8`
+  (ADR 0007). `test/abis.test.ts` enforces exact derivation from the
+  committed fixture and pins the complete public surface (including the
+  `analyses` and `userAnalyses` getters).
+- Receipts authenticate the emitter: only events from the fixed
+  `ANALYSIS_REGISTRY_ADDRESS` are evidence; same-signature events from any
+  other contract are rejected.
+- Submit parameters are validated: `txHash` must be an exact 32-byte hash
+  and `aiSummary` is capped at `MAX_SUMMARY_LENGTH` (512) chars.
+
+## Deployment status
+
+**Testnet only.** The pinned address
+`0x82344C1BD7720cfddbD5aec33E99571DC6628EA5` is a Monad Testnet (10143)
+deployment, bytecode-verified against the pinned artifact. Moss Runtime only
+accepts Monad mainnet (143) RPCs, so this package **must not ship** until a
+reviewed mainnet deployment exists. There is deliberately no chain map or
+testnet escape hatch.
+
+## Capabilities
+
+| kind       | method          | verb     | category | risk      | notes                       |
+| ---------- | --------------- | -------- | -------- | --------- | --------------------------- |
+| Capability | submitAnalysis  | submit   | tool     | gasOnly   | writes one record           |
+| Query      | getAnalysis     | —        | —        | —         | reads one record by ID      |
+| Query      | totalAnalyses   | —        | —        | —         | reads the record count      |
+
+## Checks
 
 ```bash
-cp -R packages/protocols/_template packages/protocols/myprotocol
-cd packages/protocols/myprotocol
-pnpm install
+pnpm --filter @themoss/protocol-ai-explorer build
+pnpm --filter @themoss/protocol-ai-explorer typecheck
+pnpm --filter @themoss/protocol-ai-explorer test
 ```
 
-Set `package.json` name to `@themoss/protocol-myprotocol`. Keep `private: true` while developing; remove it only when the package is ready to publish.
+## Follow-ups before this can ship
 
-Run checks from the repository root so workspace dependencies are built in order:
-
-```bash
-pnpm build
-pnpm typecheck
-pnpm lint
-pnpm test:offline
-```
-
-## Checklist
-
-- [ ] Rename the package and replace all placeholder Protocol metadata.
-- [ ] Put every ABI in `src/abis/` with a compiled, explorer, or vendored origin header. Vendored output must be the full upstream artifact.
-- [ ] Record a canonical source for every fixed address and add bytecode and metadata checks.
-- [ ] Declare fixed Package labels independently of Handles; Receipt parsers return `ReceiptResult` with raw addresses, while Core adds Protocol provenance and renders `Package(Title Cased Slug:localName)`.
-- [ ] Export public `@Protocol` classes directly from `src/index.ts`; do not add a separate registration object or import side effect.
-- [ ] Declare Protocol dependencies explicitly and use injected typed instances for cross-Protocol Capabilities and Queries.
-- [ ] Define each Capability and Query field as `{ type, description }` with a context-free Zod value contract and field-specific purpose.
-- [ ] Give every Capability exactly one direct TransactionNode and one typed Receipt parser. Put additional transactions in nested Capabilities.
-- [ ] Make every Receipt parser pure and preserve exact Change object identity, length, and order.
-- [ ] Add positive and `@ts-expect-error` negative compile-time fixtures.
-- [ ] Add unit tests for metadata, tree validation, Receipt coverage, and failure cases.
-- [ ] Add a live Monad-mainnet happy-path simulation with zero Warnings.
-- [ ] Export only stable Protocols from the package entry point; experimental classes stay internal.
-
-Read [Protocol onboarding](../../../docs/protocol-onboarding.md), [CONTEXT.md](../../../CONTEXT.md), and the current ADRs before writing source.
+- [ ] Deploy `AnalysisRegistry` on Monad mainnet (143) and get it reviewed.
+- [ ] Update `ANALYSIS_REGISTRY_ADDRESS` and the ABI provenance header.
+- [ ] Add `test-online` bytecode/live coverage (needs mainnet deployment).
