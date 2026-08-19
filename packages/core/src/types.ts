@@ -18,6 +18,7 @@ export const VERBS = [
   "approve",
   "open",
   "close",
+  "submit",
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
@@ -29,6 +30,7 @@ export const CATEGORIES = [
   "rewards",
   "token",
   "nft",
+  "tool",
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 
@@ -39,6 +41,7 @@ export const RISK_LABELS = [
   "debt",
   "leverage",
   "liquidation",
+  "gasOnly",
 ] as const;
 export type RiskLabel = (typeof RISK_LABELS)[number];
 

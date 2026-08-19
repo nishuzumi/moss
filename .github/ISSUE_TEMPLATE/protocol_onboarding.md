@@ -13,7 +13,7 @@ labels: protocol
 
 ## Capabilities to support
 
-<!-- Which user actions, using Moss verbs: swap / wrap / unwrap / supply / withdraw / borrow / repay / stake / unstake / claim / mint / transfer / approve / open / close -->
+<!-- Which user actions, using Moss verbs: swap / wrap / unwrap / supply / withdraw / borrow / repay / stake / unstake / claim / mint / transfer / approve / open / close / submit -->
 
 | Verb | What it does | Risk labels |
 | ---- | ------------ | ----------- |
