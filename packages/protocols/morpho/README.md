@@ -145,12 +145,15 @@ deposits.
   does not carry it and a Receipt parser cannot read `asset()`, so a matching
   Transfer is the only thing available. A non-compliant underlying can stay
   silent while some other token emits the same shape, which leaves one candidate
-  that is not the asset. Claiming it would put a caller-chosen address in the
-  Outcome and in the Agent-facing text, so the Outcome carries the vault, the
-  owner, the receiver, the assets and the shares out of the vault's own event
-  while saying nothing about the token. `vaultInfo` and `position` report the
-  asset from a live `asset()` read, which is where that identity can be
-  authenticated.
+  that is not the asset. So the Outcome claims no token: it carries the vault,
+  the owner, the receiver, the assets and the shares out of the vault's own
+  event while saying nothing about the token. The one candidate movement is
+  still covered as evidence, but the Receipt owns that leaf and its text marks
+  the token an unauthenticated candidate for the underlying, never the confirmed
+  asset. MCP surfaces those leaf texts and drops the root Outcome, so the label
+  travels with the evidence the Agent actually sees. `vaultInfo` and `position`
+  report the asset from a live `asset()` read, which is where that identity can
+  be authenticated.
 - `vaultInfo` reports `depositCapacityForAccount` next to
   `depositCapacityAccount`. ERC-4626 scopes `maxDeposit` to a receiver, so that
   number is one account's ceiling and not a vault-global cap.

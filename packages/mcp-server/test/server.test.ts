@@ -10,10 +10,11 @@ import {
 } from "@themoss/core";
 import * as erc from "@themoss/erc";
 import * as kuru from "@themoss/protocol-kuru";
+import * as morpho from "@themoss/protocol-morpho";
 import * as pendle from "@themoss/protocol-pendle";
 import type { SimulateOutcome } from "@themoss/simulator";
 import * as system from "@themoss/system";
-import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
+import { type Abi, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { defaultProtocolModules } from "../src/composition.js";
 import { createMossServer, toAgentSimulation } from "../src/server.js";
@@ -414,6 +415,83 @@ describe("moss MCP server", () => {
     });
   });
 
+  // A Morpho vault Receipt cannot read `asset()`, so a same-shape decoy is the
+  // only thing that emits the asset movement once every genuine underlying
+  // Transfer is absent. The projection an Agent actually receives (leaf texts,
+  // never the root Outcome) must mark that token unauthenticated rather than
+  // present it as the confirmed underlying.
+  it("labels the asset candidate unauthenticated in a supply Agent projection", () => {
+    const owner = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+    const vault = getAddress("0x32841A8511D5c2c5b253f45668780B99139e476D");
+    const decoy = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const zero = "0x0000000000000000000000000000000000000000" as const;
+    const assets = 1_000_000n;
+    const shares = 979_106_230_239_639_317n;
+    const changes = [
+      morphoEvent(morpho.MetaMorphoEventsAbi, vault, "UpdateLastTotalAssets", {
+        updatedTotalAssets: 1n,
+      }),
+      erc20Change(vault, "Transfer", zero, owner, shares),
+      morphoEvent(morpho.MetaMorphoV1_1Abi, vault, "Deposit", {
+        sender: owner,
+        owner,
+        assets,
+        shares,
+      }),
+      erc20Change(decoy, "Transfer", owner, vault, assets),
+    ];
+    const registry = new Registry(runtime).use(morpho);
+    const receipt = registry.parseReceipt(receiptCapability("morpho", "supply"), changes);
+    const { results } = toAgentSimulation({
+      results: [simulationResult("morpho", "supply", receipt)],
+    });
+    const texts = results[0]?.texts ?? [];
+
+    const decoyLines = texts.filter((text) => text.toLowerCase().includes(decoy.toLowerCase()));
+    expect(decoyLines).toHaveLength(1);
+    expect(decoyLines[0]).toMatch(/unauthenticated token/i);
+    // Never surfaced as a confirmed ERC-20 movement of a known token.
+    expect(decoyLines[0]).not.toMatch(/^ERC20 Transfer:/);
+    // Belt and suspenders: the confirmed vault share token is still authenticated
+    // evidence, so the decoy is the only unauthenticated line in the projection.
+    expect(texts.filter((text) => /unauthenticated token/i.test(text))).toHaveLength(1);
+  });
+
+  it("labels the asset candidate unauthenticated in a withdraw Agent projection", () => {
+    const owner = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+    const vault = getAddress("0x32841A8511D5c2c5b253f45668780B99139e476D");
+    const decoy = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const zero = "0x0000000000000000000000000000000000000000" as const;
+    const assets = 1_000_000n;
+    const shares = 979_106_230_239_639_317n;
+    const changes = [
+      morphoEvent(morpho.MetaMorphoEventsAbi, vault, "UpdateLastTotalAssets", {
+        updatedTotalAssets: 1n,
+      }),
+      erc20Change(vault, "Transfer", owner, zero, shares),
+      morphoEvent(morpho.MetaMorphoV1_1Abi, vault, "Withdraw", {
+        sender: owner,
+        receiver: owner,
+        owner,
+        assets,
+        shares,
+      }),
+      erc20Change(decoy, "Transfer", vault, owner, assets),
+    ];
+    const registry = new Registry(runtime).use(morpho);
+    const receipt = registry.parseReceipt(receiptCapability("morpho", "withdraw"), changes);
+    const { results } = toAgentSimulation({
+      results: [simulationResult("morpho", "withdraw", receipt)],
+    });
+    const texts = results[0]?.texts ?? [];
+
+    const decoyLines = texts.filter((text) => text.toLowerCase().includes(decoy.toLowerCase()));
+    expect(decoyLines).toHaveLength(1);
+    expect(decoyLines[0]).toMatch(/unauthenticated token/i);
+    expect(decoyLines[0]).not.toMatch(/^ERC20 Transfer:/);
+    expect(texts.filter((text) => /unauthenticated token/i.test(text))).toHaveLength(1);
+  });
+
   it("rejects unregistered simulate Capabilities before tracing", async () => {
     const { client, simulator } = await connectedHarness();
     let simulated = false;
@@ -615,6 +693,35 @@ function kuruEventChange(
     address,
     topics: encodeEventTopics({ abi, eventName } as never) as readonly Hex[],
     data: encodeAbiParameters(types.map((type) => ({ type })) as never, values as never),
+  };
+}
+
+interface AbiInput {
+  name: string;
+  type: string;
+  indexed?: boolean;
+}
+
+/** Encodes one Morpho event Change from an ABI and its argument record. */
+function morphoEvent(
+  abi: readonly unknown[],
+  address: `0x${string}`,
+  eventName: string,
+  args: Record<string, unknown>,
+): Change {
+  const entry = (abi as readonly { type: string; name?: string; inputs?: AbiInput[] }[]).find(
+    (item) => item.type === "event" && item.name === eventName,
+  );
+  if (!entry?.inputs) throw new Error(`fixture ABI has no event ${eventName}`);
+  const nonIndexed = entry.inputs.filter((input) => !input.indexed);
+  return {
+    kind: "event",
+    address,
+    topics: encodeEventTopics({ abi: abi as Abi, eventName, args }) as readonly Hex[],
+    data: encodeAbiParameters(
+      nonIndexed,
+      nonIndexed.map((input) => args[input.name]),
+    ),
   };
 }
 

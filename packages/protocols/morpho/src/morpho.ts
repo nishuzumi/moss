@@ -137,6 +137,11 @@ interface TransferFact {
   from: AddressValue;
   to: AddressValue;
   value: bigint;
+  // Where this Transfer sits in the Change list and its original object, so the
+  // one selected asset candidate can be re-owned at its leaf once the candidate
+  // set is resolved. See the re-own step at the end of #flowReceipt.
+  index: number;
+  change: Change;
 }
 
 /** The ERC-4626 event that names what the transaction actually did. */
@@ -155,6 +160,9 @@ interface MarketFact {
   args: unknown;
   vaultFields: readonly string[];
 }
+
+/** One parsed leaf: an owned Change or a delegated dependency Receipt. */
+type ParsedFlowLeaf = ReceiptChange | ReceiptResult<JsonSafeValue>;
 
 /**
  * The only Morpho Blue events a vault flow can produce, and the event fields
@@ -377,11 +385,14 @@ export class Morpho {
    * and a Receipt parser cannot read `asset()`, so the only thing available here
    * is whichever contract emitted a matching Transfer. A non-compliant
    * underlying can stay silent while another token emits the same shape, which
-   * leaves the candidate unique without making it the asset. Claiming it would
-   * put a caller-chosen address in the Outcome and in the Agent-facing text, so
-   * the claim is not made at all. `vaultInfo` and `position` report the asset
-   * from a live `asset()` read, where the identity is authenticated at the
-   * moment it is used.
+   * leaves the candidate unique without making it the asset. So the Outcome
+   * claims no token. The one candidate movement is still covered as evidence,
+   * but this Receipt owns that leaf and marks its token an unauthenticated
+   * candidate rather than delegating a leaf whose text would read the emitter as
+   * the confirmed underlying. That matters because MCP surfaces leaf texts and
+   * drops the root Outcome, so the label has to travel with the leaf the Agent
+   * actually sees. `vaultInfo` and `position` report the asset from a live
+   * `asset()` read, where the identity is authenticated at the moment it is used.
    *
    * Market evidence is bound to this flow, not only to its emitter: a Morpho
    * Blue event has to be the direction the operation produces and has to name
@@ -402,7 +413,7 @@ export class Morpho {
     const bookkeepers = new Set<string>();
     let flow: FlowFact | undefined;
 
-    const parsed: (ReceiptChange | ReceiptResult<JsonSafeValue>)[] = changes.map((change) => {
+    const parsed: ParsedFlowLeaf[] = changes.map((change, index) => {
       if (change.kind === "nativeTransfer") {
         throw new Error(
           `Unexpected Change: Morpho ${operation} moved native MON; vault flows are ERC-20 only`,
@@ -489,8 +500,10 @@ export class Morpho {
       }
 
       // Everything else is an ERC-20 movement: the asset in or out, and the
-      // vault's own shares minted or burned. The canonical ERC-20 parser owns
-      // that evidence; a transfer is also recorded here for cross-checking.
+      // vault's own shares minted or burned. Delegate each to the canonical
+      // ERC-20 parser here and record it for cross-checking. The one selected
+      // asset candidate is re-owned below with an unauthenticated-token label;
+      // the share movement and any unrelated transfer keep the ERC-20 leaf.
       const transfer = tryDecode(ERC20Abi, topics, change.data);
       if (transfer?.eventName === "Transfer") {
         const args = transfer.args as Record<string, unknown>;
@@ -499,6 +512,8 @@ export class Morpho {
           from: args.from as AddressValue,
           to: args.to as AddressValue,
           value: args.value as bigint,
+          index,
+          change,
         });
       }
       return this.erc20.changesReceipt([change]);
@@ -561,13 +576,14 @@ export class Morpho {
           same(transfer.to, confirmed.receiver) &&
           transfer.value === confirmed.assets,
     );
-    if (assetMoves.length === 0) {
+    const [assetMove, ...extraAssetMoves] = assetMoves;
+    if (!assetMove) {
       throw new Error(
         `Morpho ${operation} Receipt requires a ${confirmed.assets} asset transfer ` +
           `${direction} ${confirmed.vault}`,
       );
     }
-    if (assetMoves.length > 1) {
+    if (extraAssetMoves.length > 0) {
       throw new Error(
         `Morpho ${operation} Receipt requires exactly one asset movement, got ` +
           `${assetMoves.length} candidate Transfers of ${confirmed.assets} ${direction} vault ` +
@@ -575,6 +591,36 @@ export class Morpho {
           `A vault's asset is permissionless, so no matching Transfer can be assumed canonical`,
       );
     }
+
+    // Re-own the one selected candidate at its leaf instead of leaving the
+    // delegated ERC-20 leaf in place. MCP projects leaf texts and drops the root
+    // Outcome (see mcp-server receiptTexts), so a delegated
+    // `ERC20 Transfer: <emitter> ...` line would present a shape-only match to
+    // the Agent as the confirmed underlying. A Receipt cannot read `asset()`, so
+    // this leaf reports the movement as real evidence while naming the token an
+    // unauthenticated candidate. The Change object and its position are
+    // unchanged, so Core's ordered identity coverage still holds.
+    parsed[assetMove.index] = {
+      kind: "change",
+      change: assetMove.change,
+      data: toJsonSafe({
+        source: "morpho",
+        role: "assetCandidate",
+        authenticated: false,
+        token: assetMove.token,
+        from: assetMove.from,
+        to: assetMove.to,
+        value: assetMove.value.toString(),
+      }),
+      text:
+        `Morpho ${operation}: ${assetMove.value} moved ` +
+        (operation === "supply"
+          ? `from ${assetMove.from} into vault ${confirmed.vault}`
+          : `out of vault ${confirmed.vault} to ${assetMove.to}`) +
+        `, emitted by ${assetMove.token}. Unauthenticated token: a Receipt cannot read ` +
+        `asset(), so this emitter is a candidate for the vault's underlying, not the ` +
+        `confirmed asset. Authenticate it with vaultInfo or position.`,
+    };
 
     // The Outcome names no token. The one candidate above is the movement this
     // flow requires, never proof of which token made it: see #flowReceipt.

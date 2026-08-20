@@ -462,12 +462,23 @@ describe("Morpho supply Receipt", () => {
     expect(receipt.protocol).toBe("morpho");
   });
 
-  it("delegates ERC-20 evidence to the erc20 parser, keeping its Protocol", async () => {
+  it("owns the selected asset candidate but delegates the other ERC-20 evidence", async () => {
     const { registry, capability } = await buildSupply();
     const receipt = registry.parseReceipt(capability, supplyChanges());
+    // The share mint and the vault-to-Blue asset leg stay delegated to the
+    // canonical ERC-20 parser, keeping its Protocol.
     const nested = receipt.changes.filter((entry) => entry.kind === "receipt");
-    expect(nested.length).toBe(3);
+    expect(nested.length).toBe(2);
     expect(nested.every((entry) => entry.protocol === "erc20")).toBe(true);
+    // The one selected asset candidate is re-owned by Morpho at its leaf and
+    // labeled an unauthenticated token, so the text MCP projects cannot read the
+    // emitter as the confirmed underlying.
+    const assetLeaf = receipt.changes.find(
+      (entry) => entry.kind === "change" && entry.text.includes("Unauthenticated token"),
+    );
+    if (!assetLeaf) throw new Error("expected an owned asset-candidate leaf");
+    expect(assetLeaf.text).toContain(ASSET);
+    expect(assetLeaf.text).not.toMatch(/^ERC20 Transfer:/);
   });
 
   it("renders the Morpho Blue and IRM Package labels in Receipt text", async () => {
@@ -585,10 +596,12 @@ describe("Morpho supply Receipt", () => {
     expect(leafChanges(receipt)).toEqual(changes);
   });
 
-  // The Receipt claims no token identity, so a silent underlying plus one
-  // same-shape decoy cannot put the decoy in the Outcome or in the Agent-facing
-  // text. Uniqueness is evidence that one movement happened, never proof of
-  // which contract made it. Change 6 is the asset moving in.
+  // The Outcome claims no token identity, so a silent underlying plus one
+  // same-shape decoy cannot put the decoy in the Outcome or the root text.
+  // Uniqueness is evidence that one movement happened, never proof of which
+  // contract made it. The decoy is still surfaced as a leaf, labeled an
+  // unauthenticated candidate; the recursive projection is asserted end to end
+  // in the mcp-server tests. Change 6 is the asset moving in.
   it("names no token when only a decoy emits the asset movement", async () => {
     const { registry, capability } = await buildSupply();
     const changes = supplyChanges().map((change, index) =>
