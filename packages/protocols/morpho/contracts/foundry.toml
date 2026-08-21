@@ -1,0 +1,10 @@
+# Compiled ABI origin (ADR 0007). `lib/` is staged from node_modules by
+# `pnpm gen:contract-abis`; Morpho's sources import their dependencies through
+# relative ../../lib/ paths, which remappings cannot rewrite.
+[profile.default]
+src = "src"
+libs = ["lib"]
+out = "out"
+solc = "0.8.21"
+optimizer = false
+bytecode_hash = "none"

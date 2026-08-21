@@ -15,6 +15,7 @@
       "@themoss/protocol-kintsu",
       "@themoss/protocol-kuru",
       "@themoss/protocol-monad-cards",
+      "@themoss/protocol-morpho",
       "@themoss/protocol-nadfun",
       "@themoss/protocol-pancakeswap",
       "@themoss/protocol-pendle",
