@@ -10,6 +10,39 @@ type Readme = {
 
 type TableRow = [protocol: string, packageName: string, capabilities: string, queries: string];
 
+type PackageManifest = {
+  dependencies?: Record<string, string>;
+};
+
+const expectedPackageOrder = [
+  "@themoss/system",
+  "@themoss/erc",
+  "@themoss/erc",
+  "@themoss/erc",
+  "@themoss/protocol-aave",
+  "@themoss/protocol-kintsu",
+  "@themoss/protocol-kuru",
+  "@themoss/protocol-clober",
+  "@themoss/protocol-apriori",
+  "@themoss/protocol-nadfun",
+  "@themoss/protocol-pancakeswap",
+  "@themoss/protocol-monad-cards",
+  "@themoss/protocol-pendle",
+  "@themoss/protocol-uniswap",
+] as const;
+
+const packageManifest = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as PackageManifest;
+const defaultPackageDependencies = Object.keys(packageManifest.dependencies ?? {})
+  .filter(
+    (packageName) =>
+      packageName === "@themoss/erc" ||
+      packageName === "@themoss/system" ||
+      packageName.startsWith("@themoss/protocol-"),
+  )
+  .sort();
+
 const readmes: Readme[] = [
   {
     label: "English",
@@ -42,6 +75,13 @@ function parseRow(readme: Readme, line: string): TableRow {
   }
 
   return [protocol, packageName, capabilities, queries];
+}
+
+function packageNameFromRow([, packageCell]: TableRow): string {
+  const match = /^`(@themoss\/[^`]+)`$/.exec(packageCell);
+  if (!match?.[1])
+    throw new Error(`Protocol package cell must contain one @themoss package: ${packageCell}`);
+  return match[1];
 }
 
 function protocolRows(readme: Readme): TableRow[] {
@@ -85,15 +125,31 @@ describe("root README Protocol tables", () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("keeps bilingual package coverage aligned with the default composition", () => {
+  it("keeps bilingual package identities aligned with the default composition", () => {
     const [english, chinese] = readmes.map(protocolRows);
     if (!english || !chinese) throw new Error("both README fixtures are required");
 
-    const englishPackages = english.map(([, packageName]) => packageName);
-    const chinesePackages = chinese.map(([, packageName]) => packageName);
+    const englishPackages = english.map(packageNameFromRow);
+    const chinesePackages = chinese.map(packageNameFromRow);
+    const expectedUniquePackages = [...new Set(expectedPackageOrder)].sort();
 
-    expect(chinesePackages).toEqual(englishPackages);
-    expect(new Set(englishPackages).size).toBe(defaultProtocolModules.length);
+    expect(englishPackages).toEqual(expectedPackageOrder);
+    expect(chinesePackages).toEqual(expectedPackageOrder);
+    expect(expectedUniquePackages).toEqual(defaultPackageDependencies);
+    expect(expectedUniquePackages).toHaveLength(defaultProtocolModules.length);
+  });
+
+  it("keeps bilingual Capability and Query coverage aligned", () => {
+    const [english, chinese] = readmes.map(protocolRows);
+    if (!english || !chinese) throw new Error("both README fixtures are required");
+
+    const operationCells = (rows: TableRow[]) =>
+      rows.map(([, , capabilities, queries]) => [
+        capabilities.replaceAll("、", ", "),
+        queries.replaceAll("、", ", "),
+      ]);
+
+    expect(operationCells(chinese)).toEqual(operationCells(english));
   });
 
   it("uses Chinese separators in Capability and Query cells", () => {
