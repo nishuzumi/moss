@@ -14,7 +14,8 @@ import type { PendleSwapOutcome, VerifiedMarket } from "../src/types.js";
 
 const ZERO_ACCOUNT = getAddress("0x0000000000000000000000000000000000000000");
 const TEST_ACCOUNT = getAddress("0x71bB63F1A3b94729874FE961B5cD3209CFD45A03");
-const TEST_MARKET = getAddress("0x1519fb0d8885020387FCD6a67bC888a168a40afA");
+// Later-dated USDat market; the 2026-08-27 fixture no longer has a stable fee-bearing sell path.
+const TEST_MARKET = getAddress("0x88C5D8A908834E44B421CB67aEc9A931782f9538");
 const ERC20_BALANCES_MAPPING_SLOT = 0n;
 const USDAT_TEST_ACCOUNT_BALANCE_SLOT =
   "0x013b2304f519dd3bb551ca27c60cd907fb8619e5c0a5ef31cfdca85be2b9552c";
@@ -23,6 +24,8 @@ const USDAT_TEST_ACCOUNT_BALANCE_SLOT =
 const SWAP_AMOUNT = "0.1";
 const SELL_FUND_AMOUNT = "0.1";
 const SELL_AMOUNT = "0.05";
+// Quotes nonzero, but its net LP fee rounds to zero on TEST_MARKET.
+const DUST_AMOUNT = 5n;
 
 // Both swap directions use a fixed caller with an ERC-20 balance storage override. This keeps the
 // live gate deterministic while preserving real current market, quote, Router, and Receipt behavior.
@@ -139,7 +142,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Pendle protocol on Monad mainnet",
   });
 
   it("reports MarketZeroNetLPFee dust reverts explicitly", { timeout: 240_000 }, async () => {
-    const dustAmount = formatUnits(5_000n, market.decimals.pt);
+    const dustAmount = formatUnits(DUST_AMOUNT, market.decimals.pt);
     const capability = await registry.action("pendle", "swap", TEST_ACCOUNT, {
       market: market.market,
       tokenIn: market.pt,
@@ -150,7 +153,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Pendle protocol on Monad mainnet",
 
     const result = await createTraceSimulator(runtime, {
       receipt: (node, changes) => registry.parseReceipt(node, changes),
-      stateOverrides: balanceOverride(market.pt, TEST_ACCOUNT, 5_000n),
+      stateOverrides: balanceOverride(market.pt, TEST_ACCOUNT, DUST_AMOUNT),
       resolveContract: (protocol, target) => registry.resolveContract(protocol, target),
     }).simulate(capability);
 
