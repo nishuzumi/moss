@@ -51,6 +51,15 @@ const MARKETS: readonly MockMarket[] = [
   market(DIRECT_USDC_AUSD_BETTER, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 11n, 10n),
 ];
 
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -239,6 +248,62 @@ describe("Kuru", () => {
       ],
     });
     expect(receipt.changes.map(firstChange)).toEqual(changes);
+  });
+
+  it("projects the exact Receipt text an Agent reads for every Change class", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await swapCapability(registry);
+    const transfer = erc20Transfer(USDC_ADDRESS, ACCOUNT, KURU_ROUTER_ADDRESS, 1_000_000n);
+    const flip = flipOrderUpdatedChange(MON_USDC, 7n, 30n);
+    const firstTrade = tradeChange(MON_USDC, 8n);
+    const flipped = flippedOrderCreatedChange(MON_AUSD);
+    const secondTrade = tradeChange(MON_AUSD, 11n);
+    const router = routerSwapChange(ACCOUNT, USDC_ADDRESS, AUSD_ADDRESS, 1_000_000n, 1_200_000n);
+    const changes = [transfer, flip, firstTrade, flipped, secondTrade, router] as const;
+
+    const receipt = registry.parseReceipt(capability, changes);
+
+    // Exact leaf text for each Change class the parser produces. Raw base-unit
+    // amounts and address rendering are the accepted convention, so lock the
+    // literal strings.
+    const erc20TransferText = `ERC20 Transfer: 1000000 ${USDC_ADDRESS} from ${ACCOUNT} to ${KURU_ROUTER_ADDRESS}`;
+    const flipText = `Flip Order Updated: order 7 has size 30 emitted by ${MON_USDC}`;
+    const firstTradeText = `Trade Event: 20 at 10 emitted by ${MON_USDC}`;
+    const flippedText = `Flipped Order Created: order ID 11, flipped ID 12, owner ${ACCOUNT}; size 30, price 40, flipped price 50, is buy true, emitted by ${MON_AUSD}`;
+    const secondTradeText = `Trade Event: 20 at 10 emitted by ${MON_AUSD}`;
+    const swapText = `Kuru Swap: 1000000 ${USDC_ADDRESS} to 1200000 ${AUSD_ADDRESS} by ${ACCOUNT}`;
+
+    // The ERC20 transfer is delegated to a nested Receipt, so it reads as null
+    // at the top level and its leaf text lives one level down.
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      flipText,
+      firstTradeText,
+      flippedText,
+      secondTradeText,
+      swapText,
+    ]);
+    const nested = receipt.changes[0];
+    if (nested?.kind !== "receipt") throw new Error("expected a nested ERC20 Receipt");
+    expect(nested.text).toBe(erc20TransferText);
+
+    // Top-level Receipt text is the Kuru swap summary with the observed Trade
+    // count, not a join of the leaf texts.
+    expect(receipt.text).toBe(
+      `Kuru Swap: 1000000 ${USDC_ADDRESS} to 1200000 ${AUSD_ADDRESS}; 2 Trade events observed`,
+    );
+
+    // The full ordered leaf-text sequence, flattened exactly as receiptTexts
+    // projects it to Agents, locks order and completeness together. The nested
+    // ERC20 leaf surfaces here.
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      erc20TransferText,
+      flipText,
+      firstTradeText,
+      flippedText,
+      secondTradeText,
+      swapText,
+    ]);
   });
 
   it("represents FlipOrderUpdated before its market Trade", async () => {
