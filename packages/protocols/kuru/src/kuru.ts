@@ -109,9 +109,6 @@ const MAX_SEARCH_STEPS = 128;
 const OptionalHumanTokenAmount = PositiveDecimalString.optional().describe(
   'An optional positive base-10 decimal amount in a token\'s display units, such as "1" or "1.5".',
 );
-const RequireExhaustive = BooleanFlag.describe(
-  "Whether a swap must refuse when the route comparison was incomplete.",
-);
 const KuruSlippage = BasisPoints.min(50)
   .max(5_000)
   .describe("An integer basis-point count from 50 through 5000; 1 bps equals 0.01%.");
@@ -138,7 +135,7 @@ const quoteParams = {
 const swapParams = {
   ...quoteParams,
   requireExhaustive: {
-    type: RequireExhaustive.default(true),
+    type: BooleanFlag.default(true),
     description:
       "Refuse to build the swap when some verified routes could not be evaluated. Default true: a write is not the place to guess. Set false to accept the best of a partial comparison.",
   },
@@ -491,7 +488,7 @@ export class Kuru {
       !sameAddress(baseAsset, candidate.base) ||
       !sameAddress(quoteAsset, candidate.quote)
     ) {
-      throw new Error(`Kuru API returned unverified market ${candidate.address}`);
+      throw own(new Error(`Kuru API returned unverified market ${candidate.address}`));
     }
     const parsedBaseDecimals = tokenDecimals(baseDecimals, candidate.address, "base");
     const parsedQuoteDecimals = tokenDecimals(quoteDecimals, candidate.address, "quote");
@@ -559,16 +556,14 @@ export class Kuru {
       })),
     );
     // The reverse search rejects both when a route cannot reach the target and when the
-    // evaluation failed; only the first is an answer.
-    const unsatisfiable: KuruUnavailableRoute[] = [];
+    // evaluation failed; only the second leaves the comparison incomplete. A route that priced
+    // its maximum and fell short was measured, so it never enters `unavailable`.
     const unavailable: KuruUnavailableRoute[] = [];
     settled.forEach((result, index) => {
       if (result.status !== "rejected") return;
-      const entry = {
-        path: routeTokens(routes[index] as Route),
-        error: asError(result.reason),
-      };
-      (isUnsatisfiableTarget(entry.error) ? unsatisfiable : unavailable).push(entry);
+      const error = asError(result.reason);
+      if (isUnsatisfiableTarget(error)) return;
+      unavailable.push({ path: routeTokens(routes[index] as Route), error });
     });
     const quoted = settled.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : [],
@@ -584,11 +579,14 @@ export class Kuru {
           unavailable,
         );
       }
+      // `unavailable` is defined as evaluations that did not complete. These did complete —
+      // every route priced its maximum and fell short — so the field stays empty. Passing the
+      // deterministic proofs here let a consumer read a definitive "no" as a partial comparison
+      // and retry it. The count is in the message; the proofs stay internal.
       throw new KuruQuoteError(
         "TARGET_OUTPUT_UNSATISFIABLE",
         "amountOut",
         `all ${routes.length} verified routes outgrew what their markets can price for this output amount`,
-        unsatisfiable,
       );
     }
     // Only `unavailable` marks the comparison partial: a route that completed and cannot reach
@@ -698,18 +696,12 @@ export class Kuru {
    * exists to avoid.
    */
   #outOfReach(route: Route, pricedInput: bigint): never {
+    // The route completed: the market priced its largest encodable input and fell short. That is
+    // an answer, not a gap, so it must not enter `unavailable` — the evidence goes in the text.
     throw new KuruQuoteError(
       "TARGET_OUTPUT_UNSATISFIABLE",
       "amountOut",
-      "reaching this target needs more input than this market can price",
-      [
-        {
-          path: routeTokens(route),
-          error: new Error(
-            `Kuru priced the largest input this market can be asked for (${pricedInput} base units) and it did not reach the target`,
-          ),
-        },
-      ],
+      `reaching this target needs more input than this market can price; the largest priced input was ${pricedInput} base units on ${routeTokens(route).join(" -> ")}`,
     );
   }
 
@@ -825,17 +817,17 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new Error(`Kuru market discovery failed with HTTP ${response.status}`);
+      throw own(new Error(`Kuru market discovery failed with HTTP ${response.status}`));
     }
     text = await readBoundedMarketDiscoveryResponse(response);
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error(
-        `Kuru market discovery timed out after ${KURU_MARKET_DISCOVERY_TIMEOUT_MS}ms`,
+      throw own(
+        new Error(`Kuru market discovery timed out after ${KURU_MARKET_DISCOVERY_TIMEOUT_MS}ms`),
       );
     }
-    if (error instanceof Error && error.message.startsWith("Kuru market discovery")) throw error;
-    throw new Error(`Kuru market discovery failed: ${errorMessage(error)}`);
+    if (isOurOwnRefusal(error)) throw error;
+    throw own(new Error(`Kuru market discovery failed: ${errorMessage(error)}`));
   } finally {
     clearTimeout(timeout);
   }
@@ -845,14 +837,16 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
   } catch {
     // Not the parser's message: V8 embeds the opening characters of the body in it, which is
     // remote-controlled text on its way to an Agent.
-    throw new Error("Kuru market discovery returned invalid JSON");
+    throw own(new Error("Kuru market discovery returned invalid JSON"));
   }
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
-    throw new Error("Kuru market discovery returned an invalid response");
+    throw own(new Error("Kuru market discovery returned an invalid response"));
   }
   if (payload.data.length > MAX_KURU_MARKET_CANDIDATES) {
-    throw new Error(
-      `Kuru market discovery returned too many markets; maximum is ${MAX_KURU_MARKET_CANDIDATES}`,
+    throw own(
+      new Error(
+        `Kuru market discovery returned too many markets; maximum is ${MAX_KURU_MARKET_CANDIDATES}`,
+      ),
     );
   }
   const candidates = payload.data.map(parseMarketCandidate);
@@ -864,7 +858,9 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
       previous &&
       (!sameAddress(previous.base, candidate.base) || !sameAddress(previous.quote, candidate.quote))
     ) {
-      throw new Error(`Kuru market discovery returned conflicting market ${candidate.address}`);
+      throw own(
+        new Error(`Kuru market discovery returned conflicting market ${candidate.address}`),
+      );
     }
     unique.set(key, candidate);
   }
@@ -876,13 +872,13 @@ async function readBoundedMarketDiscoveryResponse(response: Response) {
   if (contentLength !== null) {
     const length = Number(contentLength);
     if (Number.isFinite(length) && length > MAX_KURU_MARKET_DISCOVERY_BYTES) {
-      throw new Error("Kuru market discovery response is too large");
+      throw own(new Error("Kuru market discovery response is too large"));
     }
   }
   if (!response.body) {
     const text = await response.text();
     if (new TextEncoder().encode(text).byteLength > MAX_KURU_MARKET_DISCOVERY_BYTES) {
-      throw new Error("Kuru market discovery response is too large");
+      throw own(new Error("Kuru market discovery response is too large"));
     }
     return text;
   }
@@ -897,7 +893,7 @@ async function readBoundedMarketDiscoveryResponse(response: Response) {
       bytes += value.byteLength;
       if (bytes > MAX_KURU_MARKET_DISCOVERY_BYTES) {
         await reader.cancel().catch(() => undefined);
-        throw new Error("Kuru market discovery response is too large");
+        throw own(new Error("Kuru market discovery response is too large"));
       }
       text += decoder.decode(value, { stream: true });
     }
@@ -1016,7 +1012,8 @@ function scaleUnits(amount: bigint, fromDecimals: number, toDecimals: number) {
 }
 
 function tokenDecimals(value: bigint, market: AddressValue, asset: "base" | "quote") {
-  if (value > 255n) throw new Error(`Kuru market ${market} has invalid ${asset} token decimals`);
+  if (value > 255n)
+    throw own(new Error(`Kuru market ${market} has invalid ${asset} token decimals`));
   return Number(value);
 }
 
@@ -1088,7 +1085,6 @@ function requireFollowingRouterTrade(
   );
 }
 
-/** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
 /**
  * Gaps as a Query result can carry them: a stable category, never the underlying message.
  *
@@ -1104,25 +1100,35 @@ function reportable(
   return unavailable.map(({ path, error }) => ({ path, reason: categorize(error) }));
 }
 
-/** Map a failure onto the closed reason set, walking the cause chain viem builds. */
 /** An Error whose message is ours, keeping the original reachable but never enumerable. */
 function sanitized(message: string, cause: unknown): Error {
-  const error = new Error(message);
+  const error = own(new Error(message));
   Object.defineProperty(error, "cause", { value: cause, enumerable: false });
   return error;
 }
 
 /**
- * Whether this adapter wrote the message itself.
+ * Brand for refusals this package authored itself.
  *
- * Every refusal this package raises names Kuru first — an unverified market, invalid decimals, a
- * discovery bound. Anything else arrived from below, where viem puts the endpoint URL and the
- * request body into the text, and must not be passed on as it stands.
+ * A module-private symbol, never exported: nothing below this adapter can set it. The previous
+ * test — does the message start with "Kuru " — authenticated provenance with prose the lower
+ * layer controls, so a viem error whose text happened to begin that way bypassed sanitization
+ * and carried the endpoint URL to the wire.
  */
-function isOurOwnRefusal(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith("Kuru ");
+const OWN_REFUSAL: unique symbol = Symbol("kuru.ownRefusal");
+
+/** Mark an Error as written by this adapter, so it may pass sanitization unchanged. */
+function own<E extends Error>(error: E): E {
+  Object.defineProperty(error, OWN_REFUSAL, { value: true, enumerable: false });
+  return error;
 }
 
+/** Whether this adapter wrote the error itself. Structural, not textual. */
+function isOurOwnRefusal(error: unknown): boolean {
+  return error instanceof Error && (error as { [OWN_REFUSAL]?: true })[OWN_REFUSAL] === true;
+}
+
+/** Map a failure onto the closed reason set, walking the cause chain viem builds. */
 function categorize(error: Error): KuruUnavailableReason {
   if (isProbeBeyondEncodableSize(error)) return "unencodable-probe";
   for (
@@ -1151,6 +1157,7 @@ function categorize(error: Error): KuruUnavailableReason {
   return "unknown";
 }
 
+/** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
 function asError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
 }

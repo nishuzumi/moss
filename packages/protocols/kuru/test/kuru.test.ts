@@ -661,6 +661,10 @@ describe("Kuru", () => {
     const unsatisfiable = await quoteError(registry, { amountOut: "1" });
     expect(unsatisfiable.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
     expect(unsatisfiable.side).toBe("amountOut");
+    // `unavailable` is the exported contract for evaluations that did not complete. These did:
+    // every route priced its maximum and fell short. Filing the deterministic proofs there let a
+    // consumer read a definitive "no" as a partial comparison and retry it forever.
+    expect(unsatisfiable.unavailable).toHaveLength(0);
 
     const { registry: rejecting } = offlineRegistry(
       unreachable.map((m) => ({ ...m, quoteFails: true })),
@@ -948,6 +952,14 @@ describe("Kuru", () => {
     expect(swapped?.params.requireExhaustive).toMatchObject({
       type: { type: "boolean", default: true },
     });
+    // A Parameter type describes representation; the declaration describes this field's use.
+    // `.describe()` clones rather than mutates, so the shared BooleanFlag was never harmed — but
+    // this parameter published a swap-specific sentence where a caller asking "what is a boolean
+    // here" expects the representation, and both descriptions are exported together.
+    expect(swapped?.params.requireExhaustive).toMatchObject({
+      description: expect.stringContaining("Refuse to build the swap"),
+      type: { description: "A JSON boolean: true or false." },
+    });
   });
 
   it("searches the band the opening guess jumped over, instead of concluding from below it", async () => {
@@ -1022,6 +1034,41 @@ describe("Kuru", () => {
     expect(failed?.message).not.toContain("rpc.example");
     expect(failed?.message).toMatch(/verification could not be completed/);
     expect(failed?.message).toContain("transport");
+  });
+
+  it("does not trust a lower error just because its text opens with the adapter name", async () => {
+    // Provenance used to be authenticated by prose: any Error whose message started with "Kuru "
+    // bypassed sanitization. The prefix is not ours to control — it belongs to whatever threw —
+    // so a transport error shaped this way carried the endpoint straight to MCP's jsonError().
+    const SECRET = "https://rpc.example/v2/SUPERSECRETKEY";
+    const markets = [market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n)];
+    const { registry } = offlineRegistry(markets, marketDiscoveryFetch(markets), undefined, () => {
+      const failure = new Error(
+        `Kuru HTTP request failed.\n\nURL: ${SECRET}\nRequest body: {"method":"eth_call"}`,
+      );
+      failure.name = "HttpRequestError";
+      throw failure;
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      })
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect(failed?.message).not.toContain("SUPERSECRETKEY");
+    expect(failed?.message).not.toContain("rpc.example");
+    expect(failed?.message).toMatch(/verification could not be completed/);
+    // Assert the descriptor, not a JSON round-trip: a plain Error has no enumerable fields to
+    // begin with, so stringifying this fixture would stay clean even with the guard removed.
+    // viem's errors are the ones that carry `url` and `body` enumerably.
+    expect(Object.prototype.propertyIsEnumerable.call(failed as object, "cause")).toBe(false);
+    // Positive control: the original is still reachable for debugging, just not on the wire.
+    expect((failed?.cause as Error).message).toContain("SUPERSECRETKEY");
   });
 
   it("finds the transport failure nested under viem's outer wrappers", async () => {
