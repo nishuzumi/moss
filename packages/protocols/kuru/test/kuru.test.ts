@@ -1036,6 +1036,34 @@ describe("Kuru", () => {
     expect(failed?.message).toContain("transport");
   });
 
+  it("sanitizes a discovery transport failure the same way verification is sanitized", async () => {
+    // Discovery is the second gate out of this adapter, and it used to interpolate the lower
+    // layer's message verbatim. undici hides the endpoint behind "fetch failed" today, but a host
+    // that instruments fetch does not, and MCP's jsonError() publishes `message` as it stands.
+    const SECRET = "https://rpc.example/v2/SUPERSECRETKEY";
+    const failing = vi.fn(async () => {
+      throw new Error(`HTTP request failed.\n\nURL: ${SECRET}\nRequest body: {"m":1}`);
+    });
+    const { registry } = offlineRegistry(MARKETS, failing);
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      })
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect(failed?.message).not.toContain("SUPERSECRETKEY");
+    expect(failed?.message).not.toContain("rpc.example");
+    expect(failed?.message).toMatch(/discovery failed \(/);
+    expect(Object.prototype.propertyIsEnumerable.call(failed as object, "cause")).toBe(false);
+    // Positive control: the original stays reachable, just not on the wire.
+    expect((failed?.cause as Error).message).toContain("SUPERSECRETKEY");
+  });
+
   it("does not trust a lower error just because its text opens with the adapter name", async () => {
     // Provenance used to be authenticated by prose: any Error whose message started with "Kuru "
     // bypassed sanitization. The prefix is not ours to control — it belongs to whatever threw —

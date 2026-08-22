@@ -695,13 +695,14 @@ export class Kuru {
    * nothing about the next, and reporting that as a definitive no is the mistake this search
    * exists to avoid.
    */
-  #outOfReach(route: Route, pricedInput: bigint): never {
-    // The route completed: the market priced its largest encodable input and fell short. That is
-    // an answer, not a gap, so it must not enter `unavailable` — the evidence goes in the text.
+  #outOfReach(): never {
+    // Internal control flow, not a report: #quoteTargetOutput matches on the code and discards
+    // this error, so nothing here reaches a caller. It exists to say "this route completed and
+    // fell short" — an answer, not a gap — which is why it must never enter `unavailable`.
     throw new KuruQuoteError(
       "TARGET_OUTPUT_UNSATISFIABLE",
       "amountOut",
-      `reaching this target needs more input than this market can price; the largest priced input was ${pricedInput} base units on ${routeTokens(route).join(" -> ")}`,
+      "route priced its largest encodable input without reaching the target",
     );
   }
 
@@ -735,7 +736,7 @@ export class Kuru {
       if (steps >= MAX_SEARCH_STEPS) {
         throw new Error("Kuru reverse search did not converge on an input for this target");
       }
-      if (ceiling !== null && high >= ceiling) this.#outOfReach(route, high);
+      if (ceiling !== null && high >= ceiling) this.#outOfReach();
       let next = high * 2n;
       // Doubling past the argument type would be refused for a reason that has nothing to do with
       // the market. Asking for the boundary directly says the same thing one step earlier: the
@@ -827,7 +828,11 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
       );
     }
     if (isOurOwnRefusal(error)) throw error;
-    throw own(new Error(`Kuru market discovery failed: ${errorMessage(error)}`));
+    // The other gate, mirroring #verifyMarket: a category, never the lower layer's text. viem and
+    // undici put the endpoint URL and the request body in `message`, and MCP's jsonError()
+    // publishes `message` verbatim, so interpolating it here republished the credential — and
+    // branding that interpolation as ours would have marked the lower layer's prose trusted.
+    throw sanitized(`Kuru market discovery failed (${categorize(asError(error))})`, error);
   } finally {
     clearTimeout(timeout);
   }
