@@ -440,7 +440,7 @@ export class Kuru {
         } catch (error) {
           if (error instanceof KuruQuoteError || isOurOwnRefusal(error)) throw error;
           throw sanitized(
-            `Kuru market verification could not be completed for ${candidate.address} (${categorize(asError(error))})`,
+            `Kuru market verification could not be completed for ${candidate.address} (${categorized(error)})`,
             error,
           );
         }
@@ -715,6 +715,11 @@ export class Kuru {
     // ponytail: monotonic reverse quote; replace with an order-book estimator if RPC volume matters.
     let high = scaleUnits(target, outputDecimals, inputDecimals);
     if (high < 1n) high = 1n;
+    // The route's input is the first leg's input, so nothing above that leg's encodable maximum
+    // can ever be asked for, whatever the route's length. Clamping the opening guess there costs
+    // no reachable answer and stops an Agent-supplied target from setting the search's width.
+    const inputCeiling = route[0] ? maxEncodableInput(route[0]) : null;
+    if (inputCeiling !== null && high > inputCeiling) high = inputCeiling;
 
     // The opening guess assumes a 1:1 price, so on any route that gains it is already too large.
     // A refusal there is evidence about the guess, not about the target: come down to a size the
@@ -832,7 +837,7 @@ async function fetchMarketCandidates(tokenIn: TokenRef, tokenOut: TokenRef) {
     // undici put the endpoint URL and the request body in `message`, and MCP's jsonError()
     // publishes `message` verbatim, so interpolating it here republished the credential — and
     // branding that interpolation as ours would have marked the lower layer's prose trusted.
-    throw sanitized(`Kuru market discovery failed (${categorize(asError(error))})`, error);
+    throw sanitized(`Kuru market discovery failed (${categorized(error)})`, error);
   } finally {
     clearTimeout(timeout);
   }
@@ -1042,10 +1047,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function tryDecodeKuruEvent<TAbi extends typeof KuruRouterAbi | typeof KuruOrderbookAbi>(
   abi: TAbi,
   change: Extract<Change, { kind: "event" }>,
@@ -1102,7 +1103,7 @@ function requireFollowingRouterTrade(
 function reportable(
   unavailable: readonly KuruUnavailableRoute[],
 ): readonly KuruUnavailableEvaluation[] {
-  return unavailable.map(({ path, error }) => ({ path, reason: categorize(error) }));
+  return unavailable.map(({ path, error }) => ({ path, reason: categorized(error) }));
 }
 
 /** An Error whose message is ours, keeping the original reachable but never enumerable. */
@@ -1165,6 +1166,25 @@ function categorize(error: Error): KuruUnavailableReason {
 /** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
 function asError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/**
+ * `categorize` off anything thrown, and never throwing itself.
+ *
+ * The classifier reads `.name` and walks `.cause`, and `asError` stringifies a non-Error. Those
+ * are ordinary property reads on an object this adapter did not build, so the layer below is free
+ * to answer them with a getter that throws. Because the classifier is called inside the template
+ * that builds the sanitized message, such a throw escapes before `sanitized()` ever runs, and the
+ * lower layer's error — the very thing being withheld — propagates verbatim. A sanitizer that can
+ * fail open is not a sanitizer, so the classification is total: unreadable provenance is exactly
+ * the "unknown" case the enum already has.
+ */
+function categorized(error: unknown): KuruUnavailableReason {
+  try {
+    return categorize(asError(error));
+  } catch {
+    return "unknown";
+  }
 }
 
 /**

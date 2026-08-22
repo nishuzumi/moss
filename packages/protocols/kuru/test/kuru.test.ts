@@ -414,6 +414,36 @@ describe("Kuru", () => {
     );
   });
 
+  it("does not let the target's digit count drive the reverse search's cost", async () => {
+    // `amountOut` is an Agent-supplied decimal string with no length limit, and the opening guess
+    // is derived from it directly. On a multi-leg route no encodable ceiling was applied, so a
+    // 20,000-digit target sent the descent halving a 20,000-digit bigint tens of thousands of
+    // times: ~84s of event loop for one route in one request, while the call count barely moved.
+    // The cost has to track the market's encodable range, not the length of the caller's string.
+    const cost = async (zeros: number) => {
+      let calls = 0;
+      const { registry } = offlineRegistry(MARKETS, undefined, () => {
+        calls += 1;
+      });
+      const started = performance.now();
+      await registry
+        .action("kuru", "quote", ACCOUNT, {
+          tokenIn: USDC_ADDRESS,
+          tokenOut: AUSD_ADDRESS,
+          amountOut: `1${"0".repeat(zeros)}`,
+        })
+        .catch(() => {});
+      return { ms: performance.now() - started, calls };
+    };
+    const small = await cost(100);
+    const huge = await cost(20_000);
+    // Two hundred times the digits must not mean measurably more work. The bound is absolute
+    // rather than a ratio because both sides are small enough for scheduler noise to dominate a
+    // ratio; unclamped the same call takes ~84s here, so this holds with three orders of margin.
+    expect(huge.ms).toBeLessThan(10_000);
+    expect(huge.calls).toBeLessThanOrEqual(small.calls);
+  }, 120_000);
+
   it("rejects API markets that the Router does not verify", async () => {
     const unverified = { ...MARKETS[0], verified: false } as MockMarket;
     const { registry } = offlineRegistry([unverified]);
@@ -1062,6 +1092,40 @@ describe("Kuru", () => {
     expect(Object.prototype.propertyIsEnumerable.call(failed as object, "cause")).toBe(false);
     // Positive control: the original stays reachable, just not on the wire.
     expect((failed?.cause as Error).message).toContain("SUPERSECRETKEY");
+  });
+
+  it.each([
+    "name",
+    "cause",
+  ] as const)("sanitizes a discovery failure whose %s getter throws", async (property) => {
+    // The classifier reads `name` and walks `cause` on an error this adapter did not build. When
+    // one of those reads throws, the throw escapes the message template, `sanitized()` never
+    // runs, and the lower layer's text reaches MCP verbatim — the leak the gate exists to stop,
+    // reached through the gate itself. Classification has to be total.
+    const SECRET = "SUPERSECRETKEY";
+    const failing = vi.fn(async () => {
+      const error = new Error("benign");
+      Object.defineProperty(error, property, {
+        get() {
+          throw new Error(`${property} getter blew up with ${SECRET}`);
+        },
+      });
+      throw error;
+    });
+    const { registry } = offlineRegistry(MARKETS, failing);
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain(SECRET);
+    expect((failed as Error).message).toBe("Kuru market discovery failed (unknown)");
   });
 
   it("does not trust a lower error just because its text opens with the adapter name", async () => {
