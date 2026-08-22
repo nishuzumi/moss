@@ -1,0 +1,20 @@
+{
+  "name": "@themoss/protocol-capricorn",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Moss protocol adapter for Capricorn CLMM on Monad",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "verify:deployment": "tsx scripts/verify-deployment.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "viem": "^2.54.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0"
+  }
+}
