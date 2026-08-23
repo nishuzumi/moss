@@ -1,13 +1,26 @@
 {
+  "sourceKind": "git",
   "repository": "https://github.com/euler-xyz/euler-interfaces",
   "commit": "df477f9d56a0c11542c26aabb63690219eecce6d",
   "committedAt": "2026-07-07",
   "vendoredAt": "2026-07-26",
   "commitAgeGuardDays": 7,
-  "files": {
-    "EVault.json": "1047c1f9e0b21a7bd75ed2a40d6814a33db0a738a438fcf43784ddddb9116ca3",
-    "EthereumVaultConnector.json": "0c76eb0287e112c7bb2d120419619cf9803760859e4812ceb86978d06c928e4e",
-    "GenericFactory.json": "43945d5da846a8bb74b2a3a3f3c4e3f15b89494d226bed03665e96907fe5362e",
-    "BasePerspective.json": "3546a04091ff334fcf7431cd234b5dab628e91b94422e88886fa807c6362b328"
-  }
+  "files": [
+    {
+      "file": "abis/EVault.json",
+      "fileSha256": "1047c1f9e0b21a7bd75ed2a40d6814a33db0a738a438fcf43784ddddb9116ca3"
+    },
+    {
+      "file": "abis/EthereumVaultConnector.json",
+      "fileSha256": "0c76eb0287e112c7bb2d120419619cf9803760859e4812ceb86978d06c928e4e"
+    },
+    {
+      "file": "abis/GenericFactory.json",
+      "fileSha256": "43945d5da846a8bb74b2a3a3f3c4e3f15b89494d226bed03665e96907fe5362e"
+    },
+    {
+      "file": "abis/BasePerspective.json",
+      "fileSha256": "3546a04091ff334fcf7431cd234b5dab628e91b94422e88886fa807c6362b328"
+    }
+  ]
 }

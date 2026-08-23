@@ -29,6 +29,8 @@ const expectedPackageOrder = [
   "@themoss/protocol-monad-cards",
   "@themoss/protocol-pendle",
   "@themoss/protocol-uniswap",
+  "@themoss/protocol-euler",
+  "@themoss/protocol-euler",
 ] as const;
 
 const packageManifest = JSON.parse(

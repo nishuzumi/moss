@@ -1,7 +1,6 @@
 {
   "name": "@themoss/protocol-euler",
   "version": "0.0.0",
-  "private": true,
   "description": "Moss protocol adapter for Euler v2 lending vaults on Monad",
   "license": "MIT",
   "type": "module",

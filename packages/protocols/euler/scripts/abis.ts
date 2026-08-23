@@ -10,6 +10,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+/** `file` is the upstream path at the pinned commit; the same relative layout
+ * is committed verbatim under abis-src/ (ADR 0007, Git-sourced vendored ABIs). */
 export interface SourceSpec {
   file: string;
   exportName: string;
@@ -19,19 +21,25 @@ export interface SourceSpec {
  * is reviewed where Capabilities and Receipt parsers live, and simulation is
  * the enforcement layer. */
 export const SOURCES: SourceSpec[] = [
-  { file: "EVault.json", exportName: "EVaultAbi" },
-  { file: "EthereumVaultConnector.json", exportName: "EthereumVaultConnectorAbi" },
-  { file: "GenericFactory.json", exportName: "GenericFactoryAbi" },
-  { file: "BasePerspective.json", exportName: "BasePerspectiveAbi" },
+  { file: "abis/EVault.json", exportName: "EVaultAbi" },
+  { file: "abis/EthereumVaultConnector.json", exportName: "EthereumVaultConnectorAbi" },
+  { file: "abis/GenericFactory.json", exportName: "GenericFactoryAbi" },
+  { file: "abis/BasePerspective.json", exportName: "BasePerspectiveAbi" },
 ];
 
+export interface VendoredFile {
+  file: string;
+  fileSha256: string;
+}
+
 export interface VendorInfo {
+  sourceKind: "git";
   repository: string;
   commit: string;
   committedAt: string;
   vendoredAt: string;
   commitAgeGuardDays: number;
-  files: Record<string, string>;
+  files: VendoredFile[];
 }
 
 interface AbiEntry {
@@ -51,14 +59,20 @@ export function sha256(contents: string): string {
 
 export function generate(packageRoot: string): string {
   const vendor = readVendorInfo(packageRoot);
+  const recordedDigest = (file: string) => {
+    const entry = vendor.files.find(({ file: candidate }) => candidate === file);
+    if (!entry) throw new Error(`${file}: no sha256 recorded in VENDOR.json`);
+    return entry.fileSha256;
+  };
 
   let generated = `// GENERATED FILE — do not edit by hand.
 //   regenerate offline from abis-src/:  pnpm gen:abis
 //   re-vendor from upstream:            pnpm update:abis
-// ABI origin: vendored (ADR 0007)
+// ABI origin: vendored (ADR 0007, sourceKind: git)
 //   source:   ${vendor.repository}
 //             abis/*.json at commit ${vendor.commit} (${vendor.committedAt}),
-//             verbatim copies in ../../abis-src/ with per-file sha256 in VENDOR.json
+//             committed verbatim under ../../abis-src/ at their original
+//             paths, with per-file fileSha256 in VENDOR.json
 //   vendored: ${vendor.vendoredAt} (commit-age guard: ${vendor.commitAgeGuardDays}d)
 //   why this source: euler-interfaces is Euler's canonical published record of
 //   deployed addresses and ABIs, and it is the same artifact the addresses in
@@ -76,11 +90,9 @@ export function generate(packageRoot: string): string {
   for (const source of SOURCES) {
     const raw = readFileSync(join(packageRoot, "abis-src", source.file), "utf8");
     const digest = sha256(raw);
-    const recorded = vendor.files[source.file];
+    const recorded = recordedDigest(source.file);
     if (recorded !== digest) {
-      throw new Error(
-        `${source.file}: sha256 ${digest} does not match VENDOR.json (${recorded ?? "absent"})`,
-      );
+      throw new Error(`${source.file}: sha256 ${digest} does not match VENDOR.json (${recorded})`);
     }
     const artifact = JSON.parse(raw) as AbiEntry[] | { abi: AbiEntry[] };
     // euler-interfaces ships bare ABI arrays; tolerate artifact wrappers too.

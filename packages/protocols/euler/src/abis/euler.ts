@@ -1,10 +1,11 @@
 // GENERATED FILE — do not edit by hand.
 //   regenerate offline from abis-src/:  pnpm gen:abis
 //   re-vendor from upstream:            pnpm update:abis
-// ABI origin: vendored (ADR 0007)
+// ABI origin: vendored (ADR 0007, sourceKind: git)
 //   source:   https://github.com/euler-xyz/euler-interfaces
 //             abis/*.json at commit df477f9d56a0c11542c26aabb63690219eecce6d (2026-07-07),
-//             verbatim copies in ../../abis-src/ with per-file sha256 in VENDOR.json
+//             committed verbatim under ../../abis-src/ at their original
+//             paths, with per-file fileSha256 in VENDOR.json
 //   vendored: 2026-07-26 (commit-age guard: 7d)
 //   why this source: euler-interfaces is Euler's canonical published record of
 //   deployed addresses and ABIs, and it is the same artifact the addresses in

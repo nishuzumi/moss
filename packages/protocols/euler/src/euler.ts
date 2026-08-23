@@ -22,7 +22,7 @@ import {
   tokenMetadata,
 } from "@themoss/core";
 import { ERC20, ERC20Abi } from "@themoss/erc";
-import { decodeEventLog, formatUnits, parseUnits, zeroAddress } from "viem";
+import { decodeEventLog, formatUnits, getFunctionSelector, parseUnits, zeroAddress } from "viem";
 import { BasePerspectiveAbi, EthereumVaultConnectorAbi, EVaultAbi } from "./abis/euler.js";
 import { EULER_EVC_ADDRESS, EULER_GOVERNED_PERSPECTIVE_ADDRESS } from "./addresses.js";
 import type {
@@ -33,7 +33,7 @@ import type {
   EulerSupplyOutcome,
   EulerWithdrawOutcome,
 } from "./types.js";
-import { EulerVaultConnector } from "./vault-connector.js";
+import { decodeConnectorEvent, EulerVaultConnector } from "./vault-connector.js";
 import { resolveVault, sameAddress, vaultHandle } from "./vaults.js";
 
 /** Bounds the `markets` Query: the governed perspective is a growing on-chain
@@ -89,12 +89,36 @@ const OPERATION_EVENT = {
   repay: "Repay",
 } as const satisfies Record<Operation, string>;
 
+/** The EVault entry each operation calls. The Vault Connector's call context
+ * must name this selector: it is how the Receipt binds its authorization
+ * evidence to this exact operation rather than to any vault interaction. */
+const OPERATION_SIGNATURE = {
+  supply: "deposit(uint256,address)",
+  withdraw: "withdraw(uint256,address,address)",
+  borrow: "borrow(uint256,address)",
+  repay: "repay(uint256,address)",
+} as const satisfies Record<Operation, string>;
+
 type ObservedTransfer = {
   token: AddressValue;
   from: AddressValue;
   to: AddressValue;
   value: bigint;
 };
+
+/** The role-bearing arguments across the four operation events. Which subset
+ * is present depends on the event; every binding below is optional only so a
+ * missing argument fails the lookup, never silently passes. */
+type OperationEventArgs = {
+  assets: bigint;
+  shares?: bigint;
+  sender?: AddressValue;
+  owner?: AddressValue;
+  receiver?: AddressValue;
+  account?: AddressValue;
+};
+
+type ConnectorEvidence = ReturnType<typeof decodeConnectorEvent>;
 
 /** Decodes a Change as an ERC-20 `Transfer`, or returns undefined. Pure. */
 function observeTransfer(change: Change): ObservedTransfer | undefined {
@@ -518,14 +542,21 @@ export class Euler {
       throw new Error(`Euler ${operation} Receipt requires a ${expected} event`);
     }
     const vaultAddress = vault;
+    const args = event.args as OperationEventArgs;
+    // The operation event names the actor every other piece of evidence must
+    // agree on: the position owner for deposits and withdrawals, the debt
+    // holder for borrows and repayments.
+    const subject = (args.owner ?? args.account) as AddressValue;
 
     const transfers: ObservedTransfer[] = [];
     let shareTransfer: ObservedTransfer | undefined;
+    const connectorEvidence: ConnectorEvidence[] = [];
     const parsed = changes.map((change) => {
       if (change.kind === "nativeTransfer") {
         throw new Error(`Unexpected Change: Euler ${operation} moved native MON`);
       }
       if (sameAddress(change.address, EULER_EVC_ADDRESS)) {
+        connectorEvidence.push(decodeConnectorEvent(change));
         return this.connector.changesReceipt([change]);
       }
       if (sameAddress(change.address, vaultAddress)) {
@@ -561,10 +592,11 @@ export class Euler {
       return this.erc20.changesReceipt([change]);
     });
 
-    const { assets } = event.args as { assets: bigint };
+    this.#bindConnectorEvidence(operation, vaultAddress, subject, connectorEvidence);
+
     const { asset, debtToken, payout } = this.#reconcile(operation, {
       vault: vaultAddress,
-      assets,
+      args,
       transfers,
       shareTransfer,
     });
@@ -572,21 +604,106 @@ export class Euler {
   }
 
   /**
+   * Binds the Vault Connector's events to this operation before any of them is
+   * stated as evidence. EVK routes each vault call through the connector once
+   * (`callThroughEVC`), so the canonical trace carries exactly one call context
+   * naming the vault, the operation's selector, and the account the operation
+   * event itself reports; every operation ends in a status check of that vault,
+   * and borrow additionally checks the account under this vault's controller.
+   * Evidence pointing at any other target, selector, or account contradicts
+   * the operation event and fails the Receipt instead of riding along.
+   */
+  #bindConnectorEvidence(
+    operation: Operation,
+    vault: AddressValue,
+    subject: AddressValue,
+    evidence: readonly ConnectorEvidence[],
+  ) {
+    const selector = getFunctionSelector(OPERATION_SIGNATURE[operation]);
+    const calls = evidence.filter((entry) => entry.eventName === "CallWithContext");
+    const context = calls[0];
+    if (calls.length !== 1 || !context) {
+      throw new Error(
+        `Euler ${operation} requires exactly one Vault Connector call context, observed ${calls.length}`,
+      );
+    }
+    const call = context.args as {
+      onBehalfOfAccount: AddressValue;
+      targetContract: AddressValue;
+      selector: string;
+    };
+    if (!sameAddress(call.targetContract, vault) || call.selector !== selector) {
+      throw new Error(
+        `Euler ${operation} call context targets ${call.targetContract}#${call.selector}, not ${vault}#${selector}`,
+      );
+    }
+    if (!sameAddress(call.onBehalfOfAccount, subject)) {
+      throw new Error(
+        `Euler ${operation} ran on behalf of ${call.onBehalfOfAccount}, contradicting ${subject} from ${OPERATION_EVENT[operation]}`,
+      );
+    }
+
+    let controllerChecked = false;
+    for (const entry of evidence) {
+      if (entry.eventName === "VaultStatusCheck") continue;
+      if (entry.eventName === "AccountStatusCheck") {
+        const { account, controller } = entry.args as {
+          account: AddressValue;
+          controller: AddressValue;
+        };
+        if (!sameAddress(account, subject)) {
+          throw new Error(
+            `Euler ${operation} account status check names ${account}, contradicting ${subject} from ${OPERATION_EVENT[operation]}`,
+          );
+        }
+        if (sameAddress(controller, vault)) controllerChecked = true;
+        continue;
+      }
+      if (entry.eventName === "OwnerRegistered") {
+        const { owner } = entry.args as { owner: AddressValue };
+        if (!sameAddress(owner, subject)) {
+          throw new Error(
+            `Euler ${operation} owner registration names ${owner}, contradicting ${subject} from ${OPERATION_EVENT[operation]}`,
+          );
+        }
+      }
+    }
+    const vaultChecked = evidence.some(
+      (entry) =>
+        entry.eventName === "VaultStatusCheck" &&
+        sameAddress((entry.args as { vault: AddressValue }).vault, vault),
+    );
+    if (!vaultChecked) {
+      throw new Error(`Euler ${operation} requires a Vault Connector status check of ${vault}`);
+    }
+    // Borrowing is the one operation whose liability can grow, so it alone
+    // owes an account status check under this vault's controller; a decrease
+    // (repay) cannot create a violation and the connector emits none.
+    if (operation === "borrow" && !controllerChecked) {
+      throw new Error(
+        `Euler ${operation} requires an account status check for ${subject} under controller ${vault}`,
+      );
+    }
+  }
+
+  /**
    * Cross-checks the operation's own event against the token movements that
-   * accompany it, so a Receipt can only state amounts two Changes agree on.
-   * This is also how the underlying asset and the vault's debt token are
-   * identified: by their role in the movement, never by assumption.
+   * accompany it, so a Receipt can only state amounts two Changes agree on —
+   * with both endpoints bound to the roles the event names. This is also how
+   * the underlying asset and the vault's debt token are identified: by their
+   * role in the movement, never by assumption.
    */
   #reconcile(
     operation: Operation,
     observed: {
       vault: AddressValue;
-      assets: bigint;
+      args: OperationEventArgs;
       transfers: readonly ObservedTransfer[];
       shareTransfer: ObservedTransfer | undefined;
     },
   ) {
-    const { vault, assets, transfers, shareTransfer } = observed;
+    const { vault, args, transfers, shareTransfer } = observed;
+    const { assets, shares, sender, owner, receiver, account } = args;
     const matching = transfers.filter((transfer) => transfer.value === assets);
 
     const unique = (candidates: readonly ObservedTransfer[], role: string) => {
@@ -610,7 +727,12 @@ export class Euler {
         );
       }
       if (operation === "supply") {
-        if (!shareTransfer) throw new Error("Euler supply Receipt requires a vault share mint");
+        this.#bindShares("supply", shareTransfer, zeroAddress, owner, shares);
+        if (!sender || !sameAddress(inflow.from, sender)) {
+          throw new Error(
+            `Euler supply Receipt requires the underlying transfer from ${sender}, the Deposit sender; observed from ${inflow.from}`,
+          );
+        }
         return { asset: inflow.token, debtToken: undefined, payout: undefined };
       }
       const debtBurn = unique(
@@ -620,6 +742,11 @@ export class Euler {
       if (!debtBurn) {
         throw new Error(
           "Euler repay Receipt requires a debt-token burn matching the repaid amount",
+        );
+      }
+      if (!account || !sameAddress(debtBurn.from, account)) {
+        throw new Error(
+          `Euler repay Receipt requires the debt burn from ${account}, the Repay account; observed from ${debtBurn.from}`,
         );
       }
       return { asset: inflow.token, debtToken: debtBurn.token, payout: undefined };
@@ -635,7 +762,12 @@ export class Euler {
       );
     }
     if (operation === "withdraw") {
-      if (!shareTransfer) throw new Error("Euler withdraw Receipt requires a vault share burn");
+      this.#bindShares("withdraw", shareTransfer, owner, zeroAddress, shares);
+      if (!receiver || !sameAddress(payout.to, receiver)) {
+        throw new Error(
+          `Euler withdraw Receipt requires the payout to ${receiver}, the Withdraw receiver; observed to ${payout.to}`,
+        );
+      }
       return { asset: payout.token, debtToken: undefined, payout };
     }
     const debtMint = unique(
@@ -647,7 +779,45 @@ export class Euler {
         "Euler borrow Receipt requires a debt-token mint matching the borrowed amount",
       );
     }
+    if (!account || !sameAddress(debtMint.to, account)) {
+      throw new Error(
+        `Euler borrow Receipt requires the debt mint to ${account}, the Borrow account; observed to ${debtMint.to}`,
+      );
+    }
     return { asset: payout.token, debtToken: debtMint.token, payout };
+  }
+
+  /**
+   * Binds the vault's own share Transfer to the operation event's actor and
+   * share count: mints go zero -> owner, burns go owner -> zero, always for
+   * exactly the shares the event reported — never for whatever amount some
+   * adjacent movement happened to carry.
+   */
+  #bindShares(
+    operation: Operation,
+    transfer: ObservedTransfer | undefined,
+    from: AddressValue | undefined,
+    to: AddressValue | undefined,
+    shares: bigint | undefined,
+  ) {
+    if (!from || !to || shares === undefined) {
+      throw new Error(
+        `Euler ${operation} Receipt requires the ${OPERATION_EVENT[operation]} share and actor arguments`,
+      );
+    }
+    if (
+      !transfer ||
+      !sameAddress(transfer.from, from) ||
+      !sameAddress(transfer.to, to) ||
+      transfer.value !== shares
+    ) {
+      const observed = transfer
+        ? `observed ${transfer.from} -> ${transfer.to} for ${transfer.value}`
+        : "observed none";
+      throw new Error(
+        `Euler ${operation} Receipt requires the vault share transfer (${from} -> ${to} for ${shares}); ${observed}`,
+      );
+    }
   }
 
   #vaultChange(

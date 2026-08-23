@@ -16,17 +16,21 @@ describe("abi provenance chain", () => {
     expect(committed).toBe(generate(packageRoot));
   });
 
-  it("every vendored file matches its recorded sha256", () => {
+  it("every vendored file matches its recorded sha256 at its original upstream path", () => {
     const vendor = readVendorInfo(packageRoot);
     for (const source of SOURCES) {
       const raw = readFileSync(join(packageRoot, "abis-src", source.file), "utf8");
-      expect(sha256(raw), `${source.file} digest`).toBe(vendor.files[source.file]);
+      const recorded = vendor.files.find(({ file }) => file === source.file);
+      expect(recorded?.fileSha256, `${source.file} digest`).toBe(sha256(raw));
     }
-    expect(Object.keys(vendor.files).sort()).toEqual(SOURCES.map(({ file }) => file).sort());
+    expect(vendor.files.map(({ file }) => file).sort()).toEqual(
+      SOURCES.map(({ file }) => file).sort(),
+    );
   });
 
   it("records a pinned upstream commit rather than a moving branch", () => {
     const vendor = readVendorInfo(packageRoot);
+    expect(vendor.sourceKind).toBe("git");
     expect(vendor.repository).toBe("https://github.com/euler-xyz/euler-interfaces");
     expect(vendor.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(vendor.commitAgeGuardDays).toBeGreaterThanOrEqual(7);

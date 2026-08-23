@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generate, SOURCES, sha256, type VendorInfo } from "./abis.js";
+import { generate, SOURCES, sha256, type VendoredFile, type VendorInfo } from "./abis.js";
 
 const REPOSITORY = "https://github.com/euler-xyz/euler-interfaces";
 const REPO_SLUG = "euler-xyz/euler-interfaces";
@@ -67,18 +67,20 @@ if (pinned) {
 }
 
 // --- vendor verbatim + record per-file digests ---
-mkdirSync(join(packageRoot, "abis-src"), { recursive: true });
-const files: Record<string, string> = {};
+mkdirSync(join(packageRoot, "abis-src", "abis"), { recursive: true });
+const files: VendoredFile[] = [];
 for (const source of SOURCES) {
-  const url = `https://raw.githubusercontent.com/${REPO_SLUG}/${commit}/abis/${source.file}`;
+  const url = `https://raw.githubusercontent.com/${REPO_SLUG}/${commit}/${source.file}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} responded ${response.status}`);
   const raw = await response.text();
-  writeFileSync(join(packageRoot, "abis-src", source.file), raw); // verbatim
-  files[source.file] = sha256(raw);
+  // verbatim, under the upstream's own abis-src/ relative path
+  writeFileSync(join(packageRoot, "abis-src", source.file), raw);
+  files.push({ file: source.file, fileSha256: sha256(raw) });
 }
 
 const vendor: VendorInfo = {
+  sourceKind: "git",
   repository: REPOSITORY,
   commit,
   committedAt,

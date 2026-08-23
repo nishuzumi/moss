@@ -244,6 +244,42 @@ function supplyChanges(assets: bigint, shares: bigint): Change[] {
   ];
 }
 
+/** The exact ordered Changes a real collateralised Euler borrow produces on
+ * Monad: connector context, the vault's own Borrow, the debt-token mint, the
+ * underlying payout, the account status check under this controller, and the
+ * vault status check. */
+function borrowChanges(assets: bigint): Change[] {
+  return [
+    eventChange(EthereumVaultConnectorAbi, EULER_EVC_ADDRESS as `0x${string}`, "CallWithContext", {
+      caller: USDC_VAULT,
+      onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+      onBehalfOfAccount: ACCOUNT,
+      targetContract: USDC_VAULT,
+      selector: "0x4b3fd148",
+    }),
+    eventChange(EVaultAbi, USDC_VAULT, "Borrow", { account: ACCOUNT, assets }),
+    eventChange(ERC20Abi, DEBT_TOKEN, "Transfer", {
+      from: zeroAddress,
+      to: ACCOUNT,
+      value: assets,
+    }),
+    eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
+      from: USDC_VAULT,
+      to: ACCOUNT,
+      value: assets,
+    }),
+    eventChange(
+      EthereumVaultConnectorAbi,
+      EULER_EVC_ADDRESS as `0x${string}`,
+      "AccountStatusCheck",
+      { account: ACCOUNT, controller: USDC_VAULT },
+    ),
+    eventChange(EthereumVaultConnectorAbi, EULER_EVC_ADDRESS as `0x${string}`, "VaultStatusCheck", {
+      vault: USDC_VAULT,
+    }),
+  ];
+}
+
 // --- offline tests ---------------------------------------------------------
 
 describe("Euler", () => {
@@ -520,39 +556,7 @@ describe("Euler", () => {
     if (capability.kind !== "capability") throw new Error("expected Capability");
 
     const assets = parseUnits("100", 6);
-    // The real ordering on Monad: connector context, the vault's own Borrow,
-    // the debt-token mint, the underlying payout, then the status checks.
-    const changes: Change[] = [
-      eventChange(
-        EthereumVaultConnectorAbi,
-        EULER_EVC_ADDRESS as `0x${string}`,
-        "CallWithContext",
-        {
-          caller: USDC_VAULT,
-          onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
-          onBehalfOfAccount: ACCOUNT,
-          targetContract: USDC_VAULT,
-          selector: "0x4b3fd148",
-        },
-      ),
-      eventChange(EVaultAbi, USDC_VAULT, "Borrow", { account: ACCOUNT, assets }),
-      eventChange(ERC20Abi, DEBT_TOKEN, "Transfer", {
-        from: zeroAddress,
-        to: ACCOUNT,
-        value: assets,
-      }),
-      eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
-        from: USDC_VAULT,
-        to: ACCOUNT,
-        value: assets,
-      }),
-      eventChange(
-        EthereumVaultConnectorAbi,
-        EULER_EVC_ADDRESS as `0x${string}`,
-        "AccountStatusCheck",
-        { account: ACCOUNT, controller: USDC_VAULT },
-      ),
-    ];
+    const changes = borrowChanges(assets);
 
     const receipt = registry.parseReceipt(capability, changes);
     expect(receipt.outcome).toEqual({
@@ -633,6 +637,20 @@ describe("Euler", () => {
         to: ACCOUNT,
         value: assets,
       }),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "AccountStatusCheck",
+        { account: ACCOUNT, controller: USDC_VAULT },
+      ),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "VaultStatusCheck",
+        {
+          vault: USDC_VAULT,
+        },
+      ),
     ];
     expect(() => registry.parseReceipt(borrow, decoyPayout)).toThrow(
       "transfers out of the vault match the reported",
@@ -669,6 +687,20 @@ describe("Euler", () => {
         to: ACCOUNT,
         value: assets,
       }),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "AccountStatusCheck",
+        { account: ACCOUNT, controller: USDC_VAULT },
+      ),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "VaultStatusCheck",
+        {
+          vault: USDC_VAULT,
+        },
+      ),
     ];
     expect(() => registry.parseReceipt(borrow, decoyDebtMint)).toThrow(
       "debt-token mints match the reported",
@@ -715,6 +747,14 @@ describe("Euler", () => {
         assets,
         shares: assets,
       }),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "VaultStatusCheck",
+        {
+          vault: USDC_VAULT,
+        },
+      ),
     ];
     expect(() => registry.parseReceipt(supply, decoyInflow)).toThrow(
       "transfers into the vault match the reported",
@@ -736,7 +776,7 @@ describe("Euler", () => {
           onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
           onBehalfOfAccount: ACCOUNT,
           targetContract: USDC_VAULT,
-          selector: "0x3384d308",
+          selector: "0xacb70815",
         },
       ),
       // Decoy burn: same amount, sits ahead of the real one.
@@ -756,9 +796,220 @@ describe("Euler", () => {
         value: assets,
       }),
       eventChange(EVaultAbi, USDC_VAULT, "Repay", { account: ACCOUNT, assets }),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "VaultStatusCheck",
+        {
+          vault: USDC_VAULT,
+        },
+      ),
     ];
     expect(() => registry.parseReceipt(repay, decoyDebtBurn)).toThrow(
       "debt-token burns match the reported",
+    );
+  });
+
+  it("binds withdrawal and connector evidence to the operation event's roles", async () => {
+    const { registry } = offlineRegistry();
+    const capability = await registry.action("euler", "withdraw", ACCOUNT, {
+      vault: WMON_VAULT,
+      amount: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+
+    const assets = parseUnits("1", 18);
+    const shares = parseUnits("0.92", 18);
+    const OTHER = getAddress("0x4444444444444444444444444444444444444444");
+    const context = () =>
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "CallWithContext",
+        {
+          caller: WMON_VAULT,
+          onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+          onBehalfOfAccount: ACCOUNT,
+          targetContract: WMON_VAULT,
+          selector: "0xb460af94",
+        },
+      );
+    const withdrawChanges = (): Change[] => [
+      context(),
+      eventChange(EVaultAbi, WMON_VAULT, "Transfer", {
+        from: ACCOUNT,
+        to: zeroAddress,
+        value: shares,
+      }),
+      eventChange(ERC20Abi, MOCK_WMON, "Transfer", {
+        from: WMON_VAULT,
+        to: ACCOUNT,
+        value: assets,
+      }),
+      eventChange(EVaultAbi, WMON_VAULT, "Withdraw", {
+        sender: ACCOUNT,
+        receiver: ACCOUNT,
+        owner: ACCOUNT,
+        assets,
+        shares,
+      }),
+      eventChange(
+        EthereumVaultConnectorAbi,
+        EULER_EVC_ADDRESS as `0x${string}`,
+        "VaultStatusCheck",
+        {
+          vault: WMON_VAULT,
+        },
+      ),
+    ];
+
+    const receipt = registry.parseReceipt(capability, withdrawChanges());
+    expect(receipt.outcome).toMatchObject({
+      operation: "withdraw",
+      vault: WMON_VAULT,
+      asset: MOCK_WMON,
+      receiver: ACCOUNT,
+      assets: assets.toString(),
+      shares: shares.toString(),
+    });
+
+    // A payout that contradicts the Withdraw receiver must not parse into an
+    // Outcome naming ACCOUNT while the nested ERC Receipt names someone else.
+    const misrouted = withdrawChanges();
+    misrouted[2] = eventChange(ERC20Abi, MOCK_WMON, "Transfer", {
+      from: WMON_VAULT,
+      to: OTHER,
+      value: assets,
+    });
+    expect(() => registry.parseReceipt(capability, misrouted)).toThrow("requires the payout to");
+
+    // The share burn is bound to the Withdraw owner and share count, so a
+    // foreign vault transfer of an unrelated amount cannot stand in for it.
+    const hijackedShares = withdrawChanges();
+    hijackedShares[1] = eventChange(EVaultAbi, WMON_VAULT, "Transfer", {
+      from: OTHER,
+      to: USDC_VAULT,
+      value: 1n,
+    });
+    expect(() => registry.parseReceipt(capability, hijackedShares)).toThrow(
+      "requires the vault share transfer",
+    );
+
+    // Supply binds its share mint just as tightly: a Deposit reporting a mint
+    // to the account cannot ride behind a Transfer between two other parties.
+    const supply = await registry.action("euler", "supply", ACCOUNT, {
+      vault: WMON_VAULT,
+      amount: "1",
+    });
+    if (supply.kind !== "capability") throw new Error("expected Capability");
+    const forgedMint = supplyChanges(assets, shares);
+    forgedMint[2] = eventChange(EVaultAbi, WMON_VAULT, "Transfer", {
+      from: OTHER,
+      to: USDC_VAULT,
+      value: 1n,
+    });
+    expect(() => registry.parseReceipt(supply, forgedMint)).toThrow(
+      "requires the vault share transfer",
+    );
+
+    // An underlying pull from anyone but the Deposit sender contradicts the
+    // event's own record of who moved the funds.
+    const thirdPartyPull = supplyChanges(assets, shares);
+    thirdPartyPull[1] = eventChange(ERC20Abi, MOCK_WMON, "Transfer", {
+      from: OTHER,
+      to: WMON_VAULT,
+      value: assets,
+    });
+    expect(() => registry.parseReceipt(supply, thirdPartyPull)).toThrow("the Deposit sender");
+  });
+
+  it("rejects replaced or missing connector evidence for a borrow", async () => {
+    const { registry } = offlineRegistry({
+      enabledCollaterals: [WMON_VAULT.toLowerCase()],
+      enabledControllers: [USDC_VAULT.toLowerCase()],
+    });
+    const capability = await registry.action("euler", "borrow", ACCOUNT, {
+      vault: USDC_VAULT,
+      amount: "100",
+      collateral: WMON_VAULT,
+    });
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+    const assets = parseUnits("100", 6);
+    const OTHER = getAddress("0x4444444444444444444444444444444444444444");
+
+    // The one call context must name this vault and this operation's selector.
+    const rerouted = borrowChanges(assets);
+    rerouted[0] = eventChange(
+      EthereumVaultConnectorAbi,
+      EULER_EVC_ADDRESS as `0x${string}`,
+      "CallWithContext",
+      {
+        caller: USDC_VAULT,
+        onBehalfOfAddressPrefix: `0x${ACCOUNT.slice(2, 40)}` as Hex,
+        onBehalfOfAccount: ACCOUNT,
+        targetContract: WMON_VAULT,
+        selector: "0x6e553f65",
+      },
+    );
+    expect(() => registry.parseReceipt(capability, rerouted)).toThrow("call context targets");
+
+    // And it must run on behalf of the account the Borrow event reports.
+    const impersonated = borrowChanges(assets);
+    impersonated[0] = eventChange(
+      EthereumVaultConnectorAbi,
+      EULER_EVC_ADDRESS as `0x${string}`,
+      "CallWithContext",
+      {
+        caller: USDC_VAULT,
+        onBehalfOfAddressPrefix: `0x${OTHER.slice(2, 40)}` as Hex,
+        onBehalfOfAccount: OTHER,
+        targetContract: USDC_VAULT,
+        selector: "0x4b3fd148",
+      },
+    );
+    expect(() => registry.parseReceipt(capability, impersonated)).toThrow("ran on behalf of");
+
+    // Dropping the vault status check removes the operation's own evidence.
+    const unchecked = borrowChanges(assets).filter((_, index) => index !== 5);
+    expect(() => registry.parseReceipt(capability, unchecked)).toThrow(
+      "requires a Vault Connector status check of",
+    );
+
+    // A status check naming a different account contradicts the Borrow.
+    const strangerChecked = borrowChanges(assets);
+    strangerChecked[4] = eventChange(
+      EthereumVaultConnectorAbi,
+      EULER_EVC_ADDRESS as `0x${string}`,
+      "AccountStatusCheck",
+      { account: OTHER, controller: USDC_VAULT },
+    );
+    expect(() => registry.parseReceipt(capability, strangerChecked)).toThrow(
+      "account status check names",
+    );
+
+    // Reordering is not tampering: evidence anywhere in the trace still binds.
+    const reordered = [...borrowChanges(assets)];
+    const [mint] = reordered.splice(2, 1);
+    if (!mint) throw new Error("expected the debt mint");
+    reordered.unshift(mint);
+    const reReceipt = registry.parseReceipt(capability, reordered);
+    expect(reReceipt.outcome).toMatchObject({ debtToken: DEBT_TOKEN, assets: assets.toString() });
+
+    // A debt mint whose actor differs from the Borrow account is rejected even
+    // when the amount matches exactly.
+    const borrowedForAnother = borrowChanges(assets);
+    borrowedForAnother[2] = eventChange(ERC20Abi, DEBT_TOKEN, "Transfer", {
+      from: zeroAddress,
+      to: OTHER,
+      value: assets,
+    });
+    borrowedForAnother[3] = eventChange(ERC20Abi, MOCK_USDC, "Transfer", {
+      from: USDC_VAULT,
+      to: OTHER,
+      value: assets,
+    });
+    expect(() => registry.parseReceipt(capability, borrowedForAnother)).toThrow(
+      "requires the debt mint to",
     );
   });
 

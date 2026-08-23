@@ -5,7 +5,7 @@
  */
 import {
   Address,
-  type Capability,
+  Capability,
   type Change,
   type Handle,
   type InferParams,
@@ -13,6 +13,8 @@ import {
   type ParamsSpec,
   PositiveDecimalString,
   type ProtocolRef,
+  Query,
+  Receipt,
   type ReceiptResult,
   Registry,
 } from "@themoss/core";
@@ -85,5 +87,90 @@ type _Inferred = InferParams<typeof _params>;
 const _typed: _Inferred = { vault: VAULT, amount: "1" };
 // @ts-expect-error — a ParamsSpec field needs both a type and a description.
 const _missing = { vault: { type: Address } } satisfies ParamsSpec;
+
+// Decorator inference on a derived Protocol: Capability/Query method params
+// must match the declared schemas, and `receipt` autocompletes to the names of
+// methods returning ReceiptResult.
+const fixtureParams = {
+  amount: { type: PositiveDecimalString, description: "Fixture amount." },
+} satisfies ParamsSpec;
+
+class DecoratorFixture extends Euler {
+  @Capability<DecoratorFixture, typeof fixtureParams>({
+    intent: "Compile-time fixture",
+    verb: "supply",
+    params: fixtureParams,
+    receipt: "supplyReceipt",
+    risk: ["fundOut"],
+  })
+  async valid(_: InferParams<typeof fixtureParams>) {
+    return [];
+  }
+
+  @Capability<DecoratorFixture, typeof fixtureParams>({
+    intent: "Compile-time fixture",
+    verb: "supply",
+    params: fixtureParams,
+    // @ts-expect-error — Receipt names are limited to methods returning ReceiptResult.
+    receipt: "missingReceipt",
+    risk: ["fundOut"],
+  })
+  async invalidReceiptName(_: InferParams<typeof fixtureParams>) {
+    return [];
+  }
+
+  // @ts-expect-error — Capability method params must match the declared parameter schemas.
+  @Capability<DecoratorFixture, typeof fixtureParams>({
+    intent: "Compile-time fixture",
+    verb: "supply",
+    params: fixtureParams,
+    receipt: "supplyReceipt",
+    risk: ["fundOut"],
+  })
+  async invalidParams(_: { amount: number }) {
+    return [];
+  }
+
+  @Query({ intent: "Compile-time query fixture", params: fixtureParams })
+  async validQuery(params: InferParams<typeof fixtureParams>) {
+    return params.amount;
+  }
+
+  // @ts-expect-error — Query method params must match the declared parameter schemas.
+  @Query({ intent: "Compile-time query fixture", params: fixtureParams })
+  async invalidQuery(_: { amount: number }) {
+    return "invalid";
+  }
+
+  @Receipt()
+  typedReceipt(changes: readonly Change[]): ReceiptResult<{ ok: true }> {
+    return {
+      kind: "receipt",
+      outcome: { ok: true },
+      text: "Fixture Receipt: valid",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+
+  // @ts-expect-error — Package parsers return ReceiptResult; Core owns final Receipt provenance.
+  @Receipt()
+  identifiedReceipt(changes: readonly Change[]): Receipt<{ ok: true }> {
+    return {
+      kind: "receipt",
+      protocol: "forged",
+      outcome: { ok: true },
+      text: "invalid",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+
+  // @ts-expect-error — Receipt parsers accept only an immutable ordered Change list.
+  @Receipt()
+  invalidReceiptArg(_: string): ReceiptResult<{ ok: true }> {
+    return { kind: "receipt", outcome: { ok: true }, text: "invalid", changes: [] };
+  }
+}
+
+void DecoratorFixture;
 
 export type { Capability };
