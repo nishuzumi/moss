@@ -1179,6 +1179,42 @@ describe("Kuru", () => {
     expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
   });
 
+  it("keeps a rejection that answers one prototype lookup and traps the next off the wire", async () => {
+    // `asError` guards its own `instanceof`, but when that lookup answers it returns the value
+    // unchanged — so what travels on is still the lower layer's object, and the next question
+    // asked of it is a second lookup. A Proxy that answers once and throws the next time walks
+    // straight through the first guard into the one behind it. Each object here answers its own
+    // first lookup and traps its own second, so the reproduction does not depend on how many
+    // routes reject or in what order.
+    let calls = 0;
+    const { registry } = offlineRegistry(MARKETS, undefined, () => {
+      calls += 1;
+      if (calls > 2) {
+        let asked = 0;
+        throw new Proxy(new Error("benign"), {
+          getPrototypeOf(target) {
+            asked += 1;
+            if (asked === 1) return Reflect.getPrototypeOf(target);
+            throw new Error("second lookup leaked SUPERSECRETKEY");
+          },
+        });
+      }
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "1.2",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
+    expect((failed as Error).message).toMatch(/^ROUTE_QUOTE_UNAVAILABLE:/);
+  });
+
   it("keeps a reverse-search rejection that traps its prototype off the wire", async () => {
     // Same hazard on the other side: `asError` and `isUnsatisfiableTarget` both examined every
     // rejected route before anything was classified, and both used `instanceof`. A trapped
@@ -1241,6 +1277,24 @@ describe("Kuru", () => {
     expect(failed).toBeInstanceOf(Error);
     expect((failed as Error).message).not.toContain(SECRET);
     expect((failed as Error).message).toBe("Kuru market discovery failed (unknown)");
+  });
+
+  it("does not read a lower error's prose as this adapter's out-of-reach verdict", async () => {
+    // The verdict used to be recognised by a message match, and the wording it looked for is not
+    // ours to control — it belongs to whatever threw. A market whose revert text happens to
+    // contain it would have been read as "the target is definitively out of reach", turning a
+    // route that merely failed into an answer. Provenance is membership now, so the text cannot
+    // impersonate it.
+    const { registry } = offlineRegistry([
+      {
+        ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+        quoteFails: true,
+        quoteFailMessage: "reverted: priced its largest encodable input and stopped there",
+      } as MockMarket,
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failure.unavailable.length).toBeGreaterThan(0);
   });
 
   it("does not trust a lower error just because its text opens with the adapter name", async () => {
@@ -1587,13 +1641,16 @@ describe("Kuru", () => {
       amountOut: "1.2",
     });
     expect(calls).toBeLessThanOrEqual(2_048);
+    // Four is the worker width; the assertion is on the burst, not on the constant.
     expect(peak).toBeLessThanOrEqual(4);
     if (quote.kind !== "query") throw new Error("expected query");
     // Whatever could not be measured within the budget is named, so the default-exhaustive swap
     // refuses on it rather than building a Capability from a comparison it cut short.
-    const gaps = (quote.data as KuruQuote).unavailable;
-    expect(gaps.length).toBeGreaterThan(0);
-    expect(gaps.map((gap) => gap.reason)).toContain("budget-exhausted");
+    // And the comparison is still complete. Bounding the work by searching fewer routes rather
+    // than by cutting searches short is what makes that possible: every route is measured by the
+    // ranking probe, so none of them is a gap, and the winner is the one that priced best rather
+    // than the one whose market address sorted first.
+    expect((quote.data as KuruQuote).unavailable).toHaveLength(0);
   }, 120_000);
 
   it("calls a multi-leg route unsatisfiable once the whole route priced its ceiling", async () => {
