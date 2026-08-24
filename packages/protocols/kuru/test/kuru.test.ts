@@ -897,6 +897,11 @@ describe("Kuru", () => {
     const failure = await quoteError(registry, { amountOut: "1" });
     expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
     expect(failure.unavailable.length).toBeGreaterThan(0);
+    // The counts in the message are the only place a caller reading MCP's error output learns how
+    // much of the comparison ran. Every one of them could be replaced with any number and the
+    // suite stayed green, so one is checked against the fixture that produced it: two markets,
+    // one via-MON route, and that route is the one that did not complete.
+    expect(failure.message).toContain("1 of 1 evaluations");
   });
 
   it("keeps a later leg's refusal at the first leg's ceiling an unmeasured route", async () => {
@@ -918,6 +923,56 @@ describe("Kuru", () => {
         ...market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 24n),
         sizePrecision: 10n ** 6n,
         failAbove: CEILING_SIZE - 1n,
+      },
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failure.unavailable.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("keeps a route whose recovery makes no progress an unmeasured route", async () => {
+    // The recovery's other exit. Doubling refuses, the descent comes back with a size the search
+    // was already standing on, and nothing was learned: the route priced no higher than before, so
+    // whether it could reach the target above that point is still unknown. Reporting it as out of
+    // reach would be a verdict earned by a probe that failed, which is the same mistake in a
+    // different place — and the two exits need separate fixtures because one returns nothing and
+    // this one returns something useless.
+    //
+    // The market panics above exactly the opening probe's size, so the descent's best answer is
+    // that same size and the loop is no further forward than when it started.
+    const PANIC_ARITHMETIC =
+      "0x4e487b710000000000000000000000000000000000000000000000000000000000000011";
+    const { registry } = offlineRegistry([
+      {
+        ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 2n),
+        failAbove: 1_000_000n,
+        quoteFailName: "ContractFunctionExecutionError",
+        quoteFailData: PANIC_ARITHMETIC,
+      },
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failure.unavailable.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("keeps a route whose descent never finds a priceable size an unmeasured route", async () => {
+    // The recovery has two exits, and both decide the same thing: when coming down from a refusal
+    // finds nothing this route will price, the route was not measured. It must stay a gap. Turning
+    // either exit into an out-of-reach verdict hands an Agent a definitive "cannot be done" for a
+    // route the search never got a number out of — the failure this whole change exists to stop.
+    //
+    // A market that answers with an arithmetic Panic above a size is what reaches them: the Panic
+    // costs a live call, so the descent is budgeted, and running that budget out leaves the search
+    // with no priceable size at all. An encode refusal would not do — those are free, the descent
+    // walks down through them, and it finds a size.
+    const PANIC_ARITHMETIC =
+      "0x4e487b710000000000000000000000000000000000000000000000000000000000000011";
+    const { registry } = offlineRegistry([
+      {
+        ...market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 1n),
+        failAbove: 100n,
+        quoteFailName: "ContractFunctionExecutionError",
+        quoteFailData: PANIC_ARITHMETIC,
       },
     ]);
     const failure = await quoteError(registry, { amountOut: "1" });
@@ -1211,6 +1266,75 @@ describe("Kuru", () => {
     expect(failed).toBeInstanceOf(Error);
     expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
   });
+
+  it("keeps a rejection whose plain property read traps off the wire", async () => {
+    // Once provenance is decided by identity, the only thing left that touches the value is the
+    // field read behind it — and an ordinary `get` is trappable like everything else. The probes
+    // above cover the prototype lookup, the private symbol, `name`, `cause` and `toString`; none
+    // of them covers this one, and without the membership test in front of it the read happens on
+    // the lower layer's object and its trap throws the request open.
+    let calls = 0;
+    const { registry } = offlineRegistry(MARKETS, undefined, () => {
+      calls += 1;
+      if (calls > 2) {
+        throw new Proxy(new Error("benign"), {
+          get(target, property, receiver) {
+            if (property === "code") throw new Error("code read leaked SUPERSECRETKEY");
+            return Reflect.get(target, property, receiver);
+          },
+        });
+      }
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "1.2",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
+    expect((failed as Error).message).toMatch(/^ROUTE_QUOTE_UNAVAILABLE:/);
+  }, 60_000);
+
+  it("keeps a non-Error rejection that traps its own stringification off the wire", async () => {
+    // `asError` falls through to `String(reason)` for anything that is not an Error, and that call
+    // runs code the thrown value chooses: `Symbol.toPrimitive` first, then `toString`. A value that
+    // throws from either escapes the classifier the same way a trapped prototype lookup does, and
+    // it runs on every rejected route before anything has been classified at all.
+    let calls = 0;
+    const { registry } = offlineRegistry(MARKETS, undefined, () => {
+      calls += 1;
+      if (calls > 2) {
+        throw new Proxy(
+          {},
+          {
+            get(target, property, receiver) {
+              if (property === Symbol.toPrimitive || property === "toString") {
+                throw new Error("stringify leaked SUPERSECRETKEY");
+              }
+              return Reflect.get(target, property, receiver);
+            },
+          },
+        );
+      }
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "1.2",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
+  }, 60_000);
 
   it("keeps a rejection that answers one prototype lookup and traps the next off the wire", async () => {
     // `asError` guards its own `instanceof`, but when that lookup answers it returns the value
