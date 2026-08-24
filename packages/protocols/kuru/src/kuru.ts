@@ -592,11 +592,12 @@ export class Kuru {
     outputDecimals: number,
   ) {
     const request = requestBudget();
-    // Rank before searching. A reverse search costs hundreds of calls on one route; a forward
+    // Probe before searching. A reverse search costs hundreds of calls on one route; a forward
     // quote costs one per leg. Asking every route what it returns for the same reference input
-    // orders them by price for a single probe each, and only the strongest few then earn the
-    // expensive search. Every route is still measured — what the ranking changes is the
-    // resolution at which the losers were measured, not whether they were.
+    // buys two things for a single probe each: an order to do the expensive work in, and the one
+    // comparison a single point actually proves — see the elimination below. It does not rank the
+    // losers out of the comparison, and an earlier version of this that did was wrong: a route's
+    // output at one input says nothing about its inverse price at another.
     const reference = scaleUnits(amountOut, outputDecimals, inputDecimals);
     // The probe goes through the search classifier, not the raw quote: a market that panics at the
     // reference input is not thereby a bad route — the search knows how to come down to a size it
@@ -645,23 +646,11 @@ export class Kuru {
       ...unranked,
     ];
 
+    // Every route is now either searched or provably beaten, so nothing needs collecting here:
+    // `unranked` routes all go into `searched`, and a priced route is either dominated or searched
+    // too. The gaps below come from the searches themselves — a route that ran out of budget, or
+    // failed for a reason the caller cannot attribute.
     const unavailable: KuruUnavailableRoute[] = [];
-    // A route the probe could not price AND the search never reached was measured at no
-    // resolution at all. That is a genuine gap. A route the probe priced and the search skipped is
-    // not: it was compared and lost.
-    const searchedSet = new Set(searched);
-    for (const index of routes.map((_, position) => position)) {
-      if (searchedSet.has(index) || dominated.has(index)) continue;
-      const result = ranked[index];
-      const error =
-        result && result.status === "rejected"
-          ? asError(result.reason)
-          : result && result.status === "fulfilled" && !result.value.ok
-            ? result.value.error
-            : own(new Error("Kuru ranking probe returned no price for this route"));
-      if (isUnsatisfiableTarget(error)) continue;
-      unavailable.push({ path: routeTokens(routes[index] as Route), error });
-    }
 
     const settled = await mapWithWorkers(searched, MAX_ROUTE_WORKERS, async (index) => ({
       route: routes[index] as Route,
