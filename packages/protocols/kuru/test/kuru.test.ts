@@ -1095,6 +1095,121 @@ describe("Kuru", () => {
   });
 
   it.each([
+    [
+      "traps the private-brand read",
+      () =>
+        new Proxy(new Error("benign"), {
+          get(target, property, receiver) {
+            if (typeof property === "symbol") throw new Error("brand read leaked SUPERSECRETKEY");
+            return Reflect.get(target, property, receiver);
+          },
+        }),
+    ],
+    [
+      "traps its own prototype lookup",
+      () =>
+        new Proxy(new Error("benign"), {
+          getPrototypeOf() {
+            throw new Error("prototype check leaked SUPERSECRETKEY");
+          },
+        }),
+    ],
+    [
+      "traps both the prototype lookup and toString",
+      () =>
+        new Proxy(new Error("benign"), {
+          get(target, property, receiver) {
+            if (property === "toString") throw new Error("toString leaked SUPERSECRETKEY");
+            return Reflect.get(target, property, receiver);
+          },
+          getPrototypeOf() {
+            throw new Error("prototype check leaked SUPERSECRETKEY");
+          },
+        }),
+    ],
+  ] as const)("sanitizes a discovery failure that %s", async (_label, build) => {
+    // The provenance gate runs before any classification, and it used to ask the thrown value two
+    // questions it is free to answer by throwing: `instanceof KuruQuoteError` goes through
+    // `getPrototypeOf`, and the private-symbol brand went through `get`. A throw there escapes
+    // before `sanitized()` runs, so the lower layer's text reached MCP verbatim — through the gate
+    // whose only job is to withhold it. Provenance is decided by identity now, and the value is
+    // never inspected to establish it.
+    const failing = vi.fn(async () => {
+      throw build();
+    });
+    const { registry } = offlineRegistry(MARKETS, failing);
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
+    expect((failed as Error).message).toBe("Kuru market discovery failed (unknown)");
+  });
+
+  it("keeps a market-verification rejection that traps its prototype off the wire", async () => {
+    // The verification gate is a second copy of the same decision, and it carried the
+    // `instanceof KuruQuoteError` that the discovery gate never had. `instanceof` consults the
+    // value's prototype, which a Proxy may trap and throw from, and that throw lands before
+    // `sanitized()` — so the lower layer's text went out through the gate meant to withhold it.
+    const { registry } = offlineRegistry(MARKETS, undefined, undefined, () => {
+      throw new Proxy(new Error("benign"), {
+        getPrototypeOf() {
+          throw new Error("verification prototype check leaked SUPERSECRETKEY");
+        },
+      });
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountIn: "1",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
+  });
+
+  it("keeps a reverse-search rejection that traps its prototype off the wire", async () => {
+    // Same hazard on the other side: `asError` and `isUnsatisfiableTarget` both examined every
+    // rejected route before anything was classified, and both used `instanceof`. A trapped
+    // prototype lookup threw straight out of the quote path.
+    let calls = 0;
+    const { registry } = offlineRegistry(MARKETS, undefined, () => {
+      calls += 1;
+      if (calls > 2) {
+        throw new Proxy(new Error("benign"), {
+          getPrototypeOf() {
+            throw new Error("unsatisfiable check leaked SUPERSECRETKEY");
+          },
+        });
+      }
+    });
+    const failed = await registry
+      .action("kuru", "quote", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "1.2",
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).not.toContain("SUPERSECRETKEY");
+    expect((failed as Error).message).toMatch(/^ROUTE_QUOTE_UNAVAILABLE:/);
+  });
+
+  it.each([
     "name",
     "cause",
   ] as const)("sanitizes a discovery failure whose %s getter throws", async (property) => {

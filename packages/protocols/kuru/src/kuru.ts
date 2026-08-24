@@ -78,6 +78,10 @@ export class KuruQuoteError extends Error {
     if (unavailable[0]) {
       Object.defineProperty(this, "cause", { value: unavailable[0].error, enumerable: false });
     }
+    // Registered here rather than tested with `instanceof` at the gate: the gate runs on values
+    // the lower layer threw, and a prototype lookup on such a value can be trapped and throw.
+    // Identity is decided when we build the error, where nothing hostile can interfere.
+    OWN_REFUSALS.add(this);
   }
 }
 
@@ -438,7 +442,11 @@ export class Kuru {
         try {
           return await this.#verifyMarket(candidate, account);
         } catch (error) {
-          if (error instanceof KuruQuoteError || isOurOwnRefusal(error)) throw error;
+          // One identity lookup, and nothing else. `error instanceof KuruQuoteError` used to stand
+          // here and went through the value's `getPrototypeOf`, which a Proxy may trap and throw
+          // from — before sanitization. KuruQuoteError registers itself on construction, so the
+          // membership test already covers it.
+          if (isOurOwnRefusal(error)) throw error;
           throw sanitized(
             `Kuru market verification could not be completed for ${candidate.address} (${categorized(error)})`,
             error,
@@ -1114,24 +1122,33 @@ function sanitized(message: string, cause: unknown): Error {
 }
 
 /**
- * Brand for refusals this package authored itself.
+ * The set of refusals this package authored itself.
  *
- * A module-private symbol, never exported: nothing below this adapter can set it. The previous
- * test — does the message start with "Kuru " — authenticated provenance with prose the lower
- * layer controls, so a viem error whose text happened to begin that way bypassed sanitization
- * and carried the endpoint URL to the wire.
+ * Membership is object identity, held in a module-private WeakSet that is never exported.
+ * Deciding provenance by identity rather than by anything read off the value is what makes this
+ * gate safe: `WeakSet.prototype.has` performs no property access and walks no prototype chain,
+ * so a thrown value cannot make the gate throw. That mattered — the previous brand was a private
+ * symbol, and reading it went through a Proxy `get` trap; the `instanceof` beside it went through
+ * `getPrototypeOf`. Either could throw, and a throw here escapes before `sanitized()` runs, which
+ * publishes the lower layer's error verbatim through the gate whose whole job is to withhold it.
+ *
+ * A Proxy wrapping one of our errors is a different object and is not a member. That is the
+ * conservative answer: it gets sanitized rather than trusted.
+ *
+ * Before the symbol there was a worse test still — does the message start with "Kuru " — which
+ * authenticated provenance with prose the lower layer controls.
  */
-const OWN_REFUSAL: unique symbol = Symbol("kuru.ownRefusal");
+const OWN_REFUSALS = new WeakSet<object>();
 
 /** Mark an Error as written by this adapter, so it may pass sanitization unchanged. */
 function own<E extends Error>(error: E): E {
-  Object.defineProperty(error, OWN_REFUSAL, { value: true, enumerable: false });
+  OWN_REFUSALS.add(error);
   return error;
 }
 
-/** Whether this adapter wrote the error itself. Structural, not textual. */
+/** Whether this adapter wrote the error itself. Identity, never inspection — cannot throw. */
 function isOurOwnRefusal(error: unknown): boolean {
-  return error instanceof Error && (error as { [OWN_REFUSAL]?: true })[OWN_REFUSAL] === true;
+  return typeof error === "object" && error !== null && OWN_REFUSALS.has(error);
 }
 
 /** Map a failure onto the closed reason set, walking the cause chain viem builds. */
@@ -1165,7 +1182,21 @@ function categorize(error: Error): KuruUnavailableReason {
 
 /** Anything thrown, as an Error, so provenance survives a non-Error rejection. */
 function asError(reason: unknown): Error {
-  return reason instanceof Error ? reason : new Error(String(reason));
+  // Both steps inspect a value this adapter did not build, and both can be trapped: a Proxy may
+  // throw from `getPrototypeOf` during `instanceof` and from `toString` or `Symbol.toPrimitive`
+  // during `String()`. This runs on every rejected route before anything is classified, so a
+  // throw here escapes the quote path entirely and publishes the lower layer's text — the same
+  // fail-open as the provenance gate, one step earlier. Neither step is allowed to be fatal.
+  try {
+    if (reason instanceof Error) return reason;
+  } catch {
+    // Traps its own prototype lookup — treat it as foreign rather than trusting it.
+  }
+  try {
+    return new Error(String(reason));
+  } catch {
+    return new Error("unreadable rejection value");
+  }
 }
 
 /**
@@ -1193,6 +1224,9 @@ function categorized(error: unknown): KuruUnavailableReason {
  * a typed error rather than a message match.
  */
 function isUnsatisfiableTarget(error: Error): boolean {
+  // Its only caller passes the output of `asError`, which never returns a value it could not
+  // inspect, so `instanceof` here is examining something this adapter built. Guarding it as well
+  // would add a branch no input can reach.
   return error instanceof KuruQuoteError && error.code === "TARGET_OUTPUT_UNSATISFIABLE";
 }
 
