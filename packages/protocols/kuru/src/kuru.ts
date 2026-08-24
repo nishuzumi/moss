@@ -96,6 +96,26 @@ const KURU_MARKET_DISCOVERY_TIMEOUT_MS = 10_000;
 const MAX_KURU_MARKET_DISCOVERY_BYTES = 1_000_000;
 const MAX_KURU_MARKET_CANDIDATES = 256;
 const MAX_KURU_MARKET_ROUTES = 256;
+/**
+ * How many routes may be in flight at once, and how much chain work one request may spend.
+ *
+ * Every route used to start at the same moment: `Promise.allSettled(routes.map(...))` over up to
+ * 256 candidates, each running its own search. Measured offline, one ordinary target-output quote
+ * came to ~10.7k simulated calls with 256 requests in flight, and a hostile one to ~57k — enough
+ * to rate-limit or saturate whatever endpoint the operator configured, from a single advisory
+ * quote. A fixed number of workers bounds the burst; the budgets bound the total.
+ *
+ * Exhausting either budget is reported as an unmeasured route, never as an answer, so the
+ * default-exhaustive swap refuses rather than spending without limit.
+ */
+const MAX_ROUTE_WORKERS = 4;
+// Measured against this suite's fixtures: the most expensive legitimate reverse search costs 156
+// calls on one route, and a 20,000-digit target costs 390. The per-route cap sits between them,
+// so an ordinary search is never truncated and a pathological one is. The request cap is the one
+// that protects the endpoint: 256 routes at roughly 42 calls each came to ~10.7k before, which is
+// not a bill one advisory quote should be able to run up.
+const MAX_CALLS_PER_ROUTE = 256;
+const MAX_CALLS_PER_REQUEST = 2_048;
 /** The markets take their `size` argument as `uint96`. This bounds that argument, not an amount. */
 const MAX_ENCODABLE_SIZE = 2n ** 96n - 1n;
 /**
@@ -515,9 +535,13 @@ export class Kuru {
   }
 
   async #quoteExactInput(routes: readonly Route[], amountIn: bigint) {
-    const settled = await Promise.allSettled(
-      routes.map(async (route) => ({ route, amountOut: await this.#quoteRoute(route, amountIn) })),
-    );
+    // Bounded width, and one allowance shared by every route. Starting all 256 at once was a
+    // burst the operator's endpoint had no say in.
+    const request = requestBudget();
+    const settled = await mapWithWorkers(routes, MAX_ROUTE_WORKERS, async (route) => ({
+      route,
+      amountOut: await this.#quoteRoute(route, amountIn, request, routeBudget()),
+    }));
     // Rejections are kept with the route they belong to: each one is a candidate that was never
     // compared, and naming it is the difference between evidence and a bare count.
     const unavailable = settled.flatMap((result, index) =>
@@ -557,12 +581,18 @@ export class Kuru {
     inputDecimals: number,
     outputDecimals: number,
   ) {
-    const settled = await Promise.allSettled(
-      routes.map(async (route) => ({
+    const request = requestBudget();
+    const settled = await mapWithWorkers(routes, MAX_ROUTE_WORKERS, async (route) => ({
+      route,
+      amountIn: await this.#requiredInput(
         route,
-        amountIn: await this.#requiredInput(route, amountOut, inputDecimals, outputDecimals),
-      })),
-    );
+        amountOut,
+        inputDecimals,
+        outputDecimals,
+        request,
+        routeBudget(),
+      ),
+    }));
     // The reverse search rejects both when a route cannot reach the target and when the
     // evaluation failed; only the second leaves the comparison incomplete. A route that priced
     // its maximum and fell short was measured, so it never enters `unavailable`.
@@ -614,9 +644,14 @@ export class Kuru {
    * past the next leg's `uint96` while a smaller input already reaches the target. Mainnet has
    * such routes, and calling them unsatisfiable turned a quotable pair into a refusal.
    */
-  async #quoteRouteForSearch(route: Route, amountIn: bigint): Promise<SearchProbe> {
+  async #quoteRouteForSearch(
+    route: Route,
+    amountIn: bigint,
+    request: CallBudget,
+    budget: CallBudget,
+  ): Promise<SearchProbe> {
     try {
-      return { ok: true, amountOut: await this.#quoteRoute(route, amountIn) };
+      return { ok: true, amountOut: await this.#quoteRoute(route, amountIn, request, budget) };
     } catch (error) {
       // Carried on the result, not on the instance: routes are probed concurrently, so a field
       // would hand one route's failure to another. The two refusals are told apart because one is
@@ -649,13 +684,15 @@ export class Kuru {
     route: Route,
     refusedAt: bigint,
     refusal: Extract<SearchProbe, { ok: false }>,
+    request: CallBudget,
+    budget: CallBudget,
   ): Promise<{ high: bigint; probe: Extract<SearchProbe, { ok: true }> } | null> {
     let above = refusedAt;
     let probe: SearchProbe = refusal;
 
     const legCeiling = route.length === 1 && route[0] ? maxEncodableInput(route[0]) : null;
     if (refusal.free && legCeiling !== null && refusedAt > legCeiling) {
-      const at = await this.#quoteRouteForSearch(route, legCeiling);
+      const at = await this.#quoteRouteForSearch(route, legCeiling, request, budget);
       if (at.ok) return { high: legCeiling, probe: at };
       above = legCeiling;
       probe = at;
@@ -672,7 +709,7 @@ export class Kuru {
         paid += 1;
       }
       high /= 2n;
-      probe = await this.#quoteRouteForSearch(route, high);
+      probe = await this.#quoteRouteForSearch(route, high, request, budget);
     }
     if (!probe.ok) return null;
 
@@ -682,7 +719,7 @@ export class Kuru {
     let priced = probe;
     while (below + 1n < ceiling) {
       const middle = (below + ceiling) / 2n;
-      const at = await this.#quoteRouteForSearch(route, middle);
+      const at = await this.#quoteRouteForSearch(route, middle, request, budget);
       if (at.ok) {
         below = middle;
         priced = at;
@@ -719,6 +756,8 @@ export class Kuru {
     target: bigint,
     inputDecimals: number,
     outputDecimals: number,
+    request: CallBudget,
+    budget: CallBudget,
   ) {
     // ponytail: monotonic reverse quote; replace with an order-book estimator if RPC volume matters.
     let high = scaleUnits(target, outputDecimals, inputDecimals);
@@ -732,16 +771,19 @@ export class Kuru {
     // The opening guess assumes a 1:1 price, so on any route that gains it is already too large.
     // A refusal there is evidence about the guess, not about the target: come down to a size the
     // route will price before concluding anything at all.
-    let probe = await this.#quoteRouteForSearch(route, high);
+    let probe = await this.#quoteRouteForSearch(route, high, request, budget);
     if (!probe.ok) {
-      const found = await this.#largestPriceable(route, high, probe);
+      const found = await this.#largestPriceable(route, high, probe, request, budget);
       if (!found) throw probe.error;
       high = found.high;
       probe = found.probe;
     }
 
-    // Derived from this leg's own precision, not assumed equal to the size argument's maximum.
-    const ceiling = route.length === 1 && route[0] ? maxEncodableInput(route[0]) : null;
+    // The route's input is the first leg's input at any length, so this bound holds for the whole
+    // route. Reaching it is only a verdict when the FULL route priced there and still fell short —
+    // that is decided below, against a size this search has already seen quoted. A later leg
+    // refusing at the ceiling is a different thing and stays an unmeasured route.
+    const ceiling = inputCeiling;
 
     // An explicit backstop, as upstream had. Termination otherwise rests entirely on viem refusing
     // to encode above `uint96`, which is a property of a dependency rather than of this search.
@@ -756,9 +798,9 @@ export class Kuru {
       // recovery below reaches the identical answer in the identical number of live calls, since
       // the refusal it saves is one viem makes without touching the network.
       if (ceiling !== null && next > ceiling) next = ceiling;
-      const doubled = await this.#quoteRouteForSearch(route, next);
+      const doubled = await this.#quoteRouteForSearch(route, next, request, budget);
       if (!doubled.ok) {
-        const found = await this.#largestPriceable(route, next, doubled);
+        const found = await this.#largestPriceable(route, next, doubled, request, budget);
         if (!found || found.high <= high) throw doubled.error;
         high = found.high;
         probe = found.probe;
@@ -781,22 +823,25 @@ export class Kuru {
       // Deliberately not the classifier: `middle` is below a size that already priced, so a
       // refusal here says nothing about the range. For a two-leg route the second leg is sized
       // from what the chain returned for the first, so it can fail on a smaller probe.
-      if ((await this.#quoteRoute(route, middle)) >= target) high = middle;
+      if ((await this.#quoteRoute(route, middle, request, budget)) >= target) high = middle;
       else low = middle;
     }
     return high;
   }
 
-  async #quoteRoute(route: Route, amountIn: bigint) {
+  async #quoteRoute(route: Route, amountIn: bigint, request: CallBudget, budget: CallBudget) {
     let amountOut = amountIn;
     for (const leg of route) {
-      amountOut = await this.#quoteFill(leg, amountOut);
+      amountOut = await this.#quoteFill(leg, amountOut, request, budget);
       if (amountOut === 0n) break;
     }
     return amountOut;
   }
 
-  async #quoteFill(leg: RouteLeg, amountIn: bigint) {
+  async #quoteFill(leg: RouteLeg, amountIn: bigint, request: CallBudget, route: CallBudget) {
+    // Recorded before the call, not after: the cost is what we asked of the chain. A leg that
+    // priced and a later one that refused to encode have both been paid for by then.
+    spendCall(request, route);
     if (leg.isBuy) {
       const size =
         (amountIn * leg.market.params.pricePrecision) /
@@ -1151,8 +1196,75 @@ function isOurOwnRefusal(error: unknown): boolean {
   return typeof error === "object" && error !== null && OWN_REFUSALS.has(error);
 }
 
+/** Refusals raised by a budget rather than by the chain, tracked by identity like our own. */
+const BUDGET_REFUSALS = new WeakSet<object>();
+
+/**
+ * One request's allowance of chain calls, shared by every route, with a per-route cap on top.
+ *
+ * Two limits rather than one: the shared total is what protects the endpoint, and the per-route
+ * cap stops a single pathological market from consuming it and starving the comparison. Spending
+ * is recorded at the leg, so a route that priced two legs before a third refused to encode has
+ * still spent two — the cost is what was asked of the chain, not what came back.
+ */
+type CallBudget = { left: number };
+
+function requestBudget(): CallBudget {
+  return { left: MAX_CALLS_PER_REQUEST };
+}
+
+function routeBudget(): CallBudget {
+  return { left: MAX_CALLS_PER_ROUTE };
+}
+
+function spendCall(request: CallBudget, route: CallBudget): void {
+  if (request.left <= 0 || route.left <= 0) {
+    const scope = route.left <= 0 ? "route" : "request";
+    const refusal = own(new Error(`Kuru quote stopped at its ${scope} call budget`));
+    BUDGET_REFUSALS.add(refusal);
+    throw refusal;
+  }
+  request.left -= 1;
+  route.left -= 1;
+}
+
+/**
+ * Run `work` over `items` with at most `width` running at once, in input order.
+ *
+ * Returns settled results rather than rejecting, so one route's failure stays that route's
+ * evidence — the same contract `Promise.allSettled` gave, without starting everything at once.
+ */
+async function mapWithWorkers<T, R>(
+  items: readonly T[],
+  width: number,
+  work: (item: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      const item = items[index];
+      if (item === undefined) return;
+      try {
+        results[index] = { status: "fulfilled", value: await work(item, index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(width, items.length)) }, () => worker()),
+  );
+  return results;
+}
+
 /** Map a failure onto the closed reason set, walking the cause chain viem builds. */
 function categorize(error: Error): KuruUnavailableReason {
+  // Ours and known, so it must not fall through to "unknown": stopping early is a decision this
+  // adapter made, and the caller can act on that differently from a market that would not answer.
+  if (BUDGET_REFUSALS.has(error)) return "budget-exhausted";
   if (isProbeBeyondEncodableSize(error)) return "unencodable-probe";
   for (
     let current: unknown = error, depth = 0;

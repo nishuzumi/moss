@@ -126,6 +126,7 @@ const reasonIsExhaustive: Record<KuruUnavailableReason, true> = {
   transport: true,
   reverted: true,
   "unencodable-probe": true,
+  "budget-exhausted": true,
   unknown: true,
 };
 const codeIsExhaustive: Record<KuruQuoteErrorCode, true> = {

@@ -33,6 +33,12 @@ export type KuruUnavailableReason =
   | "reverted"
   /** Our own probe outgrew what the market can represent, so nothing was asked of the chain. */
   | "unencodable-probe"
+  /**
+   * The route hit this request's call budget before it finished. The comparison is incomplete for
+   * a reason that is ours rather than the market's, and saying so is the difference between "the
+   * route cannot be measured" and "we chose to stop measuring it".
+   */
+  | "budget-exhausted"
   /** Anything else: kept distinct so an unclassified failure is not silently called transport. */
   | "unknown";
 

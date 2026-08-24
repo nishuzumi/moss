@@ -18,3 +18,15 @@ and beside a route that happened to price it produced a worse quote that looked 
 `swap` gains `requireExhaustive`, defaulting to true: a write refuses an incomplete comparison
 unless the caller opts out. A target that rounds below the token's smallest unit is refused rather
 than quoted with a zero floor.
+
+One quote request is now bounded in the chain work it may spend, not only in the routes it may
+consider. Routes are evaluated by a fixed number of workers instead of all at once, and calls are
+counted against a per-route cap and a shared per-request allowance, charged at the leg so a route
+that priced two legs before a third refused to encode has still spent two. `KuruUnavailableReason`
+gains `budget-exhausted` for a route stopped that way, so a caller can tell a limit this adapter
+imposed from a market that would not answer.
+
+A multi-leg route that prices at its first leg's encodable maximum and still falls short is now
+`TARGET_OUTPUT_UNSATISFIABLE` rather than an unmeasured route: the route's input is the first leg's
+input at any length, so nothing larger can be asked for. A refusal at that size is still a gap.
+

@@ -1537,25 +1537,86 @@ describe("Kuru", () => {
     expect((quote.data as { estimatedAmountIn: string }).estimatedAmountIn).toBe("600");
   });
 
-  it("does not call a multi-leg route unsatisfiable when it reaches the argument ceiling", async () => {
-    // The ceiling belongs to the probe we control, which is the first leg's size. On one leg that
-    // proves the target is out of reach: nothing larger can be asked. On two it proves nothing —
-    // the second leg was sized by the chain, never by us, and was never taken to its own limit.
-    // Here the first leg deflates hard enough that the search reaches the uint96 maximum while the
-    // second leg is still nowhere near its own, so the honest answer is an unmeasured route.
+  it("bounds the calls and the in-flight burst of one quote at the route limit", async () => {
+    // 32 markets produce the full 256 via-MON routes. Every route used to start in the same tick —
+    // `Promise.allSettled(routes.map(...))` — so one advisory quote issued a 256-wide burst and ran
+    // to roughly ten thousand calls against whatever endpoint the operator configured. Both are
+    // bounded now, and a route that runs out is reported as a gap rather than silently dropped or
+    // silently answered.
+    const many: MockMarket[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      many.push(
+        market(
+          addressAt(0x1000 + index),
+          ZERO,
+          USDC_ADDRESS,
+          18,
+          6,
+          BigInt(index + 1),
+          BigInt(index + 2),
+        ),
+      );
+      many.push(
+        market(
+          addressAt(0x2000 + index),
+          ZERO,
+          AUSD_ADDRESS,
+          18,
+          6,
+          BigInt(index + 2),
+          BigInt(index + 1),
+        ),
+      );
+    }
+    let calls = 0;
+    let inFlight = 0;
+    let peak = 0;
+    const { registry } = offlineRegistry(many, undefined, () => {
+      calls += 1;
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      // The call is issued synchronously; anything still counted at the end of this tick was
+      // issued alongside it, which is exactly the burst width the worker pool exists to bound.
+      queueMicrotask(() => {
+        inFlight -= 1;
+      });
+    });
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "1.2",
+    });
+    expect(calls).toBeLessThanOrEqual(2_048);
+    expect(peak).toBeLessThanOrEqual(4);
+    if (quote.kind !== "query") throw new Error("expected query");
+    // Whatever could not be measured within the budget is named, so the default-exhaustive swap
+    // refuses on it rather than building a Capability from a comparison it cut short.
+    for (const gap of (quote.data as KuruQuote).unavailable) {
+      expect(typeof gap.reason).toBe("string");
+    }
+  }, 120_000);
+
+  it("calls a multi-leg route unsatisfiable once the whole route priced its ceiling", async () => {
+    // The route's input IS the first leg's input, at any length. So when the full route prices at
+    // that leg's encodable maximum and still falls short, nothing larger can be asked for and the
+    // target is out of reach — a definitive answer, not a gap. This used to be reported as an
+    // unmeasured route on the reasoning that the second leg was never taken to its own limit,
+    // which does not matter: we cannot feed the route more than its first leg accepts.
     const { registry } = offlineRegistry([
       market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 10n ** 13n, 1n),
       market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 10n),
     ]);
     const failure = await quoteError(registry, { amountOut: "1" });
-    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failure.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
+    expect(failure.unavailable).toHaveLength(0);
 
     // The same route reached from the other side: an opening guess already past the ceiling, so
     // the verdict is considered on the way up rather than after a recovery. Both places decide it,
-    // and a guard on only one of them leaves the other free to answer.
+    // and a guard on only one of them leaves the other free to answer differently.
     const CEILING = 2n ** 96n - 1n;
     const fromAbove = await quoteError(registry, { amountOut: formatUnits(CEILING * 2n, 6) });
-    expect(fromAbove.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(fromAbove.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
+    expect(fromAbove.unavailable).toHaveLength(0);
   });
 
   it("takes the ceiling from the market's precision, not from the size argument's width", async () => {
@@ -2067,4 +2128,9 @@ function eventChange(
     topics: encodeEventTopics({ abi, eventName } as never) as readonly Hex[],
     data: encodeAbiParameters(types.map((type) => ({ type })) as never, values as never),
   };
+}
+
+/** A distinct, valid market address for fixtures that need many of them. */
+function addressAt(n: number): `0x${string}` {
+  return `0x${n.toString(16).padStart(40, "0")}` as `0x${string}`;
 }
