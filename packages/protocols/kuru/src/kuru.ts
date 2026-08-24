@@ -112,10 +112,6 @@ const MAX_ROUTE_WORKERS = 4;
 // Room for the fixed costs a search pays outside its logarithmic phases: the opening probe, the
 // paid descent, and the recoveries around a refusal.
 const SEARCH_BUDGET_SLACK = 16;
-// How many routes earn a full reverse search. The ranking probe measures every route; this bounds
-// only how many are then measured precisely. Eight keeps one request in the low thousands of calls
-// even at the 256-route limit, where searching every route costs tens of thousands.
-const MAX_REVERSE_SEARCHED_ROUTES = 8;
 const MAX_CALLS_PER_REQUEST = 2_048;
 /** The markets take their `size` argument as `uint96`. This bounds that argument, not an amount. */
 const MAX_ENCODABLE_SIZE = 2n ** 96n - 1n;

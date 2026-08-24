@@ -61,7 +61,12 @@ type MockMarket = {
   quoteFailDepth?: number;
   /** Prices below this size and refuses above it — the shape a real market that gives out has. */
   failAbove?: bigint;
-  /** ВРЕМЕННО: потолок выхода — имитация конечной глубины стакана. */
+  /**
+   * Ceiling on what this market returns, however large the input — the shape a finite order book
+   * has. Without it every fixture prices linearly, and a linear market's position at one input
+   * does predict its price at another, which is exactly the assumption that must not be baked
+   * into the fixtures the routing logic is judged by.
+   */
   outputCap?: bigint;
   /** Defaults to 10^baseDecimals; mainnet markets do not all agree with their token's decimals. */
   sizePrecision?: bigint;
