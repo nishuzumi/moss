@@ -698,9 +698,11 @@ export class Kuru {
       probe = at;
     }
 
-    // Only the paid steps are budgeted. viem refuses to encode without asking the chain anything,
-    // so coming down through those costs nothing and stopping early would throw away a route we
-    // could still measure; a market Panic is a live call each time, and that is what needs a limit.
+    // Two limits apply here, and they count different things. This one bounds the probes a market
+    // answers with a Panic, each of which is a live call, and deliberately does not bound the ones
+    // viem refuses to encode — stopping early on those would throw away a route we could still
+    // measure. The request and per-route budgets sit underneath and count every probe, encodable
+    // or not, because what they protect is the total amount of work one request may start.
     let high = above;
     let paid = 0;
     while (high > 1n && !probe.ok) {
@@ -1244,9 +1246,13 @@ async function mapWithWorkers<T, R>(
   const worker = async () => {
     for (;;) {
       const index = next;
+      // Stop on the index, never on the value. Reading `items[index] === undefined` as "done"
+      // would end the worker early on a list that legitimately holds one, and the routes after it
+      // would go unevaluated — absent from the winners and absent from `unavailable` alike, so the
+      // comparison would look exhaustive precisely because part of it never ran.
+      if (index >= items.length) return;
       next += 1;
-      const item = items[index];
-      if (item === undefined) return;
+      const item = items[index] as T;
       try {
         results[index] = { status: "fulfilled", value: await work(item, index) };
       } catch (reason) {

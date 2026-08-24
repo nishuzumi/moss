@@ -1591,9 +1591,9 @@ describe("Kuru", () => {
     if (quote.kind !== "query") throw new Error("expected query");
     // Whatever could not be measured within the budget is named, so the default-exhaustive swap
     // refuses on it rather than building a Capability from a comparison it cut short.
-    for (const gap of (quote.data as KuruQuote).unavailable) {
-      expect(typeof gap.reason).toBe("string");
-    }
+    const gaps = (quote.data as KuruQuote).unavailable;
+    expect(gaps.length).toBeGreaterThan(0);
+    expect(gaps.map((gap) => gap.reason)).toContain("budget-exhausted");
   }, 120_000);
 
   it("calls a multi-leg route unsatisfiable once the whole route priced its ceiling", async () => {
