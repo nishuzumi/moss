@@ -1818,6 +1818,35 @@ describe("Kuru", () => {
     expect(gaps.map((gap) => gap.reason)).toContain("budget-exhausted");
   }, 120_000);
 
+  it("counts a route that returns exactly the target at the reference input as reaching it", async () => {
+    // The elimination is a proof, and its boundary is part of the proof. Pricing is monotonic, so a
+    // route already returning the target at the reference input needs no more than that input,
+    // while a route falling short there needs strictly more — the first beats the second for
+    // certain. A route landing exactly on the target belongs to the first group; excluding it means
+    // no elimination happens at all when it is the only one that reaches, and every beaten route is
+    // then put through a full reverse search for nothing.
+    let calls = 0;
+    const markets: MockMarket[] = [
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 1n),
+    ];
+    for (let index = 0; index < 6; index += 1) {
+      markets.push(market(addressAt(0xc000 + index), USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 2n));
+    }
+    const { registry } = offlineRegistry(markets, undefined, () => {
+      calls += 1;
+    });
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as KuruQuote & { estimatedAmountIn: string }).estimatedAmountIn).toBe("1");
+    // Seven routes, one of which settles it: the six it beats are never searched. Excluding the
+    // exact hit from the proof puts all six through the search and costs five times the calls.
+    expect(calls).toBeLessThan(60);
+  }, 60_000);
+
   it("does not let a route's price at one input decide the comparison at another", async () => {
     // Ranking probes every route at one reference input and searches the strongest first. That
     // order must never decide which routes count, because depth curves cross: eight linear markets
