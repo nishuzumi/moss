@@ -61,6 +61,8 @@ type MockMarket = {
   quoteFailDepth?: number;
   /** Prices below this size and refuses above it — the shape a real market that gives out has. */
   failAbove?: bigint;
+  /** ВРЕМЕННО: потолок выхода — имитация конечной глубины стакана. */
+  outputCap?: bigint;
   /** Defaults to 10^baseDecimals; mainnet markets do not all agree with their token's decimals. */
   sizePrecision?: bigint;
   /** Defaults to 10^quoteDecimals, likewise. */
@@ -1378,8 +1380,15 @@ describe("Kuru", () => {
   it("names a probe past the encodable size as such, not as an unknown failure", async () => {
     // The search's own refusal to encode is the one gap that is not the market's fault at all, and
     // the only one a caller can act on by asking for less. Reporting it as "unknown" hides that.
+    //
+    // The direct market deliberately falls SHORT of the target at the reference input — it returns
+    // half. A market that reached the target there would prove it needs less input than this
+    // route, which falls short of it too, and the route would be eliminated before any search: a
+    // sound elimination that would leave this test nothing to look at. Falling short itself, it
+    // eliminates nothing, and still answers after its own search, so the quote succeeds and the
+    // gap this test is about is reported beside it.
     const { registry } = offlineRegistry([
-      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 21n, 20n),
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 2n),
       market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 10n ** 6n),
       market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 12n),
     ]);
@@ -1646,11 +1655,39 @@ describe("Kuru", () => {
     if (quote.kind !== "query") throw new Error("expected query");
     // Whatever could not be measured within the budget is named, so the default-exhaustive swap
     // refuses on it rather than building a Capability from a comparison it cut short.
-    // And the comparison is still complete. Bounding the work by searching fewer routes rather
-    // than by cutting searches short is what makes that possible: every route is measured by the
-    // ranking probe, so none of them is a gap, and the winner is the one that priced best rather
-    // than the one whose market address sorted first.
-    expect((quote.data as KuruQuote).unavailable).toHaveLength(0);
+    // What could not be measured within the budget is named. Ranking decides which routes are
+    // searched first, never which ones count: a route that survives elimination and is not
+    // searched has an unknown inverse price, and calling the comparison complete without it would
+    // let a worse route be returned as the answer.
+    const gaps = (quote.data as KuruQuote).unavailable;
+    expect(gaps.map((gap) => gap.reason)).toContain("budget-exhausted");
+  }, 120_000);
+
+  it("does not let a route's price at one input decide the comparison at another", async () => {
+    // Ranking probes every route at one reference input and searches the strongest first. That
+    // order must never decide which routes count, because depth curves cross: eight linear markets
+    // returning 1.5x at every size all beat, at the reference point, a market returning 2x that
+    // flattens just past it — and that market is the one needing the least input at the requested
+    // output. Treating the ones ranked below as compared-and-lost returned 66.666667 here with an
+    // empty `unavailable`, a worse route reported as an exhaustive answer.
+    const markets: MockMarket[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      markets.push(market(addressAt(0xa000 + index), USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 3n, 2n));
+    }
+    markets.push({
+      ...market(addressAt(0xb000), USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 2n, 1n),
+      outputCap: 110_000_000n,
+    });
+    const { registry } = offlineRegistry(markets);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "100",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    const data = quote.data as KuruQuote & { estimatedAmountIn: string };
+    expect(data.estimatedAmountIn).toBe("50");
+    expect(data.unavailable).toHaveLength(0);
   }, 120_000);
 
   it("calls a multi-leg route unsatisfiable once the whole route priced its ceiling", async () => {
@@ -1937,21 +1974,25 @@ function offlineRegistry(
         : (entry.sizePrecision ?? 10n ** BigInt(entry.baseDecimals));
       const unit = 10n ** BigInt(isBuy ? entry.quoteDecimals : entry.baseDecimals);
       const amountIn = (size * unit) / precision;
-      const result = isBuy
-        ? convertUnits(
-            amountIn,
-            entry.quoteDecimals,
-            entry.baseDecimals,
-            entry.buyNumerator,
-            entry.buyDenominator,
-          )
-        : convertUnits(
-            amountIn,
-            entry.baseDecimals,
-            entry.quoteDecimals,
-            entry.sellNumerator,
-            entry.sellDenominator,
-          );
+      const capped = (value: bigint) =>
+        entry.outputCap !== undefined && value > entry.outputCap ? entry.outputCap : value;
+      const result = capped(
+        isBuy
+          ? convertUnits(
+              amountIn,
+              entry.quoteDecimals,
+              entry.baseDecimals,
+              entry.buyNumerator,
+              entry.buyDenominator,
+            )
+          : convertUnits(
+              amountIn,
+              entry.baseDecimals,
+              entry.quoteDecimals,
+              entry.sellNumerator,
+              entry.sellDenominator,
+            ),
+      );
       return {
         data: encodeFunctionResult({
           abi: KuruOrderbookAbi,

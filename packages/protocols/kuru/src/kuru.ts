@@ -618,21 +618,34 @@ export class Kuru {
       if (probe?.ok && probe.amountOut > 0n) priced.push({ index, out: probe.amountOut });
       else unranked.push(index);
     });
+
+    // The one thing a single probe does prove. Route pricing is monotonic in the input, so a route
+    // that already returns the target at the reference input needs no more than that input, and a
+    // route that falls short of the target there needs strictly more. When any route reaches it,
+    // every route that did not is beaten by that one for certain — no assumption about the shape
+    // of either curve. That is the only elimination available here: comparing two routes that both
+    // reach the target says nothing about which needs less, because depth curves cross.
+    const reaches = priced.filter((entry) => entry.out >= amountOut);
+    const dominated =
+      reaches.length > 0
+        ? new Set(priced.filter((entry) => entry.out < amountOut).map((entry) => entry.index))
+        : new Set<number>();
     // Best first: more output for the same input is the better route. Ties keep discovery order,
     // so the choice never turns on a market's address — which it did when routes were searched in
     // the order they were built and the budget ran out partway. Routes the probe could not price
     // follow the ones it could, rather than being dropped: the search may still reach them.
+    // Ranking decides the ORDER work is done in, never which routes count. A route that survives
+    // the elimination above and is not searched has not been compared — its inverse price at the
+    // requested output is unknown, and reporting the comparison as complete without it would hand
+    // an Agent a worse route as the answer. Eight linear routes returning 1.5x at every size rank
+    // above a route returning 2x that flattens past the reference point, and that route is the one
+    // that needs the least input at the target. So everything not eliminated is searched, and the
+    // request budget — not this order — is what decides when the comparison has to stop.
     const searched = [
       ...priced
+        .filter((entry) => !dominated.has(entry.index))
         .sort((left, right) => (right.out > left.out ? 1 : right.out < left.out ? -1 : 0))
-        .map((entry) => entry.index)
-        .slice(0, MAX_REVERSE_SEARCHED_ROUTES),
-      // Routes the probe could not price are searched regardless of that limit, because the two
-      // outcomes are not the same kind of thing. A route the probe priced and the ranking dropped
-      // was compared and lost — an answer at coarse resolution. A route the probe could not price
-      // is simply unknown, and dropping it would report a gap for a route we chose not to look at.
-      // What stops this from being unbounded is the request budget underneath, which is also what
-      // decides the honest outcome when there are too many of them to look at.
+        .map((entry) => entry.index),
       ...unranked,
     ];
 
@@ -640,8 +653,9 @@ export class Kuru {
     // A route the probe could not price AND the search never reached was measured at no
     // resolution at all. That is a genuine gap. A route the probe priced and the search skipped is
     // not: it was compared and lost.
-    for (const index of unranked) {
-      if (searched.includes(index)) continue;
+    const searchedSet = new Set(searched);
+    for (const index of routes.map((_, position) => position)) {
+      if (searchedSet.has(index) || dominated.has(index)) continue;
       const result = ranked[index];
       const error =
         result && result.status === "rejected"
