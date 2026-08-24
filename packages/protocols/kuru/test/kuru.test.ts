@@ -899,6 +899,32 @@ describe("Kuru", () => {
     expect(failure.unavailable.length).toBeGreaterThan(0);
   });
 
+  it("keeps a later leg's refusal at the first leg's ceiling an unmeasured route", async () => {
+    // The other half of the ceiling rule. When the whole route prices at the first leg's encodable
+    // maximum and falls short, nothing larger can be asked and the target is out of reach. When a
+    // LATER leg refuses at that same size, nothing was learned about the target at all: that leg
+    // was sized by the chain from the first leg's output, never by this search, and its giving out
+    // says only that this route could not be measured there. The two look alike at the call site
+    // and mean opposite things, so they are separate tests.
+    //
+    // The second leg here prices every size below the boundary and refuses exactly at it, which is
+    // the shape that tells the two cases apart. The first leg's ceiling is the uint96 maximum, and
+    // the second leg's own size tracks the input one-for-one, so `failAbove` one below it lands the
+    // refusal precisely where a verdict would otherwise be earned.
+    const CEILING_SIZE = 2n ** 96n - 1n;
+    const { registry } = offlineRegistry([
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      {
+        ...market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 10n ** 24n),
+        sizePrecision: 10n ** 6n,
+        failAbove: CEILING_SIZE - 1n,
+      },
+    ]);
+    const failure = await quoteError(registry, { amountOut: "1" });
+    expect(failure.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(failure.unavailable.length).toBeGreaterThan(0);
+  }, 60_000);
+
   it("still calls a single-leg encode refusal an unreachable target", async () => {
     // One leg is the case where the refusal does prove it: the probe IS the market's size argument,
     // the search is monotonic, and nothing larger can be priced.
