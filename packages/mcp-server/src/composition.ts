@@ -5,6 +5,7 @@ import * as clober from "@themoss/protocol-clober";
 import * as kintsu from "@themoss/protocol-kintsu";
 import * as kuru from "@themoss/protocol-kuru";
 import * as monadCards from "@themoss/protocol-monad-cards";
+import * as morpho from "@themoss/protocol-morpho";
 import * as nadfun from "@themoss/protocol-nadfun";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
 import * as pendle from "@themoss/protocol-pendle";
@@ -21,6 +22,7 @@ export const defaultProtocolModules = [
   kintsu,
   kuru,
   monadCards,
+  morpho,
   nadfun,
   pancakeswap,
   pendle,

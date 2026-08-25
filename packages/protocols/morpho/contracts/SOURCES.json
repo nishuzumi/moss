@@ -1,0 +1,48 @@
+{
+  "repository": "morpho-org/metamorpho-v1.1",
+  "commit": "bcc003108c0fbb9f715566207c52a1d3f279c5c3",
+  "fetchedAt": "2026-08-01",
+  "solc": "0.8.21",
+  "files": [
+    {
+      "path": "src/interfaces/IMetaMorphoV1_1.sol",
+      "sha256": "dc6b44b6afb5847230eb524d2a980cd059e46a0ce8304f82737e2a0ee56bc589"
+    },
+    {
+      "path": "src/interfaces/IMetaMorphoV1_1Factory.sol",
+      "sha256": "1a61d7aff4bfc2c70469df0358d49b020ce10bd8046f9abdac252f6bfecee4cd"
+    },
+    {
+      "path": "src/libraries/EventsLib.sol",
+      "sha256": "72863918b059e63cf8df76dc848e31f290647b968724f8656fb4594e8609a383"
+    },
+    {
+      "path": "src/libraries/PendingLib.sol",
+      "sha256": "b1cd9d26ae6645119965331cc332275e09c0fb456522fc80e44729315908d8b3"
+    }
+  ],
+  "dependencies": [
+    {
+      "package": "@morpho-org/morpho-blue",
+      "stageTo": "lib/morpho-blue"
+    },
+    {
+      "package": "@openzeppelin/contracts",
+      "stageTo": "lib/openzeppelin-contracts/contracts"
+    }
+  ],
+  "artifacts": [
+    {
+      "contract": "IMetaMorphoV1_1",
+      "exportName": "MetaMorphoV1_1Abi"
+    },
+    {
+      "contract": "IMetaMorphoV1_1Factory",
+      "exportName": "MetaMorphoV1_1FactoryAbi"
+    },
+    {
+      "contract": "EventsLib",
+      "exportName": "MetaMorphoEventsAbi"
+    }
+  ]
+}
