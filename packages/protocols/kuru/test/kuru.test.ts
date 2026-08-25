@@ -216,6 +216,28 @@ describe("Kuru", () => {
     });
   });
 
+  it("prefers the direct market on a target-output tie too", async () => {
+    // The equality rule is not side-specific, but the exact-input test was the only one holding
+    // it. On the target-output side the search is ordered by the ranking probe rather than by
+    // discovery, so the winner could no longer be read off the array: a via-MON route needing the
+    // same input as a direct one came back as the answer, adding a market and a leg for a price
+    // that was not better.
+    const { registry } = offlineRegistry([
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 1n),
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 2n),
+      market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 2n, 1n),
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "0.000001",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    const data = quote.data as KuruQuote & { estimatedAmountIn: string; path: readonly string[] };
+    expect(data.estimatedAmountIn).toBe("0.000001");
+    expect(data.path).toEqual([USDC_ADDRESS, AUSD_ADDRESS]);
+  }, 60_000);
+
   it("prefers a direct market when its quote ties the best via-MON route", async () => {
     const equalDirect = market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 6n, 5n);
     const { registry } = offlineRegistry([
@@ -1789,7 +1811,7 @@ describe("Kuru", () => {
     let calls = 0;
     let inFlight = 0;
     let peak = 0;
-    const { registry } = offlineRegistry(many, undefined, () => {
+    const countCall = () => {
       calls += 1;
       inFlight += 1;
       peak = Math.max(peak, inFlight);
@@ -1798,13 +1820,19 @@ describe("Kuru", () => {
       queueMicrotask(() => {
         inFlight -= 1;
       });
-    });
+    };
+    // Verification is charged too, and counted here for the same reason: the allowance is the
+    // request's, not the quoting stage's. Counting only the quote calls let the test pass at the
+    // bound while the request as a whole went past it by however many candidates there were.
+    const { registry } = offlineRegistry(many, undefined, countCall, countCall);
     const quote = await registry.action("kuru", "quote", ACCOUNT, {
       tokenIn: USDC_ADDRESS,
       tokenOut: AUSD_ADDRESS,
       amountOut: "1.2",
     });
     expect(calls).toBeLessThanOrEqual(2_048);
+    // Both stages together, not one of them.
+    expect(calls).toBeGreaterThan(many.length);
     // Four is the worker width; the assertion is on the burst, not on the constant.
     expect(peak).toBeLessThanOrEqual(4);
     if (quote.kind !== "query") throw new Error("expected query");

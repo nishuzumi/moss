@@ -377,7 +377,12 @@ export class Kuru {
       throw new ParameterError("tokenIn and tokenOut must differ");
     }
     const side = amountSide(params);
-    const routes = await this.#discoverRoutes(params.tokenIn, params.tokenOut, account);
+    // One allowance for the whole public request, created before the first chain read rather than
+    // inside the quoting that follows it. Verification is up to 256 `verifiedMarket` reads, and it
+    // was width-limited but uncharged — so "one quote request is bounded" held for the quoting and
+    // not for the request, which is the thing the ADR and the changeset promise.
+    const request = requestBudget();
+    const routes = await this.#discoverRoutes(params.tokenIn, params.tokenOut, account, request);
     const [firstRoute] = routes;
     const firstLeg = firstRoute?.[0];
     const lastLeg = firstRoute?.at(-1);
@@ -403,7 +408,7 @@ export class Kuru {
 
     if (side.kind === "amountIn") {
       const amountIn = parseUnits(side.amount, inputDecimals);
-      const quoted = await this.#quoteExactInput(routes, amountIn);
+      const quoted = await this.#quoteExactInput(routes, amountIn, request);
       const minimumAmountOut = (quoted.amountOut * (10_000n - slippage)) / 10_000n;
       return {
         side: side.kind,
@@ -433,6 +438,7 @@ export class Kuru {
       minimumAmountOut,
       inputDecimals,
       outputDecimals,
+      request,
     );
     const executionAmountIn = (quoted.amountIn * (10_000n + slippage) + 9_999n) / 10_000n;
     return {
@@ -448,7 +454,12 @@ export class Kuru {
     };
   }
 
-  async #discoverRoutes(tokenIn: TokenRef, tokenOut: TokenRef, account: AddressValue) {
+  async #discoverRoutes(
+    tokenIn: TokenRef,
+    tokenOut: TokenRef,
+    account: AddressValue,
+    request: QuoteRequest,
+  ) {
     const candidates = await fetchMarketCandidates(tokenIn, tokenOut);
     // Verification is the one on-chain read outside the quoting path, and it used to escape raw:
     // a provider hiccup here threw viem's error, whose message carries the RPC URL and request
@@ -464,6 +475,9 @@ export class Kuru {
     // only the quoting made the claim "one quote request is bounded" narrower than it read.
     const verified = await mapWithWorkers(candidates, MAX_ROUTE_WORKERS, async (candidate) => {
       try {
+        // Charged like any other read, against a per-candidate allowance of one: verifying a market
+        // is a single `verifiedMarket` call, and what needs bounding is how many one request makes.
+        spendCall(request, { left: 1 });
         return await this.#verifyMarket(candidate, account);
       } catch (error) {
         // One identity lookup, and nothing else. `error instanceof KuruQuoteError` used to stand
@@ -544,10 +558,10 @@ export class Kuru {
     };
   }
 
-  async #quoteExactInput(routes: readonly Route[], amountIn: bigint) {
-    // Bounded width, and one allowance shared by every route. Starting all 256 at once was a
-    // burst the operator's endpoint had no say in.
-    const request = requestBudget();
+  async #quoteExactInput(routes: readonly Route[], amountIn: bigint, request: QuoteRequest) {
+    // Bounded width, and the request's own allowance — already part-spent by verification, which
+    // is the point: what it bounds is the request, not this stage of it. Starting all 256 routes
+    // at once was a burst the operator's endpoint had no say in.
     const settled = await mapWithWorkers(routes, MAX_ROUTE_WORKERS, async (route) => ({
       route,
       amountOut: await this.#quoteRoute(route, amountIn, request, routeBudget(route)),
@@ -590,8 +604,8 @@ export class Kuru {
     amountOut: bigint,
     inputDecimals: number,
     outputDecimals: number,
+    request: QuoteRequest,
   ) {
-    const request = requestBudget();
     // Probe before searching. A reverse search costs hundreds of calls on one route; a forward
     // quote costs one per leg. Asking every route what it returns for the same reference input
     // buys two things for a single probe each: an order to do the expensive work in, and the one
@@ -654,6 +668,11 @@ export class Kuru {
 
     const settled = await mapWithWorkers(searched, MAX_ROUTE_WORKERS, async (index) => ({
       route: routes[index] as Route,
+      // Where this route sits in discovery order, carried because the search no longer runs in
+      // that order. Routes are discovered shortest-first, and the winner on an equal quote is
+      // defined to be the earlier one; ranking reorders the work, so the position has to travel
+      // with the result rather than be read off the array it ends up in.
+      discovered: index,
       amountIn: await this.#requiredInput(
         routes[index] as Route,
         amountOut,
@@ -699,7 +718,19 @@ export class Kuru {
     }
     // Only `unavailable` marks the comparison partial: a route that completed and cannot reach
     // the target was measured, and saying so would overstate the gap.
-    const best = quoted.reduce((left, right) => (right.amountIn < left.amountIn ? right : left));
+    // Least input wins; on an equal input the shorter route, and on an equal length the one
+    // discovered first. Before ranking existed this fell out of the array order — routes arrived
+    // shortest-first and a strict `<` kept the incumbent — but the search is ordered by the
+    // probe now, so the rule is written down instead of inherited. A via-MON route that ties a
+    // direct one on price adds a market and a leg for nothing, which `CONTEXT.md` and ADR 0012
+    // both say the direct path wins.
+    const best = quoted.reduce((left, right) => {
+      if (right.amountIn !== left.amountIn) return right.amountIn < left.amountIn ? right : left;
+      if (right.route.length !== left.route.length) {
+        return right.route.length < left.route.length ? right : left;
+      }
+      return right.discovered < left.discovered ? right : left;
+    });
     return { ...best, unavailable };
   }
 
