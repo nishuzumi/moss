@@ -3,6 +3,7 @@ import {
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
+  type ReceiptResult,
   Registry,
 } from "@themoss/core";
 import { encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
@@ -12,6 +13,16 @@ import { EXAMPLE_VAULT_ADDRESS, ExampleProtocol } from "../src/index.js";
 
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package. New protocols scaffolded
+// from this template should copy this helper into their own test file.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
 
 describe("Protocol template", () => {
   it("registers its exported Protocol directly and builds one transaction", async () => {
@@ -54,5 +65,24 @@ describe("Protocol template", () => {
       kind: "change",
       text: `Native MON Transfer: 1000000000000000000 from ${ACCOUNT} to Package(Template:Vault)`,
     });
+
+    // Canonical Receipt text-projection lock. New protocols scaffolded from this
+    // template should copy this block. Lock the exact leaf text an Agent reads
+    // for each Change class in order. Raw base-unit amounts plus label or raw
+    // address rendering are the accepted convention.
+    const nativeText = `Native MON Transfer: 1000000000000000000 from ${ACCOUNT} to Package(Template:Vault)`;
+    const depositText = `Example Deposit: 1000000000000000000 by ${ACCOUNT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      nativeText,
+      depositText,
+    ]);
+
+    // Top-level Receipt text. This parser summarizes with its deposit line, so
+    // confirm the exact string rather than assuming a joined form.
+    expect(receipt.text).toBe(depositText);
+
+    // The ordered leaf-text sequence, flattened exactly as receiptTexts projects
+    // it to Agents, locks order and completeness together.
+    expect(flattenReceiptTexts(receipt)).toEqual([nativeText, depositText]);
   });
 });
