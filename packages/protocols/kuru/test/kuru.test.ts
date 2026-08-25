@@ -216,6 +216,33 @@ describe("Kuru", () => {
     });
   });
 
+  it("settles a tie between equally short routes by discovery order, not by the probe", async () => {
+    // Third level of the same rule, and the one that makes the answer deterministic. Two direct
+    // markets need the same input for this target and are the same length, so neither of the first
+    // two levels decides. What must not decide it is the ranking probe: one of them returns more at
+    // the reference input purely because it saturates later, and letting that pick the winner means
+    // the market a caller trades against depends on a measurement taken somewhere else entirely.
+    // Discovery order is stable and independent of price, so it is what breaks the tie.
+    const early = addressAt(0x1000);
+    const late = addressAt(0x9000);
+    const { registry } = offlineRegistry([
+      market(early, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 1n),
+      { ...market(late, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 2n, 1n), outputCap: 3_000_000n },
+    ]);
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: AUSD_ADDRESS,
+      amountOut: "0.000001",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const nodes = flattenCapabilityTree(capability);
+    const swap = nodes[nodes.length - 1];
+    if (!swap) throw new Error("missing swap transaction");
+    const decoded = decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data });
+    const markets = (decoded.args as readonly unknown[])[0] as readonly string[];
+    expect(markets[0]?.toLowerCase()).toBe(early.toLowerCase());
+  }, 60_000);
+
   it("prefers the direct market on a target-output tie too", async () => {
     // The equality rule is not side-specific, but the exact-input test was the only one holding
     // it. On the target-output side the search is ordered by the ranking probe rather than by

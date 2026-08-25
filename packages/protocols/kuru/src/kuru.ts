@@ -595,6 +595,10 @@ export class Kuru {
         `all ${routes.length} verified routes completed and quoted zero output for this input amount`,
       );
     }
+    // Strict on purpose, and correct only because this side does not reorder: routes arrive
+    // shortest-first from discovery, so keeping the incumbent on a tie IS the documented rule. The
+    // target-output side relied on exactly this and stopped being right the moment ranking
+    // reordered it — anything that reorders here has to bring the rule with it.
     const best = quoted.reduce((left, right) => (right.amountOut > left.amountOut ? right : left));
     return { ...best, unavailable };
   }
@@ -1364,7 +1368,18 @@ function routeBudget(route: Route): CallBudget {
 function spendCall(request: CallBudget, route: CallBudget): void {
   if (request.left <= 0 || route.left <= 0) {
     const scope = route.left <= 0 ? "route" : "request";
-    const refusal = own(new Error(`Kuru quote stopped at its ${scope} call budget`));
+    // Typed, because this can escape as the request's own answer rather than as one route's.
+    // Inside the quoting it is caught per route and reported as a `budget-exhausted` gap; during
+    // verification there is no route to attach it to and it leaves as the result. A plain Error
+    // there gave a consumer branching on `code` nothing at all. Reachability rests only on
+    // MAX_KURU_MARKET_CANDIDATES staying below MAX_CALLS_PER_REQUEST, which nothing enforces.
+    const refusal = own(
+      new KuruQuoteError(
+        "ROUTE_QUOTE_UNAVAILABLE",
+        "amountIn",
+        `stopped at its ${scope} call budget`,
+      ),
+    );
     BUDGET_REFUSALS.add(refusal);
     throw refusal;
   }
