@@ -112,6 +112,7 @@ describe("moss MCP server", () => {
     expect(stakes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ protocol: "apriori", method: "stake", kind: "capability" }),
+        expect.objectContaining({ protocol: "kintsu", method: "deposit", kind: "capability" }),
       ]),
     );
     const supplies = parseText(
