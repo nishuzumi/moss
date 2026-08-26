@@ -12,6 +12,7 @@
     "build": "echo \"examples are not built\" && exit 0"
   },
   "dependencies": {
+    "@themoss/agent": "workspace:*",
     "@themoss/core": "workspace:*",
     "@themoss/erc": "workspace:*",
     "@themoss/protocol-kuru": "workspace:*",

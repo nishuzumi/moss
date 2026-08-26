@@ -6,6 +6,7 @@
   "linked": [
     [
       "@themoss/core",
+      "@themoss/agent",
       "@themoss/simulator",
       "@themoss/erc",
       "@themoss/system",
