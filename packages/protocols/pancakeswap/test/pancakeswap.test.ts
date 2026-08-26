@@ -363,16 +363,36 @@ describe("PancakeSwap swapReceipt", () => {
       amountOut: "450000000000000000",
     });
 
-    // A native MON transfer renders through its own leaf at the top level; the
-    // ERC-20 output transfer is a delegated nested leaf. The fix leaves the leaf
-    // texts and their order untouched: only the derived Outcome and the
-    // top-level text rendered from it stop naming the sender account.
-    const nativeText = `Native MON Transfer: 500000000000000000 from ${ACCOUNT} to ${wmonAddr}`;
+    // Native and ERC-20 movements use the same canonical transfer evidence shape.
+    expect(receipt.changes[0]).toMatchObject({
+      kind: "receipt",
+      protocol: "erc20",
+      outcome: [
+        {
+          operation: "transfer",
+          token: NATIVE,
+          from: ACCOUNT,
+          to: wmonAddr,
+          amount: "500000000000000000",
+        },
+      ],
+      changes: [
+        {
+          kind: "change",
+          data: {
+            operation: "transfer",
+            token: NATIVE,
+            from: ACCOUNT,
+            to: wmonAddr,
+            amount: "500000000000000000",
+          },
+        },
+      ],
+    });
+    expect(firstChange(receipt.changes[0])).toBe(changes[0]);
+    expect(firstChange(receipt.changes[1])).toBe(changes[1]);
+    const nativeText = `ERC20 Transfer: 500000000000000000 ${NATIVE} from ${ACCOUNT} to ${wmonAddr}`;
     const outTransferText = `ERC20 Transfer: 450000000000000000 ${TOKEN_B} from ${wmonAddr} to ${ACCOUNT}`;
-    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
-      nativeText,
-      null,
-    ]);
     expect(flattenReceiptTexts(receipt)).toEqual([nativeText, outTransferText]);
     // The top-level `receipt.text` is now pinned for a native input: it names the
     // NATIVE sentinel as tokenIn where it used to render the sender account. #178
