@@ -44,6 +44,7 @@ import {
   Receipt,
   type ReceiptChange,
   type ReceiptResult,
+  type TokenRef,
   TokenReference,
   type TransactionNode,
 } from "@themoss/core";
@@ -86,7 +87,9 @@ const swapParams = {
 
 type SwapOutcome = {
   operation: "swap";
-  tokenIn: AddressValue;
+  // A native-MON input is reported as the NATIVE sentinel, not the sender
+  // account, so tokenIn is a TokenRef. tokenOut is always an ERC-20 in v1.
+  tokenIn: TokenRef;
   tokenOut: AddressValue;
   amountIn: string;
   amountOut: string;
@@ -399,11 +402,14 @@ export class PancakeSwap {
 
     const outcome: SwapOutcome = {
       operation: "swap",
-      tokenIn: (firstTransfer?.kind === "erc20"
-        ? firstTransfer.token
-        : firstTransfer?.kind === "native"
-          ? firstTransfer.from
-          : "0x0000000000000000000000000000000000000000") as AddressValue,
+      // A native-MON input is the NATIVE sentinel, not the sender account the
+      // nativeTransfer leaf records as `from`. The ERC-20 input path is unchanged.
+      tokenIn:
+        firstTransfer?.kind === "erc20"
+          ? (firstTransfer.token as AddressValue)
+          : firstTransfer?.kind === "native"
+            ? NATIVE
+            : ("0x0000000000000000000000000000000000000000" as AddressValue),
       tokenOut: (lastTransfer?.kind === "erc20"
         ? lastTransfer.token
         : lastTransfer?.kind === "native"
