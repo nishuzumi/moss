@@ -1873,6 +1873,72 @@ describe("Kuru", () => {
     expect(gaps.map((gap) => gap.reason)).toContain("budget-exhausted");
   }, 120_000);
 
+  it("reports the request's own side on a budget refusal retained as evidence", async () => {
+    // The budget refusal is deliberately typed so a consumer can branch on `code`, and the live
+    // route errors are deliberately retained on the exported error for inspection. Both promises
+    // are only worth as much as the fields on them: a target-output request whose evidence says
+    // `amountIn` tells an SDK consumer the caller asked for something it never asked for. The side
+    // belongs to the request, so it has to be carried from the request rather than assumed.
+    const many: MockMarket[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      many.push(
+        market(
+          addressAt(0x1000 + index),
+          ZERO,
+          USDC_ADDRESS,
+          18,
+          6,
+          BigInt(index + 1),
+          BigInt(index + 2),
+        ),
+      );
+      many.push(
+        market(
+          addressAt(0x2000 + index),
+          ZERO,
+          AUSD_ADDRESS,
+          18,
+          6,
+          BigInt(index + 2),
+          BigInt(index + 1),
+        ),
+      );
+    }
+    const { registry } = offlineRegistry(many);
+    const refusal = await registry
+      .action("kuru", "swap", ACCOUNT, {
+        tokenIn: USDC_ADDRESS,
+        tokenOut: AUSD_ADDRESS,
+        amountOut: "1.2",
+      })
+      .then(
+        () => {
+          throw new Error("expected the exhaustive swap to refuse");
+        },
+        (error: unknown) => error,
+      );
+    if (!(refusal instanceof KuruQuoteError)) throw new Error("expected a KuruQuoteError");
+    expect(refusal.side).toBe("amountOut");
+    // The retained cause is the route's own budget refusal; it answers the same request.
+    const cause = refusal.cause;
+    if (!(cause instanceof KuruQuoteError))
+      throw new Error("expected a retained KuruQuoteError cause");
+    expect(cause.side).toBe("amountOut");
+    // The retained entries carry the live Error rather than a category, which is the whole point
+    // of keeping them: a consumer inspects them programmatically. Every budget refusal among them
+    // answers this request, so every one of them has to say so.
+    const retained = refusal.unavailable
+      .map((gap) => gap.error)
+      .filter((error): error is KuruQuoteError => error instanceof KuruQuoteError);
+    const budgetRefusals = retained.filter(
+      (error) => error.code === "ROUTE_QUOTE_UNAVAILABLE" && /call budget/.test(error.message),
+    );
+    expect(budgetRefusals.length).toBeGreaterThan(0);
+    for (const error of budgetRefusals) {
+      expect(error.side).toBe("amountOut");
+    }
+  }, 120_000);
+
   it("counts a route that returns exactly the target at the reference input as reaching it", async () => {
     // The elimination is a proof, and its boundary is part of the proof. Pricing is monotonic, so a
     // route already returning the target at the reference input needs no more than that input,

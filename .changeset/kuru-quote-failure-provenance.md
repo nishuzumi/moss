@@ -29,4 +29,3 @@ imposed from a market that would not answer.
 A multi-leg route that prices at its first leg's encodable maximum and still falls short is now
 `TARGET_OUTPUT_UNSATISFIABLE` rather than an unmeasured route: the route's input is the first leg's
 input at any length, so nothing larger can be asked for. A refusal at that size is still a gap.
-

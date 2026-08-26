@@ -381,7 +381,7 @@ export class Kuru {
     // inside the quoting that follows it. Verification is up to 256 `verifiedMarket` reads, and it
     // was width-limited but uncharged — so "one quote request is bounded" held for the quoting and
     // not for the request, which is the thing the ADR and the changeset promise.
-    const request = requestBudget();
+    const request = requestBudget(side.kind);
     const routes = await this.#discoverRoutes(params.tokenIn, params.tokenOut, account, request);
     const [firstRoute] = routes;
     const firstLeg = firstRoute?.[0];
@@ -670,20 +670,23 @@ export class Kuru {
     // failed for a reason the caller cannot attribute.
     const unavailable: KuruUnavailableRoute[] = [];
 
-    const settled = await mapWithWorkers(searched, MAX_ROUTE_WORKERS, async (index) => ({
-      route: routes[index] as Route,
+    // `searched` holds route indices, so the worker's item IS the index into `routes` — named for
+    // what it is rather than `index`, which is also `mapWithWorkers`' own position argument and
+    // reads as the opposite thing in the one place an ordering mistake already happened.
+    const settled = await mapWithWorkers(searched, MAX_ROUTE_WORKERS, async (routeIndex) => ({
+      route: routes[routeIndex] as Route,
       // Where this route sits in discovery order, carried because the search no longer runs in
       // that order. Routes are discovered shortest-first, and the winner on an equal quote is
       // defined to be the earlier one; ranking reorders the work, so the position has to travel
       // with the result rather than be read off the array it ends up in.
-      discovered: index,
+      discovered: routeIndex,
       amountIn: await this.#requiredInput(
-        routes[index] as Route,
+        routes[routeIndex] as Route,
         amountOut,
         inputDecimals,
         outputDecimals,
         request,
-        routeBudget(routes[index] as Route),
+        routeBudget(routes[routeIndex] as Route),
       ),
     }));
     // The reverse search rejects both when a route cannot reach the target and when the
@@ -693,8 +696,8 @@ export class Kuru {
       if (result.status !== "rejected") return;
       const error = asError(result.reason);
       if (isUnsatisfiableTarget(error)) return;
-      const index = searched[position] as number;
-      unavailable.push({ path: routeTokens(routes[index] as Route), error });
+      const routeIndex = searched[position] as number;
+      unavailable.push({ path: routeTokens(routes[routeIndex] as Route), error });
     });
     const quoted = settled.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : [],
@@ -1342,10 +1345,18 @@ type CallBudget = { left: number };
  * markets are near-identical. It is a real reduction, not a way to make an unbounded comparison
  * affordable.
  */
-type QuoteRequest = CallBudget & { memo: Map<string, Promise<bigint>> };
+type QuoteRequest = CallBudget & {
+  memo: Map<string, Promise<bigint>>;
+  /**
+   * The side the caller actually asked for. A budget refusal is raised deep inside route
+   * evaluation, where only the route is in scope, yet it answers this request — so the side has to
+   * travel with the allowance rather than be assumed at the throw site.
+   */
+  side: KuruQuote["amountSide"];
+};
 
-function requestBudget(): QuoteRequest {
-  return { left: MAX_CALLS_PER_REQUEST, memo: new Map() };
+function requestBudget(side: KuruQuote["amountSide"]): QuoteRequest {
+  return { left: MAX_CALLS_PER_REQUEST, memo: new Map(), side };
 }
 
 /**
@@ -1365,18 +1376,20 @@ function routeBudget(route: Route): CallBudget {
   return { left: legs * (MAX_SEARCH_STEPS + 3 * bits + SEARCH_BUDGET_SLACK) };
 }
 
-function spendCall(request: CallBudget, route: CallBudget): void {
+function spendCall(request: QuoteRequest, route: CallBudget): void {
   if (request.left <= 0 || route.left <= 0) {
     const scope = route.left <= 0 ? "route" : "request";
-    // Typed, because this can escape as the request's own answer rather than as one route's.
-    // Inside the quoting it is caught per route and reported as a `budget-exhausted` gap; during
-    // verification there is no route to attach it to and it leaves as the result. A plain Error
-    // there gave a consumer branching on `code` nothing at all. Reachability rests only on
-    // MAX_KURU_MARKET_CANDIDATES staying below MAX_CALLS_PER_REQUEST, which nothing enforces.
+    // Typed, because a consumer branching on `code` got nothing from a plain Error here. Two paths
+    // reach it. Inside route evaluation it is caught per route, reported as a `budget-exhausted`
+    // gap, and retained on the thrown error as that gap's evidence; during verification there is no
+    // route to attach it to and it leaves as the request's own answer. That second path stays out
+    // of reach only while MAX_KURU_MARKET_CANDIDATES sits below MAX_CALLS_PER_REQUEST, which
+    // nothing enforces. Either way it answers the caller's request, so it reports the request's
+    // side — assuming a side here made a target-output refusal describe itself as `amountIn`.
     const refusal = own(
       new KuruQuoteError(
         "ROUTE_QUOTE_UNAVAILABLE",
-        "amountIn",
+        request.side,
         `stopped at its ${scope} call budget`,
       ),
     );
