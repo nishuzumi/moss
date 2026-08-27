@@ -33,7 +33,6 @@ import {
   createHandle,
   type Handle,
   type InferParams,
-  type JsonSafeValue,
   type MossRuntime,
   NATIVE,
   type ParamsSpec,
@@ -42,8 +41,8 @@ import {
   type ProtocolRef,
   Query,
   Receipt,
-  type ReceiptChange,
   type ReceiptResult,
+  type TokenRef,
   TokenReference,
   type TransactionNode,
 } from "@themoss/core";
@@ -86,7 +85,9 @@ const swapParams = {
 
 type SwapOutcome = {
   operation: "swap";
-  tokenIn: AddressValue;
+  // A native-MON input is reported as the NATIVE sentinel, not the sender
+  // account, so tokenIn is a TokenRef. tokenOut is always an ERC-20 in v1.
+  tokenIn: TokenRef;
   tokenOut: AddressValue;
   amountIn: string;
   amountOut: string;
@@ -310,105 +311,54 @@ export class PancakeSwap {
 
   @Receipt()
   swapReceipt(changes: readonly Change[]): ReceiptResult<SwapOutcome> {
-    const parsed: readonly (ReceiptChange | ReceiptResult<JsonSafeValue>)[] = changes.map(
-      (change) => {
-        // Delegate ERC-20 event parsing to the canonical erc20.changesReceipt,
-        // which classifies Transfer, Approval, and unknown events uniformly.
-        if (change.kind === "event") {
-          return this.erc20.changesReceipt([change]);
-        }
+    // ERC owns the canonical transfer evidence for both token events and native MON movement.
+    const parsed = changes.map((change) => this.erc20.changesReceipt([change]));
 
-        // Native MON transfers: WMON deposit/withdrawal or forwarded value.
-        if (change.kind === "nativeTransfer") {
-          const receiptChange: ReceiptChange = {
-            kind: "change",
-            change,
-            data: {
-              operation: "swap" as const,
-              tokenIn: change.from,
-              tokenOut: change.to,
-              amountIn: change.value,
-              amountOut: change.value,
-            },
-            text: `Native MON Transfer: ${change.value} from ${change.from} to ${change.to}`,
-          };
-          return receiptChange;
-        }
-
-        const receiptChange: ReceiptChange = {
-          kind: "change",
-          change,
-          data: null,
-          text: `Unrecognized Change kind`,
-        };
-        return receiptChange;
-      },
-    );
-
-    // Derive the outcome from the nested erc20 receipts and nativeTransfer records:
+    // Derive the outcome from the canonical nested transfer receipts:
     //   first transfer  → amountIn / tokenIn
     //   last  transfer  → amountOut / tokenOut
-    let firstTransfer:
-      | { kind: "erc20"; token: string; from: string; to: string; value: string }
-      | { kind: "native"; from: string; to: string; value: string }
-      | undefined;
-    let lastTransfer:
-      | { kind: "erc20"; token: string; from: string; to: string; value: string }
-      | { kind: "native"; from: string; to: string; value: string }
-      | undefined;
+    type ParsedTransfer = {
+      token: TokenRef;
+      from: string;
+      to: string;
+      value: string;
+    };
+    let firstTransfer: ParsedTransfer | undefined;
+    let lastTransfer: ParsedTransfer | undefined;
 
     for (const item of parsed) {
-      if (item.kind === "change" && item.data && typeof item.data === "object") {
-        const d = item.data as Record<string, unknown>;
-        if ("operation" in d && d.operation === "swap") {
-          const entry = {
-            kind: "native" as const,
-            from: d.tokenIn as string,
-            to: d.tokenOut as string,
-            value: d.amountIn as string,
+      for (const leaf of item.changes) {
+        if (leaf.kind !== "change" || leaf.data === null || typeof leaf.data !== "object") continue;
+        const d = leaf.data as Record<string, unknown>;
+        if (
+          "operation" in d &&
+          d.operation === "transfer" &&
+          "token" in d &&
+          "from" in d &&
+          "to" in d &&
+          "amount" in d
+        ) {
+          const entry: ParsedTransfer = {
+            token: d.token as TokenRef,
+            from: d.from as string,
+            to: d.to as string,
+            value: d.amount as string,
           };
           if (!firstTransfer) firstTransfer = entry;
           lastTransfer = entry;
         }
-      } else if (item.kind === "receipt") {
-        for (const leaf of item.changes) {
-          if (leaf.kind !== "change" || leaf.data === null || typeof leaf.data !== "object")
-            continue;
-          const d = leaf.data as Record<string, unknown>;
-          if (
-            "operation" in d &&
-            d.operation === "transfer" &&
-            "token" in d &&
-            "from" in d &&
-            "to" in d &&
-            "amount" in d
-          ) {
-            const entry = {
-              kind: "erc20" as const,
-              token: d.token as string,
-              from: d.from as string,
-              to: d.to as string,
-              value: d.amount as string,
-            };
-            if (!firstTransfer) firstTransfer = entry;
-            lastTransfer = entry;
-          }
-        }
       }
     }
 
+    const zero = "0x0000000000000000000000000000000000000000" as AddressValue;
     const outcome: SwapOutcome = {
       operation: "swap",
-      tokenIn: (firstTransfer?.kind === "erc20"
-        ? firstTransfer.token
-        : firstTransfer?.kind === "native"
-          ? firstTransfer.from
-          : "0x0000000000000000000000000000000000000000") as AddressValue,
-      tokenOut: (lastTransfer?.kind === "erc20"
-        ? lastTransfer.token
-        : lastTransfer?.kind === "native"
-          ? lastTransfer.to
-          : "0x0000000000000000000000000000000000000000") as AddressValue,
+      tokenIn: firstTransfer?.token ?? zero,
+      // Native tokenOut is rejected by the v1 parameters; keep the prior defensive fallback.
+      tokenOut:
+        lastTransfer?.token === NATIVE
+          ? (lastTransfer.to as AddressValue)
+          : (lastTransfer?.token ?? zero),
       amountIn: firstTransfer?.value ?? "0",
       amountOut: lastTransfer?.value ?? "0",
     };
