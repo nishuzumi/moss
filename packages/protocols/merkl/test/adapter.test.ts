@@ -524,6 +524,14 @@ function leafChange(entry: ReceiptResult["changes"][number] | undefined): Change
   return entry.kind === "change" ? entry.change : leafChange(entry.changes[0]);
 }
 
+// Mirrors the MCP layer's receiptTexts projection: the ordered leaf text
+// strings exposed to Agents, including nested dependency Receipts.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
 describe("Merkl claim Receipt evidence", () => {
   it("parses a valid single-token claim with original identity and Package label", async () => {
     const { registry, capability } = await claimCapability();
@@ -541,6 +549,11 @@ describe("Merkl claim Receipt evidence", () => {
     expect(receipt.changes[0]).toMatchObject({
       text: expect.stringContaining("Package(Merkl:Distributor)"),
     });
+
+    const claimText = `Merkl Claim: 60 of ${TOKEN_A} paid by Package(Merkl:Distributor) to ${ACCOUNT}`;
+    const transferText = `ERC20 Transfer: 60 ${TOKEN_A} from Package(Merkl:Distributor) to ${ACCOUNT}`;
+    expect(receipt.text).toBe(`Merkl Claim: 1 reward token(s) paid to ${ACCOUNT}`);
+    expect(flattenReceiptTexts(receipt)).toEqual([claimText, transferText]);
   });
 
   it("preserves observed multi-token execution order", async () => {

@@ -434,7 +434,7 @@ importers:
         version: link:../../system
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.23.0)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.23)(tsx@4.23.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
