@@ -1,0 +1,38 @@
+{
+  "name": "@themoss/protocol-kuru",
+  "version": "0.1.0",
+  "description": "Moss protocol adapter for Kuru — Monad-native on-chain CLOB DEX",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:abi:online": "vitest run --config vitest.online.config.ts",
+    "update:abis": "tsx scripts/update-abis.ts",
+    "gen:abis": "tsx scripts/gen-abis.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "viem": "^2.54.3",
+    "@themoss/erc": "workspace:*"
+  },
+  "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6",
+    "tsx": "^4.19.0",
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*"
+  }
+}

@@ -1,0 +1,113 @@
+name: Live verification
+
+# Runs one pull request's suites against the unthrottled private RPC, so a live
+# failure can be attributed: `ci` gives every pull request the public endpoint,
+# which answers `429 request limit reached` after roughly thirty sequential
+# `debug_traceCall`s and therefore fails a full run for reasons that have nothing
+# to do with the change under review. Re-running it here separates the two.
+#
+# Manual by design: dispatching requires write access, and it runs the pull
+# request's own test code, so review the diff before starting a run.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to run against the unthrottled RPC
+        required: true
+
+# Nothing here writes to the repository.
+permissions: {}
+
+# One run at a time: concurrent runs would share the endpoint's request budget
+# and reintroduce the throttling this workflow exists to rule out. Queued rather
+# than cancelled, because a cancelled run answers nothing.
+concurrency:
+  group: live-verify
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment hold the job before it can mint, and
+    # each run is recorded as a deployment. The secret itself stays
+    # repository-level, since `ci` needs it too.
+    environment: live-rpc
+    steps:
+      # Same policy and list as `ci`. It cannot be shared through a local composite
+      # action, because that would require checking out this repository first and
+      # hardening has to precede any checkout.
+      - name: Restrict runner egress
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            api.kuru.io:443
+            api-v2.pendle.finance:443
+            rpc.monad.xyz:443
+            moss-rpc.0xmon.dev:443
+
+      # Exchanges the mint token for a short-lived, read-only RPC URL. Runs before
+      # any checkout so the token stays out of later steps.
+      #
+      # Fork pull requests receive no secrets, so this is empty there and the suites
+      # fall back to the public endpoint in the allowlist above.
+      - name: Mint a short-lived RPC URL
+        env:
+          MOSS_RPC_MINT_TOKEN: ${{ secrets.MOSS_RPC_MINT_TOKEN }}
+        run: |
+          if [ -z "$MOSS_RPC_MINT_TOKEN" ]; then
+            echo "No mint token available; the live suites will use the public endpoint."
+            exit 0
+          fi
+          url=$(curl -sSf -m 30 -X POST https://moss-rpc.0xmon.dev/mint \
+                  -H "authorization: Bearer $MOSS_RPC_MINT_TOKEN")
+          echo "::add-mask::$url"
+          echo "MOSS_RPC_URL=$url" >> "$GITHUB_ENV"
+
+      # The merge ref, matching what `ci` tests, so a difference between the two
+      # runs is the endpoint and not the tree.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr }}/merge
+
+      - name: Record what is being verified
+        run: |
+          {
+            echo "Verifying PR #${{ inputs.pr }} against the private RPC."
+            echo
+            echo "Merge ref commit: \`$(git rev-parse HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build precedes the suites: workspace packages resolve each other's types
+      # and entry points through their built dist output.
+      - name: Build
+        run: pnpm build
+
+      # Lint and typecheck are `ci`'s job. This workflow exists only to answer
+      # whether the live suites pass when the endpoint is not throttling.
+      # MOSS_RPC_URL arrives from the mint step through $GITHUB_ENV.
+      - name: Test
+        run: pnpm test

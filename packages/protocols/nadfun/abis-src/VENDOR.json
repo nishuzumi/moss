@@ -1,0 +1,8 @@
+{
+  "sourceKind": "git",
+  "repository": "https://github.com/Naddotfun/contract-v3-abi.git",
+  "commit": "35ca13bd26bb2a5418698b13ddcd07008eecc30a",
+  "file": "ILens.json",
+  "fileSha256": "679d4f19e46f7f74aad0ac99f5beb485298caea61b0125f3b1222d4b3e87fadd",
+  "vendoredAt": "2026-07-25"
+}

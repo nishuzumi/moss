@@ -1,0 +1,3 @@
+# Moss compares generated source and runs formatter checks in every contributor checkout.
+# Keep text files on LF so Git's core.autocrlf setting cannot change test inputs.
+* text=auto eol=lf

@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Fork pull requests execute contributor-authored test code on this runner.
+# Nothing here needs write access, so the token is read-only.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      # Blocked rather than audited, because audit mode cannot disable telemetry.
+      # The list is derived from real runs — `api.kuru.io` was found by a failure,
+      # not by guessing — and stays as short as the jobs allow.
+      #
+      # Linux-only (eBPF), so the windows-offline job below cannot use it.
+      - name: Restrict runner egress
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            api.kuru.io:443
+            api-v2.pendle.finance:443
+            rpc.monad.xyz:443
+            moss-rpc.0xmon.dev:443
+
+      # Exchanges the mint token for a short-lived, read-only RPC URL. Runs before
+      # any checkout so the token stays out of later steps.
+      #
+      # Fork pull requests receive no secrets, so this is empty there and the suites
+      # fall back to the public endpoint in the allowlist above.
+      - name: Mint a short-lived RPC URL
+        env:
+          MOSS_RPC_MINT_TOKEN: ${{ secrets.MOSS_RPC_MINT_TOKEN }}
+        run: |
+          if [ -z "$MOSS_RPC_MINT_TOKEN" ]; then
+            echo "No mint token available; the live suites will use the public endpoint."
+            exit 0
+          fi
+          url=$(curl -sSf -m 30 -X POST https://moss-rpc.0xmon.dev/mint \
+                  -H "authorization: Bearer $MOSS_RPC_MINT_TOKEN")
+          echo "::add-mask::$url"
+          echo "MOSS_RPC_URL=$url" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      # Foundry-in-monorepo invariant (ADR 0007): no git submodules, ever.
+      # forge init/install must use --no-git; this catches any violation.
+      - name: Forbid git submodules
+        run: |
+          if [ -e .gitmodules ] || git ls-files -s | grep -q '^160000'; then
+            echo "git submodules are banned in this repo (ADR 0007): use forge --no-git, npm+remappings, or soldeer"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      # Build precedes typecheck: workspace packages resolve each other's
+      # types through their built dist/*.d.ts.
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The live suites reach the chain through core's DEFAULT_RPC_URL, which reads
+      # the MOSS_RPC_URL set by the mint step above, or falls back to the public
+      # endpoint when that step had no token.
+      - name: Test
+        run: pnpm test
+
+  windows-offline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Offline test
+        run: pnpm test:offline

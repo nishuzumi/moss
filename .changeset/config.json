@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    [
+      "@themoss/core",
+      "@themoss/simulator",
+      "@themoss/erc",
+      "@themoss/system",
+      "@themoss/protocol-aave",
+      "@themoss/protocol-apriori",
+      "@themoss/protocol-clober",
+      "@themoss/protocol-kintsu",
+      "@themoss/protocol-kuru",
+      "@themoss/protocol-monad-cards",
+      "@themoss/protocol-morpho",
+      "@themoss/protocol-nadfun",
+      "@themoss/protocol-pancakeswap",
+      "@themoss/protocol-pendle",
+      "@themoss/protocol-uniswap",
+      "@themoss/mcp-server"
+    ]
+  ],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@themoss/abi-tools",
+    "@themoss/example-simple-flow",
+    "@themoss/example-agent-swap",
+    "@themoss/protocol-template"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@themoss/example-simple-flow",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "wrap": "tsx src/wmon-wrap.ts",
+    "swap": "tsx src/kuru-swap.ts",
+    "pancakeswap-v2": "tsx src/pancakeswap-v2-swap.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"examples are exercised by e2e tests in packages\" && exit 0",
+    "build": "echo \"examples are not built\" && exit 0"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/protocol-pancakeswap": "workspace:*",
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*",
+    "viem": "^2.54.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0"
+  }
+}

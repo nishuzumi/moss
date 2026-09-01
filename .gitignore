@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+coverage/
+.env
+.env.*
+.pnpm-store/
+.npmrc
+.pnpm-cache/
+.pnpm-state/
+# .claude/agents ships with the repo (the agent-swap example); the rest is local.
+.claude/*
+!.claude/agents/
+/docs/research/
+/.agents/

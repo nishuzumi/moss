@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "moss": {
+      "command": "node",
+      "args": ["packages/mcp-server/dist/cli.js"],
+      "env": { "MOSS_RPC_URL": "http://127.0.0.1:8545" }
+    }
+  }
+}

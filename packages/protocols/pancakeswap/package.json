@@ -1,0 +1,36 @@
+{
+  "name": "@themoss/protocol-pancakeswap",
+  "version": "0.1.0",
+  "description": "Moss Protocols for PancakeSwap V2 and V3 swaps on Monad mainnet",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "update:abis": "tsx scripts/update-abis.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "viem": "^2.54.3",
+    "@themoss/erc": "workspace:*",
+    "@themoss/system": "workspace:*"
+  },
+  "devDependencies": {
+    "@themoss/abi-tools": "workspace:*",
+    "@themoss/simulator": "workspace:*",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}

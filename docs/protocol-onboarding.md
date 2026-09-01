@@ -1,0 +1,217 @@
+# Protocol onboarding
+
+One Protocol package owns its ABIs, Capabilities, Queries, declared Protocol dependencies, and Receipt parsers.
+
+## 0. Start from the template
+
+Copy the workspace package instead of creating build and test configuration by hand:
+
+```bash
+cp -R packages/protocols/_template packages/protocols/myprotocol
+pnpm install
+```
+
+Rename the package to `@themoss/protocol-myprotocol`, remove `"private": true` when it is ready to publish, and replace every `CHANGEME` marker.
+
+Keep the template tests running while you replace the example. The package remains part of the workspace, so normal root build, typecheck, lint, and test commands exercise it.
+
+## 1. Establish ABI and address provenance
+
+Every ABI under `src/abis/` declares one origin:
+
+- `compiled`: generated from committed contract source;
+- `explorer`: retrieved from a verified-contract page with URL and date;
+- `vendored`: generated deterministically from committed full upstream artifacts, pinned either by npm package version and tarball digest or by upstream Git commit and file digest.
+
+Follow [ADR 0007](./adr/0007-abi-origin.md). Never hand-transcribe an ABI or generate a hand-selected function subset. A vendored ABI can additionally be cross-checked against the explorer-verified implementation behind the protocol's proxies: ship a `test:abi:online` script (the root command and the ABI cross-check workflow pick it up automatically) and build the suite from `@themoss/abi-tools` — `fetchAbi`, `compareDeployedAbi`, and the ERC-1967 helpers. See ADR 0007 and `packages/protocols/kuru` (`abis.json` + `test-online/`) for the reference implementation.
+
+### Fetch an explorer ABI
+
+Export an [Etherscan API key](https://info.monadscan.com/myapikey/), then run the repository command:
+
+```bash
+export MONADSCAN_API_KEY=…
+pnpm fetch-abi 0x1b81D678ffb9C0263b24A97847620C99d213eB14 swapRouter \
+  > packages/protocols/myprotocol/src/abis/swap-router.ts
+```
+
+The command calls the official Etherscan V2 ABI endpoint for Monad mainnet, prints the complete verified ABI as `export const swapRouterAbi = [...] as const`, and stamps its public Monadscan source URL and UTC retrieval date. It writes TypeScript only to stdout and diagnostics only to stderr. For repeatable regeneration, give the package an `update:abis` script that drives `@themoss/abi-tools`' `fetchAbi` + `renderAbiModule` from a committed source table, and pin the committed modules to the renderer's exact output with a derivation test (see `packages/protocols/pancakeswap/scripts/` and its `test/abis.test.ts`).
+
+Every fixed address cites a canonical source and has an on-chain bytecode check. Fixed token constants additionally verify expected metadata. Dynamic pools and tokens come from chain state and do not become global constants.
+
+## 2. Export a self-describing Protocol
+
+A package exports its public `@Protocol` classes directly from its entry point. Registry registers either one class or every top-level Protocol export in a selected module namespace; ABIs and helpers are ignored.
+
+```ts
+@Protocol({
+  name: "myprotocol",
+  category: "dex",
+  description: "One sentence an Agent can use to choose this Protocol.",
+  contracts: {
+    router: { abi: RouterAbi, addr: ROUTER_ADDRESS },
+  },
+  labels: {
+    Router: ROUTER_ADDRESS,
+  },
+  protocols: {
+    erc20: ERC20,
+  },
+})
+export class MyProtocol {
+  declare router: Handle<typeof RouterAbi>;
+  declare erc20: ProtocolRef<ERC20>;
+}
+```
+
+Protocol dependencies are explicit. Registry recursively registers them and injects typed instances. Calling an injected Capability creates a nested Capability node; calling an injected Query returns data directly.
+
+Nesting one of the Protocol's own Capabilities goes through the injected `self` reference, declared over the named Capabilities it nests: `declare self: SelfRef<MyProtocol, "approve">`. It behaves exactly like a dependency reference (validated params, core-stamped node, Registry-resolved Receipt parser). Never hand-assemble a `CapabilityNode` in a Protocol package. A Capability declares itself nestable where it is written, by returning `nestable(...)`:
+
+```ts
+@Capability<MyProtocol, typeof approveParams>({ /* ... */ })
+approve(params: ApproveParams): Nestable<TransactionNode[]> {
+  return nestable([this.router.approve(/* protocol arguments */)]);
+}
+```
+
+`self` names only declared Capabilities, so a Query, a Receipt parser, a Capability that never declared itself, or a plain helper shaped like a Capability will not compile. TypeScript cannot see a decorator, so core also refuses at the call site: reaching any other method of the class through `self` throws a named framework error rather than returning undefined. Reaching for `self` from a Query or a Receipt parser throws for the same reason. `declare self` is the only valid form: core owns the property, so a contract or dependency key named `self` is rejected up front and an initialized `self` field is rejected at construction. Core admits each nested call against the same `CAPABILITY_TREE_LIMITS` depth and count budget the finished tree is checked against, so a Capability that nests itself is stopped at the limit rather than after the work is done.
+
+`labels` names fixed Package addresses independently of Handles. Registry renders the example above as `Package(Myprotocol:Router)`, validates the combined payload inside the Core-owned wrapper as a safe 1–32 character name, and exposes it through declared dependency and Receipt parser caller scopes. Receipt parsers still emit raw evidence-backed addresses; Registry owns presentation.
+
+## 3. Define parameter contracts
+
+Each field pairs a reusable Zod value contract with a description of that field's role.
+
+```ts
+const swapParams = {
+  user: {
+    type: Address,
+    description: "Account whose assets the swap may spend.",
+  },
+  tokenIn: {
+    type: TokenReference,
+    description: "Token provided to the swap.",
+  },
+  tokenOut: {
+    type: TokenReference,
+    description: "Token requested from the swap.",
+  },
+  amountIn: {
+    type: PositiveDecimalString,
+    description: "Amount of tokenIn to spend.",
+  },
+  slippageBps: {
+    type: BasisPoints.default(50),
+    description: "Maximum allowed slippage for this swap.",
+  },
+} satisfies ParamsSpec;
+
+type SwapParams = InferParams<typeof swapParams>;
+```
+
+`BasisPoints` describes only the value: an integer basis-point count, `1 bps = 0.01%`, valid range, and examples. It does not mention swaps or slippage. The field description supplies that purpose. A default of `50` means `0.5%`.
+
+Registry parses action input with the composed schemas. `load` returns JSON-safe generated schemas and both descriptions; Zod objects never cross MCP.
+
+## 4. Author one transaction per Capability
+
+Every Capability owns exactly one direct transaction and one registered Receipt parser. More transactions require nested Capabilities. The serialized Capability tree carries `protocol + method`; Registry resolves the Receipt name from the registered Capability metadata.
+
+```ts
+@Capability<MyProtocol, typeof swapParams>({
+  intent: "Swap {amountIn} of {tokenIn} into {tokenOut}",
+  verb: "swap",
+  params: swapParams,
+  receipt: "swapReceipt",
+  risk: ["fundOut", "approval", "priceImpact"],
+})
+async swap(params: SwapParams) {
+  const approval = await this.erc20.approve({
+    token: params.tokenIn,
+    spender: this.router.address,
+    amount: amountInBaseUnits.toString(),
+  });
+  const transaction = this.router.swap(/* protocol arguments */);
+  return [approval, transaction];
+}
+```
+
+Here `approval` is a nested ERC Capability with its own direct transaction and Receipt. `transaction` is the one direct TransactionNode owned by `swap`. A contract-level multicall is still one transaction.
+
+The authoring method may use local bigint or viem helpers while constructing calldata. Values stored in the serializable Capability tree use JSON-safe forms such as decimal strings.
+
+## 5. Parse actual Changes with a Receipt
+
+```ts
+@Receipt()
+swapReceipt(changes: readonly Change[]): ReceiptResult<SwapOutcome> {
+  // Decode, loop, branch, and delegate as required by this Protocol.
+  // Every ReceiptChange must retain the exact input Change object.
+  return buildSwapReceipt(changes);
+}
+```
+
+A Receipt parser receives only the immutable ordered Changes for one successful direct transaction. It cannot receive Capability parameters or transaction data and cannot call Runtime, Handle, Query, or RPC.
+
+It may call another Protocol's pure Receipt parser for a continuous Change interval and embed the returned Receipt. Package parsers author `ReceiptResult`; Core attaches the producing Protocol name to every parser call and returns the identified `Receipt` through injected dependency references, Registry, and Simulator.
+
+Parsing strategy belongs to the Protocol: ordinary loops, queues, and branches are allowed. Core provides no grammar engine or semantic matcher.
+
+Core only flattens ReceiptChange leaves and checks exact object identity, length, and order against the input.
+
+Receipt text is presentation. The structured Outcome is authoritative and must use JSON-safe values.
+
+After the root parser returns, Registry replaces standalone addresses in every Receipt and ReceiptChange text once. At each Receipt, resolution is `Trusted(name)`, the current `Package(Title Cased Slug:localName)`, nearest-to-farthest caller Packages, one unambiguous Package from the current Protocol's dependency graph, then the raw address. ReceiptChange text inherits its containing Receipt's scope; unrelated, conflicting, and unknown addresses stay raw. Outcomes, data, and Change objects are not rewritten.
+
+## 6. Export and compose
+
+The package entry point exports the Protocol class:
+
+```ts
+export { MyProtocol } from "./my-protocol.js";
+```
+
+The application composition root imports selected module namespaces and supplies them with one Runtime to the generic MCP server. Adding a Protocol does not modify core, simulator, or generic transport code. MCP and library compositions select the Trusted catalog explicitly:
+
+```ts
+const { server } = createMossServer({
+  runtime,
+  protocols: [myProtocol],
+  trustedTokens: [{ address: OFFICIAL_TOKEN_ADDRESS, label: "Official Token" }],
+});
+```
+
+```ts
+const registry = new Registry(runtime, {
+  trustedTokens: [{ address: OFFICIAL_TOKEN_ADDRESS, label: "Official Token" }],
+}).use(protocols);
+```
+
+Registry never discovers Trusted labels from module exports passed to `use`.
+
+Fixed official Monad constants may be imported from `@themoss/system`. Caller-supplied and chain-discovered token addresses remain explicit; do not introduce a package-level token list.
+
+## 7. Tests required for review
+
+- A compile-time fixture proves valid inferred parameter and Receipt names, plus invalid cases marked with `@ts-expect-error`.
+- Unit tests cover Registry metadata validation and the Capability's exactly-one-direct-transaction invariant.
+- Receipt tests prove complete ordered coverage using the original Change object references, including nested Receipts.
+- Failure tests cover missing, duplicated, replaced, and reordered Changes.
+- Live Monad-mainnet tests verify fixed addresses and run the happy path with zero Warnings.
+
+Run `pnpm build`, then `pnpm typecheck`, lint, and tests before review.
+
+## 8. Document and submit
+
+Document what the Protocol does, supported contracts or markets, parameter units, defaults, important risks, fixed-address sources, and known limitations.
+
+Export the stable `@Protocol` class from the package entry point. Experimental classes remain internal. Add the package module to the selected application's composition root; generic core and simulator code do not change.
+
+Add a changeset for a user-facing package release:
+
+```bash
+pnpm changeset
+```
+
+Open the pull request from a branch based on `main`. Include the live simulation evidence and explain any framework or package-boundary impact. Use the checklist in [CONTRIBUTING.md](../CONTRIBUTING.md).

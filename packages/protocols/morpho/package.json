@@ -1,0 +1,40 @@
+{
+  "name": "@themoss/protocol-morpho",
+  "version": "0.1.0",
+  "description": "Moss protocol adapter for Morpho vaults (MetaMorpho V1.1) on Monad",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "update:abis": "tsx scripts/update-abis.ts",
+    "gen:abis": "tsx scripts/gen-abis.ts",
+    "gen:contract-abis": "tsx scripts/gen-contract-abis.ts",
+    "update:contracts": "tsx scripts/update-contracts.ts"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "viem": "^2.54.3"
+  },
+  "devDependencies": {
+    "@morpho-org/morpho-blue": "^1.0.0",
+    "@openzeppelin/contracts": "^5.6.1",
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6"
+  }
+}

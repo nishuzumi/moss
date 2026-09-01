@@ -1,0 +1,847 @@
+import { type Abi, isAddress } from "viem";
+import {
+  METHOD_META,
+  type MethodMeta,
+  PROTOCOL_META,
+  PROTOCOL_TARGET,
+  type ProtocolConfig,
+  type ProtocolCtor,
+  type ProtocolDependencies,
+  RECEIPT_META,
+  requireUnclaimedSelf,
+  SELF_KEY,
+} from "./decorators.js";
+import {
+  CAPABILITY_TREE_LIMITS,
+  CapabilityTreeError,
+  flattenCapabilityTree,
+  toJsonSafe,
+  verifyReceiptCoverage,
+} from "./framework.js";
+import { queryObservationOf, type TokenMetadataObservation } from "./observations.js";
+import type { MossRuntime } from "./runtime.js";
+import { describeParams, parameterTypeDescription, parseParams } from "./semantics.js";
+import type {
+  Address,
+  CapabilityNode,
+  CapabilityResult,
+  Category,
+  Change,
+  JsonSafeValue,
+  LabelScope,
+  PackageLabel,
+  Receipt,
+  ReceiptResult,
+  RegistryOptions,
+  RiskLabel,
+  Verb,
+} from "./types.js";
+import { CATEGORIES, RISK_LABELS, VERBS } from "./types.js";
+
+export interface ActionCtx {
+  account: Address;
+}
+
+/**
+ * One in-flight Capability construction. Registry threads it through every
+ * nested `self` and dependency call, so the depth and Capability count budgets
+ * are checked before the next Protocol method runs. Without it a self-recursive
+ * Capability would parse parameters, instantiate and execute all the way down
+ * and only meet `flattenCapabilityTree` as the recursion unwinds.
+ */
+interface BuildContext {
+  /** `protocol.method` chain from the root build down to the current call. */
+  readonly chain: readonly string[];
+  /** Capability count shared by the whole in-flight tree. */
+  readonly counter: { count: number };
+}
+
+function rootBuild(): BuildContext {
+  return { chain: [], counter: { count: 0 } };
+}
+
+/**
+ * Stands in for `self` where nesting a Capability is not part of the contract.
+ * A Query returns data and a Receipt parser must stay pure, so reaching for
+ * `self` there fails with a named framework error instead of `undefined`.
+ */
+function unavailableSelf(protocol: string, surface: "Query" | "Receipt"): object {
+  return new Proxy(Object.freeze({}), {
+    get(_target, key) {
+      throw new Error(
+        `protocol "${protocol}" cannot reach "${SELF_KEY}.${String(key)}" from a ${surface}; core injects "${SELF_KEY}" only while a Capability is built`,
+      );
+    },
+  });
+}
+
+export interface Coordinate {
+  protocol: string;
+  method: string;
+  kind: "capability" | "query";
+  verb?: Verb;
+  category: Category;
+  tags: string[];
+  summary: string;
+}
+
+export interface LoadedParameter {
+  type: JsonSafeValue;
+  description: string;
+}
+
+export interface Stub {
+  protocol: string;
+  method: string;
+  kind: "capability" | "query";
+  intent: string;
+  verb?: Verb;
+  category: Category;
+  risk: RiskLabel[];
+  tags: string[];
+  params: Record<string, LoadedParameter>;
+}
+
+export interface QueryResult {
+  kind: "query";
+  protocol: string;
+  method: string;
+  data: JsonSafeValue;
+}
+
+export interface ResolvedProtocolContract {
+  abi: Abi;
+  /** Explanations for ABI-declared custom errors, by error name. */
+  customErrorMessages: Readonly<Record<string, string>>;
+  /** Explanations for `require` reverts, by the exact emitted message. */
+  stringRevertMessages: Readonly<Record<string, string>>;
+}
+
+interface Registered {
+  ctor: ProtocolCtor;
+  receiptCtor: ProtocolCtor;
+  config: ProtocolConfig<ProtocolDependencies>;
+  methods: Record<string, MethodMeta>;
+  receipts: Set<string>;
+  /** Every method on the Protocol's prototype chain, decorated or not. */
+  methodNames: readonly string[];
+  packageName: string;
+  packageLabels: ReadonlyMap<string, string>;
+}
+
+type CapabilityMethodMeta = Extract<MethodMeta, { kind: "capability" }>;
+
+export type ProtocolSource = ProtocolCtor | Record<string, unknown>;
+
+function configOf(value: unknown): ProtocolConfig<ProtocolDependencies> | undefined {
+  if (typeof value !== "function") return undefined;
+  if (!Object.hasOwn(value, PROTOCOL_META)) return undefined;
+  return (value as unknown as Record<symbol, ProtocolConfig<ProtocolDependencies> | undefined>)[
+    PROTOCOL_META
+  ];
+}
+
+function requireMetadataText(value: unknown, path: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${path} must be a non-empty string`);
+  }
+}
+
+const SAFE_LABEL_PART = /^[A-Za-z0-9 ._-]+$/;
+const ADDRESS_IN_TEXT = /(?<![0-9a-f])0x[0-9a-f]{40}(?![0-9a-f])/gi;
+
+function isSafeLabelName(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 32 && SAFE_LABEL_PART.test(value);
+}
+
+function collectLabels(
+  entries: Iterable<readonly [name: string, address: Address]>,
+  provenance: "Trusted" | "Package",
+  owner: string,
+  packageName?: string,
+): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  const names = new Set<string>();
+  for (const [name, address] of entries) {
+    const payload = packageName ? `${packageName}:${name}` : name;
+    if (!isSafeLabelName(name) || payload.length > 32) {
+      throw new Error(`${owner} ${provenance} label must be a 1-32 character safe name`);
+    }
+    if (!isAddress(address, { strict: false })) {
+      throw new Error(`${owner} ${provenance} label has an invalid address`);
+    }
+    const key = address.toLowerCase();
+    if (labels.has(key)) {
+      throw new Error(`${owner} assigns multiple ${provenance} names to address "${address}"`);
+    }
+    const nameKey = name.toLowerCase();
+    if (names.has(nameKey)) {
+      throw new Error(`${owner} assigns ${provenance} name "${name}" to multiple addresses`);
+    }
+    labels.set(key, name);
+    names.add(nameKey);
+  }
+  return labels;
+}
+
+function titleCaseSlug(slug: string): string {
+  return slug
+    .split("-")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function hasProtocol(receipt: ReceiptResult): receipt is Receipt {
+  return "protocol" in receipt && typeof receipt.protocol === "string";
+}
+
+function freezeReceiptOwnedStructure(root: Receipt): Receipt {
+  const receipts = new WeakSet<object>();
+  const jsonValues = new WeakSet<object>();
+  const freezeJson = (value: JsonSafeValue): void => {
+    if (value === null || typeof value !== "object" || jsonValues.has(value)) return;
+    jsonValues.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) freezeJson(entry);
+    } else {
+      for (const entry of Object.values(value)) freezeJson(entry);
+    }
+    Object.freeze(value);
+  };
+  const freezeReceipt = (receipt: Receipt): void => {
+    if (receipts.has(receipt)) return;
+    receipts.add(receipt);
+    freezeJson(receipt.outcome);
+    for (const child of receipt.changes) {
+      if (child.kind === "receipt") {
+        freezeReceipt(child);
+      } else {
+        freezeJson(child.data);
+        Object.freeze(child);
+      }
+    }
+    Object.freeze(receipt.changes);
+    Object.freeze(receipt);
+  };
+  freezeReceipt(root);
+  return root;
+}
+
+export class Registry {
+  #protocols = new Map<string, Registered>();
+  #assignedReceiptProtocols = new WeakMap<object, string>();
+  #onChainMetadata = new Map<
+    string,
+    Pick<TokenMetadataObservation, "address" | "symbol" | "name">
+  >();
+  #trustedLabels: ReadonlyMap<string, string>;
+  readonly runtime: MossRuntime;
+
+  constructor(runtime: MossRuntime, options: RegistryOptions = {}) {
+    this.runtime = runtime;
+    this.#trustedLabels = collectLabels(
+      (options.trustedTokens ?? []).map(({ address, label }) => [label, address]),
+      "Trusted",
+      "trusted token catalog",
+    );
+  }
+
+  use(...sources: ProtocolSource[]): this {
+    for (const source of sources) {
+      if (configOf(source)) {
+        this.register(source as ProtocolCtor);
+        continue;
+      }
+      if (!source || typeof source !== "object") {
+        throw new Error("Registry.use() expects a decorated Protocol class or module namespace");
+      }
+      const protocols = [...new Set(Object.values(source).filter((value) => configOf(value)))];
+      if (protocols.length === 0) {
+        throw new Error("module namespace exports no decorated Protocol classes");
+      }
+      for (const protocol of protocols) this.register(protocol as ProtocolCtor);
+    }
+    return this;
+  }
+
+  register(ctor: ProtocolCtor, stack: string[] = []): void {
+    const config = configOf(ctor);
+    if (!config) throw new Error(`${ctor.name} is not decorated with @Protocol`);
+    const target = (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET];
+    for (let ancestor = target && Object.getPrototypeOf(target); ancestor; ) {
+      if (configOf(ancestor)) {
+        throw new Error(
+          `protocol "${config.name}" cannot extend another decorated Protocol; declare it as a dependency`,
+        );
+      }
+      ancestor = Object.getPrototypeOf(ancestor);
+    }
+    requireMetadataText(config.description, `protocol "${config.name}" description`);
+    if (!CATEGORIES.includes(config.category)) {
+      throw new Error(`protocol "${config.name}" has an invalid category`);
+    }
+    for (const [errorName, message] of Object.entries(config.customErrorMessages ?? {})) {
+      requireMetadataText(errorName, `protocol "${config.name}" error name`);
+      requireMetadataText(message, `protocol "${config.name}" error "${errorName}" message`);
+      if (
+        !Object.values(config.contracts).some(({ abi }) =>
+          abi.some((item) => item.type === "error" && item.name === errorName),
+        )
+      ) {
+        throw new Error(
+          `protocol "${config.name}" error "${errorName}" is not declared by a contract ABI`,
+        );
+      }
+    }
+    // A revert message appears in no ABI, so this is all Registry can check. The Protocol owns
+    // proving the literal against its own pinned vendored source.
+    for (const [reason, message] of Object.entries(config.stringRevertMessages ?? {})) {
+      requireMetadataText(reason, `protocol "${config.name}" revert reason`);
+      requireMetadataText(message, `protocol "${config.name}" revert "${reason}" message`);
+    }
+    const existing = this.#protocols.get(config.name);
+    if (existing?.ctor === ctor) return;
+    if (existing) throw new Error(`protocol "${config.name}" is already registered`);
+    if (stack.includes(config.name)) {
+      throw new Error(`Protocol dependency cycle: ${[...stack, config.name].join(" -> ")}`);
+    }
+    const packageName = titleCaseSlug(config.name);
+    const packageLabels = collectLabels(
+      Object.entries(config.labels ?? {}),
+      "Package",
+      `protocol "${config.name}"`,
+      packageName,
+    );
+    for (const dependency of Object.values(config.protocols ?? {})) {
+      this.register(dependency, [...stack, config.name]);
+    }
+
+    const methods: Record<string, MethodMeta> = {};
+    const receipts = new Set<string>();
+    const methodNames: string[] = [];
+    const seenNames = new Set<string>();
+    for (
+      let prototype = ctor.prototype;
+      prototype && prototype !== Object.prototype;
+      prototype = Object.getPrototypeOf(prototype)
+    ) {
+      for (const name of Object.getOwnPropertyNames(prototype)) {
+        if (name === "constructor") continue;
+        if (seenNames.has(name)) continue;
+        seenNames.add(name);
+        const method = Object.getOwnPropertyDescriptor(prototype, name)?.value;
+        if (typeof method !== "function") continue;
+        methodNames.push(name);
+        const markers = method as unknown as Record<symbol, unknown>;
+        const meta = markers[METHOD_META] as MethodMeta | undefined;
+        if (meta && !Object.hasOwn(methods, name)) methods[name] = meta;
+        if (markers[RECEIPT_META]) receipts.add(name);
+      }
+    }
+    if (Object.keys(methods).length === 0) {
+      throw new Error(`protocol "${config.name}" declares no @Capability or @Query methods`);
+    }
+    for (const [name, meta] of Object.entries(methods)) {
+      requireMetadataText(meta.spec.intent, `method "${config.name}.${name}" intent`);
+      if (meta.spec.tags?.some((tag) => typeof tag !== "string" || tag.trim().length === 0)) {
+        throw new Error(`method "${config.name}.${name}" has an invalid tag`);
+      }
+      for (const [param, field] of Object.entries(meta.spec.params)) {
+        requireMetadataText(
+          field.description,
+          `parameter "${config.name}.${name}.${param}" description`,
+        );
+        if (!field.type || typeof field.type.safeParseAsync !== "function") {
+          throw new Error(`parameter "${config.name}.${name}.${param}" has an invalid type`);
+        }
+        requireMetadataText(
+          parameterTypeDescription(field.type),
+          `parameter "${config.name}.${name}.${param}" type description`,
+        );
+      }
+      if (meta.kind !== "capability") continue;
+      if (!VERBS.includes(meta.spec.verb)) {
+        throw new Error(`capability "${config.name}.${name}" has an invalid verb`);
+      }
+      if (meta.spec.risk.length === 0) {
+        throw new Error(`capability "${config.name}.${name}" must declare a risk label`);
+      }
+      if (meta.spec.risk.some((risk) => !RISK_LABELS.includes(risk))) {
+        throw new Error(`capability "${config.name}.${name}" has an invalid risk label`);
+      }
+      if (!receipts.has(meta.spec.receipt)) {
+        throw new Error(
+          `capability "${config.name}.${name}" names "${meta.spec.receipt}", which is not an @Receipt method`,
+        );
+      }
+    }
+    const receiptCtor =
+      (ctor as unknown as Record<symbol, ProtocolCtor | undefined>)[PROTOCOL_TARGET] ?? ctor;
+    this.#protocols.set(config.name, {
+      ctor,
+      receiptCtor,
+      config,
+      methods,
+      receipts,
+      methodNames,
+      packageName,
+      packageLabels,
+    });
+  }
+
+  discover(filter: { verb?: Verb; category?: Category; protocol?: string } = {}): Coordinate[] {
+    const found: Coordinate[] = [];
+    for (const { config, methods } of this.#protocols.values()) {
+      if (filter.protocol && filter.protocol !== config.name) continue;
+      if (filter.category && filter.category !== config.category) continue;
+      for (const [method, meta] of Object.entries(methods)) {
+        const verb = meta.kind === "capability" ? meta.spec.verb : undefined;
+        if (filter.verb && filter.verb !== verb) continue;
+        found.push({
+          protocol: config.name,
+          method,
+          kind: meta.kind,
+          ...(verb === undefined ? {} : { verb }),
+          category: config.category,
+          tags: meta.spec.tags ?? [],
+          summary: meta.spec.intent,
+        });
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Resolves only contracts declared by the Capability's own Protocol. Target scoping prevents an
+   * ABI or explanation from being attributed to the same selector emitted by another deployment.
+   */
+  resolveContract(protocol: string, target: Address): ResolvedProtocolContract | undefined {
+    const registered = this.#protocols.get(protocol);
+    if (!registered) return undefined;
+    const matches = Object.values(registered.config.contracts).filter(
+      ({ addr }) => addr.toLowerCase() === target.toLowerCase(),
+    );
+    if (matches.length === 0) return undefined;
+    // The ABI is what the target decides; the explanations belong to the Protocol and travel with
+    // every one of its targets. An entry only ever renders when the matched ABI decodes an error of
+    // that name, so a target missing it simply never looks it up.
+    return {
+      abi: matches.flatMap(({ abi }) => abi) as Abi,
+      customErrorMessages: registered.config.customErrorMessages ?? {},
+      stringRevertMessages: registered.config.stringRevertMessages ?? {},
+    };
+  }
+
+  load(coords: readonly { protocol: string; method: string }[]): Stub[] {
+    return coords.map(({ protocol, method }) => {
+      const registered = this.#get(protocol);
+      const meta = registered.methods[method];
+      if (!meta) throw new Error(`protocol "${protocol}" has no method "${method}"`);
+      return {
+        protocol,
+        method,
+        kind: meta.kind,
+        intent: meta.spec.intent,
+        ...(meta.kind === "capability" ? { verb: meta.spec.verb } : {}),
+        category: registered.config.category,
+        risk: meta.kind === "capability" ? meta.spec.risk : [],
+        tags: meta.spec.tags ?? [],
+        params: describeParams(meta.spec.params),
+      };
+    });
+  }
+
+  async action(
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+  ): Promise<QueryResult | CapabilityNode> {
+    const meta = this.#get(protocol).methods[method];
+    if (!meta) throw new Error(`protocol "${protocol}" has no method "${method}"`);
+    if (meta.kind === "query") {
+      return {
+        kind: "query",
+        protocol,
+        method,
+        data: await this.#runQuery(protocol, method, account, rawParams),
+      };
+    }
+    return this.#buildCapability(protocol, method, account, rawParams);
+  }
+
+  parseReceipt(node: CapabilityNode, changes: readonly Change[]): Receipt {
+    flattenCapabilityTree(node);
+    const meta = this.#capabilityMeta(node.protocol, node.method);
+    return this.#renderReceipt(this.#runReceipt(node.protocol, meta.spec.receipt, changes));
+  }
+
+  validateCapabilityTree(root: CapabilityNode): void {
+    for (const { capability } of flattenCapabilityTree(root)) {
+      this.#capabilityMeta(capability.protocol, capability.method);
+    }
+  }
+
+  async #buildCapability(
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+    parent?: BuildContext,
+  ): Promise<CapabilityNode> {
+    const ctx = this.#enterBuild(protocol, method, parent);
+    const registered = this.#get(protocol);
+    const meta = registered.methods[method];
+    if (meta?.kind !== "capability") {
+      throw new Error(`"${protocol}.${method}" is not a Capability`);
+    }
+    const params = await parseParams(meta.spec.params, rawParams);
+    const instance = this.#instantiate(protocol, account, ctx, "capability");
+    // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
+    const result = (await (instance as any)[method](params, { account } satisfies ActionCtx)) as
+      | CapabilityResult
+      | undefined;
+    const children = Array.isArray(result) ? result : result ? [result] : [];
+    const node: CapabilityNode = {
+      kind: "capability",
+      protocol,
+      method,
+      params: toJsonSafe(params),
+      children,
+    };
+    flattenCapabilityTree(node);
+    return node;
+  }
+
+  /**
+   * Admits one more Capability into an in-flight construction. The depth and
+   * count budgets are the same `CAPABILITY_TREE_LIMITS` bounds that
+   * `flattenCapabilityTree` enforces on the finished tree, checked here before
+   * any parameter parsing, instantiation or Protocol method call.
+   */
+  #enterBuild(protocol: string, method: string, parent?: BuildContext): BuildContext {
+    const chain = [...(parent?.chain ?? []), `${protocol}.${method}`];
+    const counter = parent?.counter ?? rootBuild().counter;
+    const path = `Capability(${chain.join(" -> ")})`;
+    if (chain.length > CAPABILITY_TREE_LIMITS.maxCapabilityDepth) {
+      throw new CapabilityTreeError(
+        "CAPABILITY_DEPTH",
+        path,
+        `nested Capability construction exceeds depth ${CAPABILITY_TREE_LIMITS.maxCapabilityDepth}`,
+      );
+    }
+    counter.count += 1;
+    if (counter.count > CAPABILITY_TREE_LIMITS.maxCapabilities) {
+      throw new CapabilityTreeError(
+        "CAPABILITY_COUNT",
+        path,
+        `nested Capability construction exceeds ${CAPABILITY_TREE_LIMITS.maxCapabilities} Capabilities`,
+      );
+    }
+    return { chain, counter };
+  }
+
+  async #runQuery(
+    protocol: string,
+    method: string,
+    account: Address,
+    rawParams: Record<string, unknown>,
+    parent?: BuildContext,
+  ): Promise<JsonSafeValue> {
+    const registered = this.#get(protocol);
+    const meta = registered.methods[method];
+    if (meta?.kind !== "query") throw new Error(`"${protocol}.${method}" is not a Query`);
+    const params = await parseParams(meta.spec.params, rawParams);
+    // A Query nests nothing itself, so it carries the caller's budget when one
+    // exists and otherwise starts a fresh one for its own dependency calls.
+    const instance = this.#instantiate(protocol, account, parent ?? rootBuild(), "query");
+    // biome-ignore lint/suspicious/noExplicitAny: metadata validates dynamic method dispatch
+    const result = await (instance as any)[method](params, { account } satisfies ActionCtx);
+    this.#processQueryObservation(result);
+    return toJsonSafe(result);
+  }
+
+  #processQueryObservation(result: unknown): void {
+    const observation = queryObservationOf(result);
+    if (!observation) return;
+    switch (observation.kind) {
+      case "tokenMetadata": {
+        const symbol = isSafeLabelName(observation.symbol) ? observation.symbol : undefined;
+        const name = isSafeLabelName(observation.name) ? observation.name : undefined;
+        const key = observation.address.toLowerCase();
+        if (!symbol && !name) {
+          this.#onChainMetadata.delete(key);
+          return;
+        }
+        this.#onChainMetadata.set(key, {
+          address: observation.address,
+          ...(symbol ? { symbol } : {}),
+          ...(name ? { name } : {}),
+        });
+        return;
+      }
+    }
+  }
+
+  #runReceipt(protocol: string, receiptName: string, changes: readonly Change[]): Receipt {
+    const registered = this.#get(protocol);
+    if (!registered.receipts.has(receiptName)) {
+      throw new Error(`protocol "${protocol}" has no Receipt "${receiptName}"`);
+    }
+    const instance = this.#instantiateReceipt(protocol);
+    // biome-ignore lint/suspicious/noExplicitAny: registration validates Receipt dispatch
+    const result = (instance as any)[receiptName](changes) as ReceiptResult;
+    verifyReceiptCoverage(changes, result);
+    return freezeReceiptOwnedStructure(this.#attachProtocol(result, protocol));
+  }
+
+  #attachProtocol(result: ReceiptResult, protocol: string): Receipt {
+    const dependencyNames = new Map<string, ReadonlySet<string>>();
+    const dependenciesFor = (parent: string): ReadonlySet<string> => {
+      const cached = dependencyNames.get(parent);
+      if (cached) return cached;
+      const names = new Set(
+        Object.values(this.#get(parent).config.protocols ?? {}).flatMap((dependency) => {
+          const name = configOf(dependency)?.name;
+          return name ? [name] : [];
+        }),
+      );
+      dependencyNames.set(parent, names);
+      return names;
+    };
+    const validate = (parent: string, child: ReceiptResult): Receipt => {
+      const assignedProtocol = this.#assignedReceiptProtocols.get(child);
+      if (!assignedProtocol || !hasProtocol(child)) {
+        const claimed = hasProtocol(child) ? ` "${child.protocol}"` : "";
+        throw new Error(`Receipt protocol${claimed} was not assigned by Registry`);
+      }
+      if (child.protocol !== assignedProtocol) {
+        throw new Error(
+          `Receipt protocol "${child.protocol}" does not match Registry-assigned "${assignedProtocol}"`,
+        );
+      }
+      if (assignedProtocol !== parent && !dependenciesFor(parent).has(assignedProtocol)) {
+        throw new Error(
+          `Receipt protocol "${assignedProtocol}" is not a dependency of "${parent}"`,
+        );
+      }
+      for (const grandchild of child.changes) {
+        if (grandchild.kind === "receipt") validate(assignedProtocol, grandchild);
+      }
+      return child;
+    };
+    const attach = (current: ReceiptResult): Receipt => {
+      const receipt: Receipt = {
+        ...current,
+        protocol,
+        changes: current.changes.map((child) => {
+          if (child.kind === "change") return child;
+          if (this.#assignedReceiptProtocols.has(child) || hasProtocol(child)) {
+            return validate(protocol, child);
+          }
+          return attach(child);
+        }),
+      };
+      this.#assignedReceiptProtocols.set(receipt, protocol);
+      return receipt;
+    };
+    return attach(result);
+  }
+
+  #instantiateReceipt(protocol: string): object {
+    const registered = this.#get(protocol);
+    const ReceiptCtor = registered.receiptCtor as unknown as new () => object;
+    const instance = new ReceiptCtor();
+    requireUnclaimedSelf(instance, protocol);
+    Object.defineProperty(instance, SELF_KEY, {
+      value: unavailableSelf(protocol, "Receipt"),
+      writable: false,
+    });
+    for (const [key, dependency] of Object.entries(registered.config.protocols ?? {})) {
+      const name = configOf(dependency)?.name;
+      if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
+      Object.defineProperty(instance, key, {
+        value: this.#receiptDependency(name),
+        writable: false,
+      });
+    }
+    return instance;
+  }
+
+  #instantiate(
+    protocol: string,
+    account: Address,
+    ctx: BuildContext,
+    surface: "capability" | "query",
+  ): object {
+    const registered = this.#get(protocol);
+    const dependencies = Object.fromEntries(
+      Object.entries(registered.config.protocols ?? {}).map(([key, dependency]) => {
+        const name = configOf(dependency)?.name;
+        if (!name) throw new Error(`protocol "${protocol}" has an undecorated dependency`);
+        return [key, this.#dependency(name, account, ctx)];
+      }),
+    );
+    const Ctor = registered.ctor as unknown as new (
+      runtime: MossRuntime,
+      account: Address,
+      dependencies: Record<string, object>,
+      self: object,
+    ) => object;
+    // `self` routes a Protocol's own nested Capabilities through the same
+    // builder as a dependency call, so they are parameter-validated, stamped and
+    // budgeted by core instead of hand-assembled in the Protocol package.
+    return new Ctor(
+      this.runtime,
+      account,
+      dependencies,
+      surface === "capability"
+        ? this.#selfRef(protocol, account, ctx)
+        : unavailableSelf(protocol, "Query"),
+    );
+  }
+
+  /**
+   * The Capability-only surface injected as `self`. `SelfRef` names Capabilities
+   * that declared themselves nestable, and TypeScript cannot see a decorator, so
+   * Registry keeps the last word at the call site: every other method of the
+   * Protocol answers with a named framework error rather than `undefined`, and
+   * only the Capabilities are enumerable.
+   */
+  #selfRef(protocol: string, account: Address, ctx: BuildContext): object {
+    const registered = this.#get(protocol);
+    const self: Record<string, unknown> = {};
+    const capabilities: string[] = [];
+    for (const [method, meta] of Object.entries(registered.methods)) {
+      if (meta.kind !== "capability") continue;
+      capabilities.push(method);
+      self[method] = (params: Record<string, unknown>) =>
+        this.#buildCapability(protocol, method, account, params, ctx);
+    }
+    for (const method of registered.methodNames) {
+      if (Object.hasOwn(self, method)) continue;
+      Object.defineProperty(self, method, {
+        enumerable: false,
+        get() {
+          throw new Error(
+            `protocol "${protocol}" cannot nest "${SELF_KEY}.${method}", which is not a @Capability; "${SELF_KEY}" carries ${capabilities.join(", ")}`,
+          );
+        },
+      });
+    }
+    return Object.freeze(self);
+  }
+
+  #dependency(protocol: string, account: Address, ctx: BuildContext): object {
+    const registered = this.#get(protocol);
+    const dependency: Record<string, unknown> = {};
+    for (const [method, meta] of Object.entries(registered.methods)) {
+      dependency[method] =
+        meta.kind === "capability"
+          ? (params: Record<string, unknown>) =>
+              this.#buildCapability(protocol, method, account, params, ctx)
+          : (params: Record<string, unknown>) =>
+              this.#runQuery(protocol, method, account, params, ctx);
+    }
+    for (const receipt of registered.receipts) {
+      dependency[receipt] = (changes: readonly Change[]) =>
+        this.#runReceipt(protocol, receipt, changes);
+    }
+    return Object.freeze(dependency);
+  }
+
+  #receiptDependency(protocol: string): object {
+    const dependency: Record<string, unknown> = {};
+    for (const receipt of this.#get(protocol).receipts) {
+      dependency[receipt] = (changes: readonly Change[]) =>
+        this.#runReceipt(protocol, receipt, changes);
+    }
+    return Object.freeze(dependency);
+  }
+
+  #capabilityMeta(protocol: string, method: string): CapabilityMethodMeta {
+    const meta = this.#get(protocol).methods[method];
+    if (meta?.kind !== "capability") {
+      throw new Error(`unknown capability "${protocol}.${method}"`);
+    }
+    return meta;
+  }
+
+  #renderReceipt(root: Receipt): Receipt {
+    const scopes = new Map<string, LabelScope>();
+    const scopeFor = (protocol: string): LabelScope => {
+      const cached = scopes.get(protocol);
+      if (cached) return cached;
+
+      const registered = this.#get(protocol);
+      const dependencies = new Map<string, PackageLabel | null>();
+      const visited = new Set<string>();
+      const collectDependencies = (current: Registered): void => {
+        for (const dependency of Object.values(current.config.protocols ?? {})) {
+          const name = configOf(dependency)?.name;
+          if (!name || visited.has(name)) continue;
+          visited.add(name);
+          const visible = this.#get(name);
+          for (const [address, label] of visible.packageLabels) {
+            dependencies.set(
+              address,
+              dependencies.has(address) ? null : { packageName: visible.packageName, name: label },
+            );
+          }
+          collectDependencies(visible);
+        }
+      };
+      collectDependencies(registered);
+
+      const scope = {
+        packageName: registered.packageName,
+        own: registered.packageLabels,
+        dependencies,
+      } satisfies LabelScope;
+      scopes.set(protocol, scope);
+      return scope;
+    };
+
+    const render = (receipt: Receipt, ancestors: readonly LabelScope[]): Receipt => {
+      const current = scopeFor(receipt.protocol);
+      const chain = [current, ...ancestors];
+      const renderText = (text: string): string =>
+        text.replace(ADDRESS_IN_TEXT, (address) => {
+          const key = address.toLowerCase();
+          const trusted = this.#trustedLabels.get(key);
+          if (trusted) return `Trusted(${trusted})`;
+          for (const scope of chain) {
+            const label = scope.own.get(key);
+            if (label) return `Package(${scope.packageName}:${label})`;
+          }
+          const dependency = current.dependencies.get(key);
+          if (dependency) return `Package(${dependency.packageName}:${dependency.name})`;
+          const onChain = this.#onChainMetadata.get(key);
+          const name = onChain?.symbol ?? onChain?.name;
+          return name ? `OnChain(${name},${address})` : address;
+        });
+
+      return {
+        ...receipt,
+        text: renderText(receipt.text),
+        changes: receipt.changes.map((child) =>
+          child.kind === "receipt"
+            ? render(child, chain)
+            : { ...child, text: renderText(child.text) },
+        ),
+      };
+    };
+
+    return render(root, []);
+  }
+
+  #get(protocol: string): Registered {
+    const registered = this.#protocols.get(protocol);
+    if (!registered) {
+      throw new Error(
+        `unknown protocol "${protocol}" (registered: ${[...this.#protocols.keys()].join(", ")})`,
+      );
+    }
+    return registered;
+  }
+}

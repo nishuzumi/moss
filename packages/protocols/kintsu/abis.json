@@ -1,0 +1,7 @@
+{
+  "stakedMonad": {
+    "proxy": "0xA3227C5969757783154C60bF0bC1944180ed81B9",
+    "implementation": "0x6A4593baBDF617d5D8D6fbC04b53435d08Baf21f",
+    "allowedExplorerOnly": []
+  }
+}

@@ -1,0 +1,744 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  type CapabilityNode,
+  type Change,
+  type Hex,
+  type MossRuntime,
+  type Receipt,
+  Registry,
+} from "@themoss/core";
+import * as erc from "@themoss/erc";
+import * as kuru from "@themoss/protocol-kuru";
+import * as morpho from "@themoss/protocol-morpho";
+import * as pendle from "@themoss/protocol-pendle";
+import type { SimulateOutcome } from "@themoss/simulator";
+import * as system from "@themoss/system";
+import { type Abi, encodeAbiParameters, encodeEventTopics, getAddress } from "viem";
+import { describe, expect, it } from "vitest";
+import { defaultProtocolModules } from "../src/composition.js";
+import { createMossServer, toAgentSimulation } from "../src/server.js";
+
+const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
+
+async function connectedClient(simulateOutcome?: SimulateOutcome) {
+  return (await connectedHarness(simulateOutcome)).client;
+}
+
+async function connectedHarness(simulateOutcome?: SimulateOutcome) {
+  const { server, simulator } = createMossServer({
+    runtime,
+    protocols: defaultProtocolModules,
+  });
+  if (simulateOutcome) {
+    simulator.simulate = async () => simulateOutcome;
+  }
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test", version: "0.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return { client, simulator };
+}
+
+function parseText(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
+  const content = result.content as { type: string; text: string }[];
+  return JSON.parse(content[0]?.text ?? "null");
+}
+
+describe("moss MCP server", () => {
+  it("exposes exactly discover, load, action, and simulate", async () => {
+    const { tools } = await (await connectedClient()).listTools();
+    expect(tools.map(({ name }) => name).sort()).toEqual([
+      "action",
+      "discover",
+      "load",
+      "simulate",
+    ]);
+  });
+
+  it("passes the explicitly selected Trusted catalog into Registry", () => {
+    const token = system.USDC_ADDRESS;
+    const owner = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const spender = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const { registry } = createMossServer({
+      runtime,
+      protocols: [erc],
+      trustedTokens: [{ address: token, label: "USDC" }],
+    });
+    const receipt = registry.parseReceipt(receiptCapability("erc20", "approve"), [
+      erc20Change(token, "Approval", owner, spender, 1n),
+    ]);
+
+    expect(receipt.text).toContain("Trusted(USDC)");
+  });
+
+  it("resolves Pendle Router errors from Protocol metadata without an MCP selector table", () => {
+    const { registry } = createMossServer({ runtime, protocols: defaultProtocolModules });
+    const contract = registry.resolveContract("pendle", pendle.PENDLE_ROUTER_ADDRESS);
+
+    expect(contract?.abi).toContainEqual(
+      expect.objectContaining({ type: "error", name: "MarketZeroNetLPFee" }),
+    );
+    expect(contract?.customErrorMessages.MarketZeroNetLPFee).toContain("LP fee rounds to zero");
+  });
+
+  it("discovers and loads the Protocols selected by the default CLI composition", async () => {
+    const client = await connectedClient();
+    const discovered = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "wrap" } }),
+    ) as { protocol: string; method: string }[];
+    expect(discovered).toEqual([
+      expect.objectContaining({ protocol: "wmon", method: "wrap", kind: "capability" }),
+    ]);
+    const swaps = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "swap" } }),
+    ) as { protocol: string; method: string }[];
+    expect(swaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          protocol: "pancakeswap-v2",
+          method: "swap",
+          kind: "capability",
+        }),
+        expect.objectContaining({
+          protocol: "pendle",
+          method: "swap",
+          kind: "capability",
+        }),
+      ]),
+    );
+    const stakes = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "stake" } }),
+    ) as { protocol: string; method: string }[];
+    expect(stakes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "apriori", method: "stake", kind: "capability" }),
+        expect.objectContaining({ protocol: "kintsu", method: "deposit", kind: "capability" }),
+      ]),
+    );
+    const supplies = parseText(
+      await client.callTool({ name: "discover", arguments: { verb: "supply" } }),
+    ) as { protocol: string; method: string }[];
+    expect(supplies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "morpho", method: "supply", kind: "capability" }),
+      ]),
+    );
+    const loaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "pancakeswap-v2", method: "swap" }] },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(loaded[0]?.params.slippage).toMatchObject({
+      type: { default: 50, description: expect.stringContaining("1 bps equals 0.01%") },
+      description: expect.stringContaining("adverse movement"),
+    });
+
+    const cloberCoordinates = parseText(
+      await client.callTool({
+        name: "discover",
+        arguments: { protocol: "clober" },
+      }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(cloberCoordinates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "clober", method: "quote", kind: "query" }),
+        expect.objectContaining({ protocol: "clober", method: "swap", kind: "capability" }),
+      ]),
+    );
+    expect(cloberCoordinates).toHaveLength(2);
+
+    const cloberLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "clober", method: "quote" },
+            { protocol: "clober", method: "swap" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    const [cloberQuote, cloberSwap] = cloberLoaded;
+    const quoteAmount = cloberQuote?.params.amountIn;
+    const swapAmount = cloberSwap?.params.amountIn;
+    const quoteSlippage = cloberQuote?.params.slippage;
+    const swapSlippage = cloberSwap?.params.slippage;
+    if (!quoteAmount || !swapAmount || !quoteSlippage || !swapSlippage) {
+      throw new Error("missing Clober parameter metadata");
+    }
+    expect(quoteAmount).toMatchObject({
+      type: { description: expect.stringMatching(/display units.*decimals/) },
+      description: expect.stringContaining("Viewer quote"),
+    });
+    expect(swapAmount).toMatchObject({
+      type: quoteAmount.type,
+      description: expect.stringContaining("Controller.spend"),
+    });
+    expect(quoteSlippage.description).toContain("returned minimumAmountOut");
+    expect(swapSlippage.description).toContain("Controller.spend");
+    expect(quoteAmount.description).not.toBe(swapAmount.description);
+    expect(quoteSlippage.description).not.toBe(swapSlippage.description);
+
+    const monadCards = parseText(
+      await client.callTool({ name: "discover", arguments: { protocol: "monad-cards" } }),
+    ) as { protocol: string; method: string; kind: string }[];
+    expect(monadCards).toEqual([
+      expect.objectContaining({
+        protocol: "monad-cards",
+        method: "totalMinted",
+        kind: "query",
+      }),
+    ]);
+    const loadedMonadCards = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "monad-cards", method: "totalMinted" }] },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(loadedMonadCards[0]?.params).toEqual({});
+
+    const unstakeLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "apriori", method: "unstake" }] },
+      }),
+    ) as { params: Record<string, { description: string }> }[];
+    expect(unstakeLoaded[0]?.params.controller).toMatchObject({
+      description: expect.stringContaining("controller"),
+    });
+
+    const supplyLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "morpho", method: "supply" }] },
+      }),
+    ) as { params: Record<string, { type: unknown; description: string }> }[];
+    expect(supplyLoaded[0]?.params.amount).toMatchObject({
+      type: { description: expect.stringContaining("positive base-10 decimal string") },
+      description: expect.stringContaining("to supply"),
+    });
+    expect(supplyLoaded[0]?.params.vault).toMatchObject({
+      description: expect.stringContaining("Morpho factory created it"),
+    });
+
+    const pendleLoaded = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: {
+          items: [
+            { protocol: "pendle", method: "swap" },
+            { protocol: "pendle", method: "quote" },
+          ],
+        },
+      }),
+    ) as { params: Record<string, { type: Record<string, unknown>; description: string }> }[];
+    expect(pendleLoaded[0]?.params.slippageBps?.type).toMatchObject({ default: 50 });
+    expect(pendleLoaded[0]?.params.amountIn?.description).toContain("may spend");
+    expect(pendleLoaded[1]?.params.amountIn?.description).toContain("price");
+  });
+
+  it("round-trips a Capability tree through action JSON", async () => {
+    const capability = parseText(
+      await (await connectedClient()).callTool({
+        name: "action",
+        arguments: {
+          protocol: "wmon",
+          method: "wrap",
+          account: "0xcccccccccccccccccccccccccccccccccccccccc",
+          params: { amount: "0.25" },
+        },
+      }),
+    ) as { kind: string; children: unknown[] };
+    expect(capability).toMatchObject({
+      kind: "capability",
+      protocol: "wmon",
+      method: "wrap",
+    });
+    expect(capability).not.toHaveProperty("receipt");
+    expect(capability.children).toHaveLength(1);
+  });
+
+  it("publishes simulate as one recursive Capability input", async () => {
+    const { tools } = await (await connectedClient()).listTools();
+    const simulate = tools.find(({ name }) => name === "simulate");
+    expect(simulate?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["capability"],
+      properties: { capability: expect.any(Object) },
+    });
+    expect(JSON.stringify(simulate?.inputSchema)).not.toContain("plans");
+    expect(JSON.stringify(simulate?.inputSchema)).not.toContain("receipt");
+  });
+
+  it("projects full SDK Receipts into ordered Agent text only", () => {
+    const outcome: SimulateOutcome = {
+      results: [successfulSimulationResult()],
+    };
+
+    const projected = toAgentSimulation(outcome);
+    expect(projected).toEqual({
+      ok: true,
+      guidance:
+        "Compare every ordered Receipt text with the user's intent before handing transactions to a signer.",
+      results: [{ protocol: "kuru", method: "swap", texts: ["first", "second"], warnings: [] }],
+    });
+  });
+
+  it("projects halted simulations into stop guidance without leaking SDK evidence", () => {
+    const outcome: SimulateOutcome = {
+      halted: { transactionIndex: 1, reason: "execution reverted" },
+      results: [
+        successfulSimulationResult(),
+        {
+          protocol: "kuru",
+          method: "swap",
+          transaction: {
+            from: "0xcccccccccccccccccccccccccccccccccccccccc",
+            to: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            data: "0xabcd",
+            value: "0x0",
+          },
+          reverted: true,
+          revertReason: "execution reverted",
+          warnings: [{ code: "REVERTED", message: "transaction reverted: execution reverted" }],
+          gas: null,
+        },
+      ],
+    };
+
+    const projected = toAgentSimulation(outcome);
+    expect(projected).toEqual({
+      ok: false,
+      guidance: "Stop. Do not sign; report the warning and failed transaction.",
+      halted: { transactionIndex: 1, reason: "execution reverted" },
+      results: [
+        { protocol: "kuru", method: "swap", texts: ["first", "second"], warnings: [] },
+        {
+          protocol: "kuru",
+          method: "swap",
+          texts: [],
+          warnings: [{ code: "REVERTED", message: "transaction reverted: execution reverted" }],
+        },
+      ],
+    });
+  });
+
+  it("shows the exact Kuru simulation response an Agent receives", async () => {
+    const user = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+    const router = kuru.KURU_ROUTER_ADDRESS;
+    const usdc = system.USDC_ADDRESS;
+    const ausd = system.AUSD_ADDRESS;
+    const firstMarket = getAddress("0x1111111111111111111111111111111111111111");
+    const secondMarket = getAddress("0x2222222222222222222222222222222222222222");
+    const receiptRegistry = new Registry(runtime).use(erc, kuru);
+    const approval = erc20Change(usdc, "Approval", user, router, 1_000_000n);
+    const swapChanges = [
+      erc20Change(usdc, "Transfer", user, router, 1_000_000n),
+      kuruEventChange(firstMarket, kuru.KuruOrderbookAbi, "Trade", [
+        1n,
+        getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        false,
+        123n,
+        0n,
+        router,
+        user,
+        500_000_000_000_000_000n,
+      ]),
+      kuruEventChange(secondMarket, kuru.KuruOrderbookAbi, "Trade", [
+        2n,
+        getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        false,
+        456n,
+        0n,
+        router,
+        user,
+        600_000n,
+      ]),
+      erc20Change(ausd, "Transfer", router, user, 1_200_000n),
+      kuruEventChange(router, kuru.KuruRouterAbi, "KuruRouterSwap", [
+        user,
+        usdc,
+        ausd,
+        1_000_000n,
+        1_200_000n,
+      ]),
+    ] as const;
+    const outcome: SimulateOutcome = {
+      results: [
+        simulationResult(
+          "erc20",
+          "approve",
+          receiptRegistry.parseReceipt(receiptCapability("erc20", "approve"), [approval]),
+        ),
+        simulationResult(
+          "kuru",
+          "swap",
+          receiptRegistry.parseReceipt(receiptCapability("kuru", "swap"), swapChanges),
+        ),
+      ],
+    };
+
+    const client = await connectedClient(outcome);
+    const response = parseText(
+      await client.callTool({
+        name: "simulate",
+        arguments: {
+          capability: receiptCapability("kuru", "swap"),
+        },
+      }),
+    );
+
+    expect(response).toEqual({
+      ok: true,
+      guidance:
+        "Compare every ordered Receipt text with the user's intent before handing transactions to a signer.",
+      results: [
+        {
+          protocol: "erc20",
+          method: "approve",
+          texts: [`ERC20 Approval: ${user} approved ${router} for 1000000 ${usdc}`],
+          warnings: [],
+        },
+        {
+          protocol: "kuru",
+          method: "swap",
+          texts: [
+            `ERC20 Transfer: 1000000 ${usdc} from ${user} to ${router}`,
+            `Trade Event: 500000000000000000 at 123 emitted by ${firstMarket}`,
+            `Trade Event: 600000 at 456 emitted by ${secondMarket}`,
+            `ERC20 Transfer: 1200000 ${ausd} from ${router} to ${user}`,
+            `Kuru Swap: 1000000 ${usdc} to 1200000 ${ausd} by ${user}`,
+          ],
+          warnings: [],
+        },
+      ],
+    });
+  });
+
+  // A Morpho vault Receipt cannot read `asset()`, so a same-shape decoy is the
+  // only thing that emits the asset movement once every genuine underlying
+  // Transfer is absent. The projection an Agent actually receives (leaf texts,
+  // never the root Outcome) must mark that token unauthenticated rather than
+  // present it as the confirmed underlying.
+  it("labels the asset candidate unauthenticated in a supply Agent projection", () => {
+    const owner = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+    const vault = getAddress("0x32841A8511D5c2c5b253f45668780B99139e476D");
+    const decoy = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const zero = "0x0000000000000000000000000000000000000000" as const;
+    const assets = 1_000_000n;
+    const shares = 979_106_230_239_639_317n;
+    const changes = [
+      morphoEvent(morpho.MetaMorphoEventsAbi, vault, "UpdateLastTotalAssets", {
+        updatedTotalAssets: 1n,
+      }),
+      erc20Change(vault, "Transfer", zero, owner, shares),
+      morphoEvent(morpho.MetaMorphoV1_1Abi, vault, "Deposit", {
+        sender: owner,
+        owner,
+        assets,
+        shares,
+      }),
+      erc20Change(decoy, "Transfer", owner, vault, assets),
+    ];
+    const registry = new Registry(runtime).use(morpho);
+    const receipt = registry.parseReceipt(receiptCapability("morpho", "supply"), changes);
+    const { results } = toAgentSimulation({
+      results: [simulationResult("morpho", "supply", receipt)],
+    });
+    const texts = results[0]?.texts ?? [];
+
+    const decoyLines = texts.filter((text) => text.toLowerCase().includes(decoy.toLowerCase()));
+    expect(decoyLines).toHaveLength(1);
+    expect(decoyLines[0]).toMatch(/unauthenticated token/i);
+    // Never surfaced as a confirmed ERC-20 movement of a known token.
+    expect(decoyLines[0]).not.toMatch(/^ERC20 Transfer:/);
+    // Belt and suspenders: the confirmed vault share token is still authenticated
+    // evidence, so the decoy is the only unauthenticated line in the projection.
+    expect(texts.filter((text) => /unauthenticated token/i.test(text))).toHaveLength(1);
+  });
+
+  it("labels the asset candidate unauthenticated in a withdraw Agent projection", () => {
+    const owner = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
+    const vault = getAddress("0x32841A8511D5c2c5b253f45668780B99139e476D");
+    const decoy = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const zero = "0x0000000000000000000000000000000000000000" as const;
+    const assets = 1_000_000n;
+    const shares = 979_106_230_239_639_317n;
+    const changes = [
+      morphoEvent(morpho.MetaMorphoEventsAbi, vault, "UpdateLastTotalAssets", {
+        updatedTotalAssets: 1n,
+      }),
+      erc20Change(vault, "Transfer", owner, zero, shares),
+      morphoEvent(morpho.MetaMorphoV1_1Abi, vault, "Withdraw", {
+        sender: owner,
+        receiver: owner,
+        owner,
+        assets,
+        shares,
+      }),
+      erc20Change(decoy, "Transfer", vault, owner, assets),
+    ];
+    const registry = new Registry(runtime).use(morpho);
+    const receipt = registry.parseReceipt(receiptCapability("morpho", "withdraw"), changes);
+    const { results } = toAgentSimulation({
+      results: [simulationResult("morpho", "withdraw", receipt)],
+    });
+    const texts = results[0]?.texts ?? [];
+
+    const decoyLines = texts.filter((text) => text.toLowerCase().includes(decoy.toLowerCase()));
+    expect(decoyLines).toHaveLength(1);
+    expect(decoyLines[0]).toMatch(/unauthenticated token/i);
+    expect(decoyLines[0]).not.toMatch(/^ERC20 Transfer:/);
+    expect(texts.filter((text) => /unauthenticated token/i.test(text))).toHaveLength(1);
+  });
+
+  it("rejects unregistered simulate Capabilities before tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: {
+        capability: receiptCapability("kuru", "missing"),
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    const content = response.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain('Error: unknown capability "kuru.missing"');
+    expect(simulated).toBe(false);
+  });
+
+  it("rejects caller-supplied Receipt names before tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: {
+        capability: { ...receiptCapability("kuru", "swap"), receipt: "swapReceipt" },
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    expect(simulated).toBe(false);
+  });
+
+  it("rejects an over-deep Capability tree before decoding or tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const response = await client.callTool({
+      name: "simulate",
+      arguments: { capability: nestedReceiptCapability(17) },
+    });
+
+    expect(response.isError).toBe(true);
+    const content = response.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain("CAPABILITY_DEPTH");
+    expect(content[0]?.text).toContain("Capability depth exceeds 16");
+    expect(simulated).toBe(false);
+  });
+
+  it("rejects oversized values and partial calldata bytes before tracing", async () => {
+    const { client, simulator } = await connectedHarness();
+    let simulated = false;
+    simulator.simulate = async () => {
+      simulated = true;
+      return { results: [] };
+    };
+
+    const base = receiptCapability("kuru", "swap");
+    const withTransaction = (data: `0x${string}`, value: `0x${string}`): CapabilityNode => ({
+      ...base,
+      children: [
+        {
+          kind: "transaction",
+          transaction: {
+            from: "0xcccccccccccccccccccccccccccccccccccccccc",
+            to: "0xdddddddddddddddddddddddddddddddddddddddd",
+            data,
+            value,
+          },
+        },
+      ],
+    });
+
+    const oversizedValue = await client.callTool({
+      name: "simulate",
+      arguments: { capability: withTransaction("0x", `0x1${"0".repeat(64)}`) },
+    });
+    expect(oversizedValue.isError).toBe(true);
+    expect((oversizedValue.content as { text: string }[])[0]?.text).toContain("VALUE_OVERFLOW");
+
+    const partialByte = await client.callTool({
+      name: "simulate",
+      arguments: { capability: withTransaction("0x0", "0x0") },
+    });
+    expect(partialByte.isError).toBe(true);
+    expect((partialByte.content as { text: string }[])[0]?.text).toContain("CALLDATA_PARTIAL_BYTE");
+
+    expect(simulated).toBe(false);
+  });
+});
+
+function eventChange(address: `0x${string}`): Change {
+  return { kind: "event", address, topics: ["0x01"], data: "0x02" };
+}
+
+function successfulSimulationResult(): SimulateOutcome["results"][number] {
+  const first = eventChange("0x1111111111111111111111111111111111111111");
+  const second = eventChange("0x2222222222222222222222222222222222222222");
+  const nested: Receipt = {
+    kind: "receipt",
+    protocol: "erc20",
+    outcome: { operation: "transfer" },
+    text: "nested summary",
+    changes: [{ kind: "change", change: second, data: { amount: "2" }, text: "second" }],
+  };
+  const receipt: Receipt = {
+    kind: "receipt",
+    protocol: "kuru",
+    outcome: { operation: "swap" },
+    text: "root summary",
+    changes: [{ kind: "change", change: first, data: { amount: "1" }, text: "first" }, nested],
+  };
+
+  return {
+    protocol: "kuru",
+    method: "swap",
+    transaction: {
+      from: "0xcccccccccccccccccccccccccccccccccccccccc",
+      to: "0xdddddddddddddddddddddddddddddddddddddddd",
+      data: "0x",
+      value: "0x0",
+    },
+    reverted: false,
+    receipt,
+    changes: [first, second],
+    warnings: [],
+    gas: "1",
+  };
+}
+
+function receiptCapability(protocol: string, method: string): CapabilityNode {
+  return {
+    kind: "capability",
+    protocol,
+    method,
+    params: {},
+    children: [
+      {
+        kind: "transaction",
+        transaction: {
+          from: "0xcccccccccccccccccccccccccccccccccccccccc",
+          to: "0xdddddddddddddddddddddddddddddddddddddddd",
+          data: "0x",
+          value: "0x0",
+        },
+      },
+    ],
+  };
+}
+
+function nestedReceiptCapability(depth: number): CapabilityNode {
+  let node = receiptCapability("kuru", "swap");
+  for (let level = 1; level < depth; level += 1) {
+    const parent = receiptCapability("kuru", "swap");
+    node = { ...parent, children: [node, ...parent.children] };
+  }
+  return node;
+}
+
+function erc20Change(
+  token: `0x${string}`,
+  eventName: "Approval" | "Transfer",
+  from: `0x${string}`,
+  to: `0x${string}`,
+  amount: bigint,
+): Change {
+  const args = eventName === "Approval" ? { owner: from, spender: to } : { from, to };
+  return {
+    kind: "event",
+    address: token,
+    topics: encodeEventTopics({ abi: erc.ERC20Abi, eventName, args } as never) as readonly Hex[],
+    data: encodeAbiParameters([{ type: "uint256" }], [amount]),
+  };
+}
+
+function kuruEventChange(
+  address: `0x${string}`,
+  abi: typeof kuru.KuruRouterAbi | typeof kuru.KuruOrderbookAbi,
+  eventName: "Trade" | "KuruRouterSwap",
+  values: readonly unknown[],
+): Change {
+  const types =
+    eventName === "Trade"
+      ? ["uint40", "address", "bool", "uint256", "uint96", "address", "address", "uint96"]
+      : ["address", "address", "address", "uint256", "uint256"];
+  return {
+    kind: "event",
+    address,
+    topics: encodeEventTopics({ abi, eventName } as never) as readonly Hex[],
+    data: encodeAbiParameters(types.map((type) => ({ type })) as never, values as never),
+  };
+}
+
+interface AbiInput {
+  name: string;
+  type: string;
+  indexed?: boolean;
+}
+
+/** Encodes one Morpho event Change from an ABI and its argument record. */
+function morphoEvent(
+  abi: readonly unknown[],
+  address: `0x${string}`,
+  eventName: string,
+  args: Record<string, unknown>,
+): Change {
+  const entry = (abi as readonly { type: string; name?: string; inputs?: AbiInput[] }[]).find(
+    (item) => item.type === "event" && item.name === eventName,
+  );
+  if (!entry?.inputs) throw new Error(`fixture ABI has no event ${eventName}`);
+  const nonIndexed = entry.inputs.filter((input) => !input.indexed);
+  return {
+    kind: "event",
+    address,
+    topics: encodeEventTopics({ abi: abi as Abi, eventName, args }) as readonly Hex[],
+    data: encodeAbiParameters(
+      nonIndexed,
+      nonIndexed.map((input) => args[input.name]),
+    ),
+  };
+}
+
+function simulationResult(protocol: string, method: string, receipt: Receipt) {
+  return {
+    protocol,
+    method,
+    transaction: {
+      from: "0xcccccccccccccccccccccccccccccccccccccccc" as const,
+      to: "0xdddddddddddddddddddddddddddddddddddddddd" as const,
+      data: "0x" as const,
+      value: "0x0" as const,
+    },
+    reverted: false,
+    receipt,
+    warnings: [],
+    gas: "1",
+  };
+}

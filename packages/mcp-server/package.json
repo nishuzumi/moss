@@ -1,0 +1,49 @@
+{
+  "name": "@themoss/mcp-server",
+  "version": "0.1.0",
+  "description": "Moss MCP server: discover / load / action / simulate over stdio",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "moss-mcp": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/cli.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@themoss/core": "workspace:*",
+    "@themoss/erc": "workspace:*",
+    "@themoss/protocol-aave": "workspace:*",
+    "@themoss/protocol-apriori": "workspace:*",
+    "@themoss/protocol-clober": "workspace:*",
+    "@themoss/protocol-kintsu": "workspace:*",
+    "@themoss/protocol-kuru": "workspace:*",
+    "@themoss/protocol-monad-cards": "workspace:*",
+    "@themoss/protocol-morpho": "workspace:*",
+    "@themoss/protocol-nadfun": "workspace:*",
+    "@themoss/protocol-pancakeswap": "workspace:*",
+    "@themoss/protocol-pendle": "workspace:*",
+    "@themoss/protocol-uniswap": "workspace:*",
+    "@themoss/simulator": "workspace:*",
+    "@themoss/system": "workspace:*",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "viem": "^2.54.3",
+    "vitest": "^3.2.6"
+  }
+}
