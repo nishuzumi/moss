@@ -1,4 +1,12 @@
-import type { ActionCtx, AddressValue, ProtocolRef } from "@themoss/core";
+import type {
+  ActionCtx,
+  AddressValue,
+  CapabilitySpec,
+  Handle,
+  Hex,
+  ProtocolRef,
+} from "@themoss/core";
+import type { distributorAbi } from "../src/abis/distributor.js";
 import type { MerklClaimOutcome, MerklProtocol, MerklRewardsResult } from "../src/index.js";
 
 declare const merkl: MerklProtocol;
@@ -7,6 +15,8 @@ declare const dependency: ProtocolRef<MerklProtocol>;
 
 const TOKEN = "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A" as const;
 const ACCOUNT = "0x461549c73FFfB676860A0E49F5DaABEcf4E8D2d7" as const;
+const ZERO = "0x0000000000000000000000000000000000000000" as const;
+const PROOF_NODE = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 
 type RewardsParams = Parameters<MerklProtocol["rewards"]>[0];
 type ClaimParams = Parameters<MerklProtocol["claim"]>[0];
@@ -19,10 +29,51 @@ merkl.claim(claimParams, ctx);
 merkl.claimReceipt([]).outcome satisfies MerklClaimOutcome;
 dependency.claimReceipt([]).protocol satisfies string;
 
+function distributorHandleFixture(handle: Handle<typeof distributorAbi>) {
+  handle.claim([[ACCOUNT], [TOKEN], [1n], [[PROOF_NODE]]]);
+  handle.read.getMerkleRoot();
+  handle.read.claimed([ACCOUNT, TOKEN]);
+  handle.read.claimRecipient([ACCOUNT, ZERO]);
+  // @ts-expect-error ABI-generic Handles reject unknown Distributor methods.
+  handle.notARealMethod([]);
+  // @ts-expect-error Distributor.claim requires all four ABI arguments.
+  handle.claim([[ACCOUNT], [TOKEN], [1n]]);
+  // @ts-expect-error Distributor.claimRecipient requires two address arguments.
+  handle.read.claimRecipient([ACCOUNT]);
+}
+
 const result = null as unknown as RewardsResult;
 result.account satisfies AddressValue;
 result.rewards[0]?.token satisfies AddressValue | undefined;
 result.rewards[0]?.claimableAmount satisfies string | undefined;
+
+declare function assertClaimSpec(spec: CapabilitySpec<MerklProtocol>): void;
+
+assertClaimSpec({
+  intent: "Claim selected Merkl rewards",
+  verb: "claim",
+  params: {},
+  receipt: "claimReceipt",
+  risk: ["fundOut"],
+});
+
+assertClaimSpec({
+  intent: "Claim selected Merkl rewards",
+  verb: "claim",
+  params: {},
+  // @ts-expect-error Query methods are not valid Receipt bindings.
+  receipt: "rewards",
+  risk: ["fundOut"],
+});
+
+assertClaimSpec({
+  intent: "Claim selected Merkl rewards",
+  verb: "claim",
+  params: {},
+  // @ts-expect-error Receipt bindings must name an existing ReceiptResult method.
+  receipt: "notAReceipt",
+  risk: ["fundOut"],
+});
 
 // @ts-expect-error Query account must be an EVM address.
 void merkl.rewards({ account: "not-an-address" });
@@ -49,3 +100,5 @@ void dependency.distributor;
 
 void rewardsParams;
 void claimParams;
+void distributorHandleFixture;
+void assertClaimSpec;
