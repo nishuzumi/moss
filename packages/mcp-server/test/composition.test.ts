@@ -11,6 +11,25 @@ describe("default MCP Protocol composition", () => {
     expect(nadfunModule).toBeDefined();
   });
 
+  it("includes the Nad Name Service Protocol module", () => {
+    const nnsModule = defaultProtocolModules.find((module) => "NadNameService" in module);
+
+    expect(nnsModule).toBeDefined();
+  });
+
+  it("discovers Nad Name Service identity Queries through the default composition", () => {
+    const registry = new Registry(runtime).use(...defaultProtocolModules);
+    const discovered = registry.discover({ protocol: "nns" });
+
+    expect(discovered).toHaveLength(2);
+    expect(discovered).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocol: "nns", method: "primaryName", kind: "query" }),
+        expect.objectContaining({ protocol: "nns", method: "profile", kind: "query" }),
+      ]),
+    );
+  });
+
   it("discovers and loads Nad.fun Query coordinates through the default composition", () => {
     const registry = new Registry(runtime).use(...defaultProtocolModules);
 

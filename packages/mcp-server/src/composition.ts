@@ -7,6 +7,7 @@ import * as kuru from "@themoss/protocol-kuru";
 import * as monadCards from "@themoss/protocol-monad-cards";
 import * as morpho from "@themoss/protocol-morpho";
 import * as nadfun from "@themoss/protocol-nadfun";
+import * as nns from "@themoss/protocol-nns";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
 import * as pendle from "@themoss/protocol-pendle";
 import * as uniswap from "@themoss/protocol-uniswap";
@@ -24,6 +25,7 @@ export const defaultProtocolModules = [
   monadCards,
   morpho,
   nadfun,
+  nns,
   pancakeswap,
   pendle,
   uniswap,

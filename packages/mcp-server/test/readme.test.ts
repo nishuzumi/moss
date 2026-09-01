@@ -26,6 +26,7 @@ const expectedPackageOrder = [
   "@themoss/protocol-apriori",
   "@themoss/protocol-morpho",
   "@themoss/protocol-nadfun",
+  "@themoss/protocol-nns",
   "@themoss/protocol-pancakeswap",
   "@themoss/protocol-monad-cards",
   "@themoss/protocol-pendle",
