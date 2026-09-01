@@ -17,6 +17,7 @@
       "@themoss/protocol-monad-cards",
       "@themoss/protocol-morpho",
       "@themoss/protocol-nadfun",
+      "@themoss/protocol-nns",
       "@themoss/protocol-pancakeswap",
       "@themoss/protocol-pendle",
       "@themoss/protocol-uniswap",
