@@ -70,6 +70,60 @@ class PerpsFixture {
 }
 
 @Protocol({
+  name: "empty-risk-fixture",
+  category: "token",
+  description: "Compile-time explicit empty risk fixture.",
+  contracts: {},
+})
+class EmptyRiskFixture {
+  @Capability<EmptyRiskFixture, typeof positionParams>({
+    intent: "Claim a reviewed operation with no applicable closed-set risk label.",
+    verb: "claim",
+    params: positionParams,
+    receipt: "emptyRiskReceipt",
+    risk: [],
+  })
+  async claim(
+    _params: InferParams<typeof positionParams>,
+    __: { account: AddressValue },
+  ): Promise<TransactionNode[]> {
+    return [];
+  }
+
+  @Receipt()
+  emptyRiskReceipt(_changes: readonly Change[]): ReceiptResult<null> {
+    return { kind: "receipt", outcome: null, text: "", changes: [] };
+  }
+}
+
+@Protocol({
+  name: "missing-risk-fixture",
+  category: "token",
+  description: "Compile-time missing risk fixture.",
+  contracts: {},
+})
+class MissingRiskFixture {
+  // @ts-expect-error Capability metadata requires an explicit risk array.
+  @Capability<MissingRiskFixture, typeof positionParams>({
+    intent: "Claim without an authored risk decision.",
+    verb: "claim",
+    params: positionParams,
+    receipt: "missingRiskReceipt",
+  })
+  async claim(
+    _params: InferParams<typeof positionParams>,
+    __: { account: AddressValue },
+  ): Promise<TransactionNode[]> {
+    return [];
+  }
+
+  @Receipt()
+  missingRiskReceipt(_changes: readonly Change[]): ReceiptResult<null> {
+    return { kind: "receipt", outcome: null, text: "", changes: [] };
+  }
+}
+
+@Protocol({
   name: "invalid-category-fixture",
   // @ts-expect-error Category is a closed set; "perpetuals" is not a member.
   category: "perpetuals",
@@ -173,6 +227,8 @@ tokenMetadata("metadata", { address: ADDRESS });
 void LabeledFixture;
 void InvalidLabeledFixture;
 void PerpsFixture;
+void EmptyRiskFixture;
+void MissingRiskFixture;
 void InvalidCategoryFixture;
 void InvalidPerpsFixture;
 void debtRisk;

@@ -363,11 +363,13 @@ export class Registry {
       if (!VERBS.includes(meta.spec.verb)) {
         throw new Error(`capability "${config.name}.${name}" has an invalid verb`);
       }
-      if (meta.spec.risk.length === 0) {
-        throw new Error(`capability "${config.name}.${name}" must declare a risk label`);
+      if (!Array.isArray(meta.spec.risk)) {
+        throw new Error(`capability "${config.name}.${name}" must declare a risk array`);
       }
-      if (meta.spec.risk.some((risk) => !RISK_LABELS.includes(risk))) {
-        throw new Error(`capability "${config.name}.${name}" has an invalid risk label`);
+      for (const risk of meta.spec.risk) {
+        if (!RISK_LABELS.includes(risk)) {
+          throw new Error(`capability "${config.name}.${name}" has an invalid risk label`);
+        }
       }
       if (!receipts.has(meta.spec.receipt)) {
         throw new Error(

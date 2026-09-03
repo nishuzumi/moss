@@ -141,6 +141,8 @@ Here `approval` is a nested ERC Capability with its own direct transaction and R
 
 The authoring method may use local bigint or viem helpers while constructing calldata. Values stored in the serializable Capability tree use JSON-safe forms such as decimal strings.
 
+Every Capability must explicitly declare `risk`. When no current closed-set RiskLabel accurately applies, `risk: []` records that the author reviewed the operation and found no applicable current danger category; it is not omitted metadata or a substitute for analysis. If the evidence exposes a recurring reusable danger that Core cannot represent, raise a focused Core vocabulary issue and wait for the maintainer decision. Ask for Core or maintainer review when uncertain, and replace `[]` if Core later defines an applicable label. Receipt tests must retain the relevant Changes and demonstrate that they do not move assets out of the account; contradictory Receipt evidence refutes the declaration.
+
 ## 5. Parse actual Changes with a Receipt
 
 ```ts

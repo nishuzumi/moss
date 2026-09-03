@@ -88,7 +88,7 @@ type Stub = {
 };
 ```
 
-`risk` uses Core's closed set. `fundOut` means assets leave the account in the current transaction and does not cover future repayment obligations. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. Free-form `tags` may add description, but do not replace risk classification.
+`risk` uses Core's closed set. `fundOut` means assets leave the account in the current transaction and does not cover future repayment obligations. `debt` means the Capability increases the account's repayment obligations, even when no asset leaves the account in the transaction. An explicitly authored `risk: []` means the author reviewed the operation and determined that none of the current closed-set RiskLabels accurately applies. It is not omitted metadata or an opt-out from analysis, and `load` returns the authored empty list unchanged. If a recurring reusable danger semantic is missing, raise a focused Core vocabulary issue first and wait for the maintainer decision; use `risk: []` only after review finds no current applicable danger category; request Core or maintainer review when uncertain; replace `[]` if Core later defines an applicable label. Receipt evidence remains authoritative and can refute an inaccurate no-outbound claim. Free-form `tags` may add description, but do not replace risk classification.
 
 Each parameter contains two independent explanations:
 
