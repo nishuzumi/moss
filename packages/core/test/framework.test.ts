@@ -493,6 +493,35 @@ class BadReceiptProtocol {
 }
 
 @Protocol({
+  name: "empty-risk",
+  category: "token",
+  description: "Fixture with reviewed empty risk metadata.",
+  contracts: {},
+})
+class EmptyRiskProtocol {
+  @Capability<EmptyRiskProtocol, typeof noParams>({
+    intent: "Execute the fixture",
+    verb: "transfer",
+    params: noParams,
+    receipt: "executeReceipt",
+    risk: [],
+  })
+  async execute(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT)];
+  }
+
+  @Receipt()
+  executeReceipt(changes: readonly Change[]): MossReceipt<null> {
+    return {
+      kind: "receipt",
+      outcome: null,
+      text: "executed",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+}
+
+@Protocol({
   name: "missing-risk",
   category: "token",
   description: "Fixture with missing risk metadata.",
@@ -500,11 +529,72 @@ class BadReceiptProtocol {
 })
 class MissingRiskProtocol {
   @Capability<MissingRiskProtocol, typeof noParams>({
-    intent: "Execute the fixture",
+    intent: "Execute the missing-risk fixture",
     verb: "transfer",
     params: noParams,
     receipt: "executeReceipt",
-    risk: [],
+    // biome-ignore lint/suspicious/noExplicitAny: proving the runtime guard for malformed metadata
+    risk: undefined as any,
+  })
+  async execute(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT)];
+  }
+
+  @Receipt()
+  executeReceipt(changes: readonly Change[]): MossReceipt<null> {
+    return {
+      kind: "receipt",
+      outcome: null,
+      text: "executed",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+}
+
+@Protocol({
+  name: "non-array-risk",
+  category: "token",
+  description: "Fixture with non-array risk metadata.",
+  contracts: {},
+})
+class NonArrayRiskProtocol {
+  @Capability<NonArrayRiskProtocol, typeof noParams>({
+    intent: "Execute the non-array-risk fixture",
+    verb: "transfer",
+    params: noParams,
+    receipt: "executeReceipt",
+    // biome-ignore lint/suspicious/noExplicitAny: proving the runtime guard for malformed metadata
+    risk: "fundOut" as any,
+  })
+  async execute(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
+    return [transaction(ctx.account, VAULT)];
+  }
+
+  @Receipt()
+  executeReceipt(changes: readonly Change[]): MossReceipt<null> {
+    return {
+      kind: "receipt",
+      outcome: null,
+      text: "executed",
+      changes: changes.map((change) => ({ kind: "change", change, data: null, text: "change" })),
+    };
+  }
+}
+
+@Protocol({
+  name: "sparse-risk",
+  category: "token",
+  description: "Fixture with sparse risk metadata.",
+  contracts: {},
+})
+class SparseRiskProtocol {
+  @Capability<SparseRiskProtocol, typeof noParams>({
+    intent: "Execute the sparse-risk fixture",
+    verb: "transfer",
+    params: noParams,
+    receipt: "executeReceipt",
+    // biome-ignore lint/suspicious/noExplicitAny: proving every runtime array index is validated
+    risk: new Array(1) as any,
   })
   async execute(_: InferParams<typeof noParams>, ctx: { account: AddressValue }) {
     return [transaction(ctx.account, VAULT)];
@@ -621,6 +711,17 @@ function receiptFor<T extends "approve" | "borrow" | "swap">(
   };
 }
 
+function receiptMovesNativeAssetsOut(receipt: MossReceipt, account: AddressValue): boolean {
+  return receipt.changes.some((entry) => {
+    if (entry.kind === "receipt") return receiptMovesNativeAssetsOut(entry, account);
+    return (
+      entry.change.kind === "nativeTransfer" &&
+      entry.change.from.toLowerCase() === account.toLowerCase() &&
+      entry.change.to.toLowerCase() !== account.toLowerCase()
+    );
+  });
+}
+
 const runtime: MossRuntime = {
   rpcUrl: "http://offline",
   // biome-ignore lint/suspicious/noExplicitAny: calls are not used by this unit test
@@ -628,6 +729,38 @@ const runtime: MossRuntime = {
 };
 
 describe("framework core seam", () => {
+  it("accepts authored empty risk and requires Receipt evidence to show no outbound Change", async () => {
+    const registry = new Registry(runtime).use(EmptyRiskProtocol);
+    expect(registry.load([{ protocol: "empty-risk", method: "execute" }])[0]?.risk).toEqual([]);
+
+    const capability = await registry.action("empty-risk", "execute", ACCOUNT, {});
+    if (capability.kind !== "capability") throw new Error("expected Capability");
+
+    const inbound: Change = {
+      kind: "nativeTransfer",
+      from: VAULT,
+      to: ACCOUNT,
+      value: "1",
+    };
+    const inboundReceipt = registry.parseReceipt(capability, [inbound]);
+    const inboundEvidence = inboundReceipt.changes[0];
+    if (inboundEvidence?.kind !== "change") throw new Error("expected inbound ReceiptChange");
+    expect(inboundEvidence.change).toBe(inbound);
+    expect(receiptMovesNativeAssetsOut(inboundReceipt, ACCOUNT)).toBe(false);
+
+    const outbound: Change = {
+      kind: "nativeTransfer",
+      from: ACCOUNT,
+      to: VAULT,
+      value: "1",
+    };
+    const outboundReceipt = registry.parseReceipt(capability, [outbound]);
+    const outboundEvidence = outboundReceipt.changes[0];
+    if (outboundEvidence?.kind !== "change") throw new Error("expected outbound ReceiptChange");
+    expect(outboundEvidence.change).toBe(outbound);
+    expect(receiptMovesNativeAssetsOut(outboundReceipt, ACCOUNT)).toBe(true);
+  });
+
   it("loads the debt risk label through Registry", () => {
     const registry = new Registry(runtime).use(DebtProtocol);
     const [loaded] = registry.load([{ protocol: "debt-fixture", method: "borrow" }]);
@@ -827,7 +960,10 @@ describe("framework core seam", () => {
       "not decorated with @Protocol",
     );
     expect(() => new Registry(runtime).use(BadReceiptProtocol)).toThrow("not an @Receipt method");
-    expect(() => new Registry(runtime).use(MissingRiskProtocol)).toThrow("risk label");
+    expect(() => new Registry(runtime).use(EmptyRiskProtocol)).not.toThrow();
+    expect(() => new Registry(runtime).use(MissingRiskProtocol)).toThrow("risk array");
+    expect(() => new Registry(runtime).use(NonArrayRiskProtocol)).toThrow("risk array");
+    expect(() => new Registry(runtime).use(SparseRiskProtocol)).toThrow("invalid risk label");
     expect(() => new Registry(runtime).use(BadErrorMessageProtocol)).toThrow(
       'error "MissingError" is not declared by a contract ABI',
     );
