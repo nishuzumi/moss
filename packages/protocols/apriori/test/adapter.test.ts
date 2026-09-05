@@ -401,6 +401,160 @@ describe("claimReceipt", () => {
   });
 });
 
+// Real mainnet evidence, Redeem tx
+// 0x7413c8200dbec7806270958c68619f6f1458f70411cff80c84d6fd4eb9ced13f (block
+// 90460609), the transaction the ABI header already cites. Every byte below is
+// copied from `eth_getTransactionReceipt` and `debug_traceTransaction`, so this
+// fixture is deliberately NOT built with `encodeEventTopics`: a fixture encoded
+// off the ABI under test decodes consistently even when an `indexed` flag is
+// wrong, because `indexed` never enters the event signature hash. Feeding the
+// chain's own bytes is what pins the layout.
+const REDEEM_TX = "0x7413c8200dbec7806270958c68619f6f1458f70411cff80c84d6fd4eb9ced13f";
+const LIVE_VAULT = "0x0c65a0bc65a5d819235b71f554d210d3f80e0852" as const;
+const LIVE_ACTOR = "0x7c5f36507a74f22661eb793176811fef11438ea3" as const;
+// The three ABI-coded words of Redeem's data section, in on-chain order.
+const LIVE_SHARES_WORD = "0000000000000000000000000000000000000000000001f983aedeab934ba89a";
+const LIVE_ASSETS_WORD = "00000000000000000000000000000000000000000000021e90cbb85862bed8a1";
+const LIVE_FEE_WORD = "0000000000000000000000000000000000000000000000008b092c42b710d902";
+const LIVE_REQUEST_ID = 10470n;
+const LIVE_SHARES = 9_325_094_523_516_731_762_842n;
+const LIVE_ASSETS = 10_008_568_923_602_064_169_121n;
+const LIVE_FEE = 10_018_587_511_113_177_346n;
+
+// log 1: Transfer(vault -> zero), the aprMON burn. Value word is byte-identical
+// to Redeem's shares word, which is the cross-check the parser relies on.
+const liveBurnLog: Change = {
+  kind: "event",
+  address: LIVE_VAULT,
+  topics: [
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+    "0x0000000000000000000000000c65a0bc65a5d819235b71f554d210d3f80e0852",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+  ],
+  data: `0x${LIVE_SHARES_WORD}`,
+};
+
+// log 2: Redeem(controller, receiver, requestId indexed; shares, assets, fee in
+// data). `liveRedeemLog()` rebuilds it from the words so a tamper case can move
+// one word without touching anything else.
+function liveRedeemLog(
+  words: readonly string[] = [LIVE_SHARES_WORD, LIVE_ASSETS_WORD, LIVE_FEE_WORD],
+  topics: readonly Hex[] = [
+    "0x8caf04742286d017f9ac3924388e188c73e6e5094311c5e59a61a7ef86dda8bf",
+    "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
+    "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
+    "0x00000000000000000000000000000000000000000000000000000000000028e6",
+  ],
+): Change {
+  return { kind: "event", address: LIVE_VAULT, topics, data: `0x${words.join("")}` };
+}
+
+// The native MON payout carries no log. It comes from the call trace: the
+// DELEGATECALL frame transfers Redeem.assets from the vault to the receiver.
+const livePayout = (value: bigint = LIVE_ASSETS): Change =>
+  nativeChange(LIVE_VAULT, LIVE_ACTOR, value);
+
+describe(`claimReceipt against the real logs of ${REDEEM_TX}`, () => {
+  it("parses the chain's own bytes into the evidence-backed outcome", async () => {
+    const capability = await offlineRegistry.action("apriori", "claim", LIVE_ACTOR, {
+      requestId: LIVE_REQUEST_ID.toString(),
+      receiver: LIVE_ACTOR,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const changes = [liveBurnLog, liveRedeemLog(), livePayout()];
+    const receipt = offlineRegistry.parseReceipt(capability, changes);
+
+    expect(receipt.outcome).toEqual({
+      operation: "claim",
+      controller: getAddress(LIVE_ACTOR),
+      receiver: getAddress(LIVE_ACTOR),
+      requestIds: [LIVE_REQUEST_ID.toString()],
+      shares: LIVE_SHARES.toString(),
+      assets: LIVE_ASSETS.toString(),
+      fee: LIVE_FEE.toString(),
+    });
+    // assets is net of fee: the chain's own words say so.
+    expect(LIVE_ASSETS + LIVE_FEE).toBe(10_018_587_511_113_177_346_467n);
+    expect(receipt.changes).toHaveLength(3);
+    changes.forEach((change, index) => {
+      expect(leafChangeOf(receipt.changes[index])).toBe(change);
+    });
+  });
+
+  // Falsification. A layout error must fail, not read the wrong field quietly.
+  it("rejects the payloads a wrong layout would produce", async () => {
+    const capability = await offlineRegistry.action("apriori", "claim", LIVE_ACTOR, {
+      requestId: LIVE_REQUEST_ID.toString(),
+      receiver: LIVE_ACTOR,
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const parse = (changes: readonly Change[]) => offlineRegistry.parseReceipt(capability, changes);
+
+    // shares and assets swapped in the data section, which is what reading the
+    // words in the wrong order looks like. The burn cross-check catches it.
+    expect(() =>
+      parse([
+        liveBurnLog,
+        liveRedeemLog([LIVE_ASSETS_WORD, LIVE_SHARES_WORD, LIVE_FEE_WORD]),
+        livePayout(),
+      ]),
+    ).toThrow(/burn/);
+
+    // fee read as assets: the payout would have to be the gross to agree.
+    expect(() =>
+      parse([
+        liveBurnLog,
+        liveRedeemLog([LIVE_SHARES_WORD, LIVE_FEE_WORD, LIVE_ASSETS_WORD]),
+        livePayout(),
+      ]),
+    ).toThrow(/payout/);
+
+    // Paying the gross instead of the net is refused, so the net reading of
+    // Redeem.assets is asserted rather than assumed.
+    expect(() => parse([liveBurnLog, liveRedeemLog(), livePayout(LIVE_ASSETS + LIVE_FEE)])).toThrow(
+      /payout/,
+    );
+
+    // requestId moved out of topics is the one flag change that shifts payload
+    // length. The Redeem log then matches no aPriori event, so it falls through
+    // to the erc20 dependency and fails closed there rather than decoding into
+    // the wrong fields.
+    expect(() =>
+      parse([
+        liveBurnLog,
+        liveRedeemLog(
+          [LIVE_SHARES_WORD, LIVE_ASSETS_WORD, LIVE_FEE_WORD],
+          [
+            "0x8caf04742286d017f9ac3924388e188c73e6e5094311c5e59a61a7ef86dda8bf",
+            "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
+            "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
+          ],
+        ),
+        livePayout(),
+      ]),
+    ).toThrow(/unsupported ERC-20 event/);
+  });
+
+  // Honest limit of this transaction: controller and receiver are the same
+  // address, so swapping topic1 and topic2 produces a byte-identical log and
+  // this fixture cannot discriminate those two indexed slots. Asserted rather
+  // than left as a comment, because a reader deserves proof of the blind spot.
+  // The verified implementation source pins their order; a cited Redeem with
+  // controller != receiver would close it here too.
+  it("cannot pin controller against receiver, because this tx has them equal", () => {
+    const swapped = liveRedeemLog(
+      [LIVE_SHARES_WORD, LIVE_ASSETS_WORD, LIVE_FEE_WORD],
+      [
+        "0x8caf04742286d017f9ac3924388e188c73e6e5094311c5e59a61a7ef86dda8bf",
+        "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
+        "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
+        "0x00000000000000000000000000000000000000000000000000000000000028e6",
+      ],
+    );
+    expect(swapped).toEqual(liveRedeemLog());
+  });
+});
+
 describe.skipIf(!!process.env.MOSS_SKIP_E2E)("aPriori mainnet", () => {
   it("has deployed bytecode at the aprMON proxy address", { timeout: 60_000 }, async () => {
     const runtime = await createRuntime();
