@@ -579,6 +579,46 @@ describe("Capability simulation", () => {
     expect(outcome.syntheticState).toEqual([B]);
   });
 
+  it("reports the exact base block it pinned and reused for the whole run", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, logs: [] }]),
+      {
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
+  });
+
+  it("still reports the pinned block on a halted run", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, error: "execution reverted" }]),
+      { receipt: (node, changes) => coveringReceipt(node.protocol, changes) },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeDefined();
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
+  });
+
+  it("omits simulatorPinnedBlock when block resolution itself fails, since no block was ever pinned", async () => {
+    const runtime: MossRuntime = {
+      rpcUrl: "http://offline",
+      client: {
+        request: async () => {
+          throw new Error("rpc unreachable");
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: minimal failing RPC fixture
+      } as any,
+    };
+    const outcome = await createTraceSimulator(runtime, {
+      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+    }).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeDefined();
+    expect(outcome).not.toHaveProperty("simulatorPinnedBlock");
+  });
+
   it("explains a terse require message by its exact payload", async () => {
     // Protocols that compile their messages down to a few characters are the reason the payload is
     // the key: every one of them decodes as `Error`, so an error name cannot address one.
