@@ -80,6 +80,11 @@
   of immutable Event/native-transfer Changes. Reject inferred or reconstructed
   evidence, approximate ordering, continued execution after a Warning, and
   Receipt parsers that read external state.
+- `risk` is required and drawn from the closed RiskLabel set; an explicitly
+  authored `risk: []` means review found no current label applies (ADR 0003).
+  Reject knowingly inaccurate placeholder labels, and reject `risk: []` without
+  Receipt test coverage asserting that no Change moves assets out of the
+  account.
 - Moss v1 is Monad-mainnet only. Reject speculative per-chain maps or repeated
   chain IDs in Protocol metadata, address constants, and Capability nodes;
   Runtime must instead reject an RPC whose reported chain ID is not `143`.
