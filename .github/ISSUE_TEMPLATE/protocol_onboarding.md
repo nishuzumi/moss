@@ -19,6 +19,8 @@ labels: protocol
 | ---- | ------------ | ----------- |
 |      |              |             |
 
+<!-- Closed set: fundOut / approval / priceImpact / debt / leverage / liquidation. If none accurately applies after review, declare `risk: []` — raise a focused Core vocabulary issue first when a reusable danger semantic is missing, ask for maintainer review when uncertain, and give the Receipt test coverage that shows no Change moves assets out of the account. -->
+
 ## Queries to support
 
 <!-- Read-only data worth exposing: APY, positions, quotes, claimable amounts... -->
