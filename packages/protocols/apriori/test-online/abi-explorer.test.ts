@@ -1,11 +1,11 @@
 /**
  * On-chain derivation checks for the vendored aPriori ABI (ADR 0007).
  *
- * The aprMON EIP-1967 implementation is UNVERIFIED on MonadScan (no Sourcify
- * match either), so there is no explorer artifact to fetch and compare and no
- * API key involved. The ABI is instead vendored verbatim from aPriori's
- * official integration docs (see src/abis/apriori.ts) and this suite enforces
- * the derivation directly against Monad mainnet:
+ * When this suite was written the aprMON EIP-1967 implementation was
+ * unverified on MonadScan and Sourcify, so there was no explorer artifact to
+ * fetch and compare and no API key involved. The ABI is vendored verbatim from
+ * aPriori's official integration docs (see src/abis/apriori.ts) and this suite
+ * enforces the derivation directly against Monad mainnet:
  *
  * - the proxy address recorded in abis.json matches the adapter's constant;
  * - the proxy's EIP-1967 slot still resolves to the implementation recorded
@@ -18,8 +18,9 @@
  * - convertToShares/convertToAssets round-trip at a sane LST exchange rate.
  *
  * Requires Monad mainnet RPC; runs only via `pnpm test:abi:online`.
- * If aPriori verifies the implementation, replace this with the keyed
- * fetchAbi + compareDeployedAbi cross-check used by protocol-kuru.
+ * The implementation is verified on MonadScan since 2026-09-05; replacing this
+ * with the keyed fetchAbi + compareDeployedAbi cross-check used by
+ * protocol-kuru is tracked in #197.
  */
 
 import { readFileSync } from "node:fs";
