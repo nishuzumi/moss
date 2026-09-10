@@ -1,45 +1,50 @@
 /**
- * On-chain derivation checks for the vendored aPriori ABI (ADR 0007).
+ * Keyed online cross-check for the explorer-tier aPriori aprMON ABI (ADR 0007).
  *
- * When this suite was written the aprMON EIP-1967 implementation was
- * unverified on MonadScan and Sourcify, so there was no explorer artifact to
- * fetch and compare and no API key involved. The ABI is vendored verbatim from
- * aPriori's official integration docs (see src/abis/apriori.ts) and this suite
- * enforces the derivation directly against Monad mainnet:
+ * Online and keyed on purpose: requires MONADSCAN_API_KEY plus Monad mainnet
+ * RPC and runs only via `pnpm test:abi:online`, never inside the offline
+ * `pnpm test` suite. A missing key FAILS this suite instead of skipping, so a
+ * misconfigured pipeline cannot stay green.
  *
- * - the proxy address recorded in abis.json matches the adapter's constant;
- * - the proxy's EIP-1967 slot still resolves to the implementation recorded
- *   in abis.json — an aPriori upgrade turns this suite red so a human
- *   re-verifies the vendored ABI before trusting it again;
- * - proxy and implementation both have deployed bytecode;
- * - every vendored function selector and event topic hash, recomputed from
- *   the artifact, appears in the deployed implementation bytecode;
+ * What it enforces:
+ * - the aprMON proxy recorded in abis.json is the one the adapter uses;
+ * - the proxy still points at the implementation recorded in abis.json
+ *   (ERC-1967 slot read); an aPriori upgrade turns this suite red so a human
+ *   re-verifies the ABI before trusting it again;
  * - on-chain name/symbol/decimals match the exported APRMON_* constants;
- * - convertToShares/convertToAssets round-trip at a sane LST exchange rate.
- *
- * Requires Monad mainnet RPC; runs only via `pnpm test:abi:online`.
- * The implementation is verified on MonadScan since 2026-09-05; replacing this
- * with the keyed fetchAbi + compareDeployedAbi cross-check used by
- * protocol-kuru is tracked in #197.
+ * - convertToShares/convertToAssets round-trip at a sane LST exchange rate;
+ * - the committed ABI is semantically identical to the ABI of the
+ *   explorer-verified implementation: a second supply chain, independent of
+ *   the committed artifact, that catches any drift.
  */
 
 import { readFileSync } from "node:fs";
-import { ERC1967_IMPLEMENTATION_SLOT, erc1967ImplementationAddress } from "@themoss/abi-tools";
+import {
+  compareDeployedAbi,
+  ERC1967_IMPLEMENTATION_SLOT,
+  erc1967ImplementationAddress,
+  fetchAbi,
+} from "@themoss/abi-tools";
 import { createRuntime } from "@themoss/core";
-import { type Address, getAddress, toEventSelector, toFunctionSelector } from "viem";
+import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { AprMonAbi } from "../src/abis/apriori.js";
 import { APRMON_ADDRESS, APRMON_DECIMALS, APRMON_NAME, APRMON_SYMBOL } from "../src/index.js";
 
 interface AbiManifest {
-  aprMon: { proxy: Address; implementation: Address };
+  aprMon: { proxy: Address; implementation: Address; allowedExplorerOnly: string[] };
 }
 
 const manifest = JSON.parse(
   readFileSync(new URL("../abis.json", import.meta.url), "utf8"),
 ) as AbiManifest;
+const key = process.env.MONADSCAN_API_KEY;
 
-describe("aPriori ABI on-chain derivation", () => {
+describe("aPriori ABI explorer cross-check", () => {
+  it("requires MONADSCAN_API_KEY", () => {
+    expect(key, "MONADSCAN_API_KEY must be set for pnpm test:abi:online").toBeTruthy();
+  });
+
   it("pins the aprMON proxy the adapter actually uses", () => {
     expect(getAddress(manifest.aprMon.proxy)).toBe(getAddress(APRMON_ADDRESS));
   });
@@ -60,24 +65,6 @@ describe("aPriori ABI on-chain derivation", () => {
     expect(getAddress(erc1967ImplementationAddress(slot))).toBe(
       getAddress(manifest.aprMon.implementation),
     );
-  });
-
-  it("every vendored selector and topic hash appears in the implementation bytecode", {
-    timeout: 60_000,
-  }, async () => {
-    const runtime = await createRuntime();
-    const code = await runtime.client.getCode({ address: manifest.aprMon.implementation });
-    expect(code?.length ?? 0).toBeGreaterThan(2);
-    const haystack = (code ?? "0x").toLowerCase();
-    for (const item of AprMonAbi) {
-      const needle =
-        item.type === "function"
-          ? toFunctionSelector(item).slice(2)
-          : toEventSelector(item).slice(2);
-      expect(haystack, `${item.type} ${item.name} (${needle}) missing from bytecode`).toContain(
-        needle.toLowerCase(),
-      );
-    }
   });
 
   it("matches on-chain token metadata against the exported constants", {
@@ -130,5 +117,15 @@ describe("aPriori ABI on-chain derivation", () => {
     // (tolerate integer-division dust, not rate errors).
     const drift = roundTrip > one ? roundTrip - one : one - roundTrip;
     expect(drift).toBeLessThan(10n ** 15n);
+  });
+
+  it("committed aprMON ABI matches the explorer-verified implementation", {
+    timeout: 120_000,
+  }, async () => {
+    const explorerAbi = await fetchAbi(manifest.aprMon.implementation, key ?? "");
+    const issues = compareDeployedAbi(AprMonAbi, explorerAbi, {
+      allowedActualOnly: manifest.aprMon.allowedExplorerOnly,
+    });
+    expect(issues).toEqual([]);
   });
 });

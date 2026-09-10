@@ -27,9 +27,10 @@ import type { ClaimOutcome, StakeOutcome, UnstakeOutcome } from "./types.js";
 //   Token"; upgrade history shows the current EIP-1967 implementation
 //   0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2 set at block 40,124,891):
 //   https://monadscan.com/address/0x0c65A0BC65a5D819235B71F554D210D3F80E0852
-// The proxy linkage, bytecode, token metadata, and every vendored
-// selector/topic are enforced on chain by test-online/abi-explorer.test.ts.
-// ABI origin: vendored (ADR 0007) — see src/abis/apriori.ts
+// The proxy linkage, bytecode, token metadata and the committed ABI are
+// enforced on chain by test-online/abi-explorer.test.ts, which cross-checks the
+// committed artifact against the explorer-verified implementation.
+// ABI origin: explorer (ADR 0007), see src/abis/apriori.ts
 export const APRMON_ADDRESS: AddressValue = "0x0c65A0BC65a5D819235B71F554D210D3F80E0852" as const;
 
 // Static ERC-20 metadata for aprMON, verified on chain by the online suite.
