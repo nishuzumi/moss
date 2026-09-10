@@ -405,10 +405,15 @@ describe("claimReceipt", () => {
 // 0x7413c8200dbec7806270958c68619f6f1458f70411cff80c84d6fd4eb9ced13f (block
 // 90460609), the transaction the ABI header already cites. Every byte below is
 // copied from `eth_getTransactionReceipt` and `debug_traceTransaction`, so this
-// fixture is deliberately NOT built with `encodeEventTopics`: a fixture encoded
-// off the ABI under test decodes consistently even when an `indexed` flag is
-// wrong, because `indexed` never enters the event signature hash. Feeding the
-// chain's own bytes is what pins the layout.
+// fixture is deliberately NOT built with `encodeEventTopics`: `indexed` never
+// enters the event signature hash, so a fixture encoded off the ABI under test
+// can only fail a wrong layout by accident. Feeding the chain's own bytes is
+// what pins it.
+//
+// Limit of this transaction: controller and receiver are the same address, so
+// swapping topic1 and topic2 yields a byte-identical log and these cases cannot
+// discriminate those two indexed slots. Their order is pinned by the verified
+// implementation source on MonadScan (see the ABI header).
 const REDEEM_TX = "0x7413c8200dbec7806270958c68619f6f1458f70411cff80c84d6fd4eb9ced13f";
 const LIVE_VAULT = "0x0c65a0bc65a5d819235b71f554d210d3f80e0852" as const;
 const LIVE_ACTOR = "0x7c5f36507a74f22661eb793176811fef11438ea3" as const;
@@ -473,8 +478,6 @@ describe(`claimReceipt against the real logs of ${REDEEM_TX}`, () => {
       assets: LIVE_ASSETS.toString(),
       fee: LIVE_FEE.toString(),
     });
-    // assets is net of fee: the chain's own words say so.
-    expect(LIVE_ASSETS + LIVE_FEE).toBe(10_018_587_511_113_177_346_467n);
     expect(receipt.changes).toHaveLength(3);
     changes.forEach((change, index) => {
       expect(leafChangeOf(receipt.changes[index])).toBe(change);
@@ -533,25 +536,6 @@ describe(`claimReceipt against the real logs of ${REDEEM_TX}`, () => {
         livePayout(),
       ]),
     ).toThrow(/unsupported ERC-20 event/);
-  });
-
-  // Honest limit of this transaction: controller and receiver are the same
-  // address, so swapping topic1 and topic2 produces a byte-identical log and
-  // this fixture cannot discriminate those two indexed slots. Asserted rather
-  // than left as a comment, because a reader deserves proof of the blind spot.
-  // The verified implementation source pins their order; a cited Redeem with
-  // controller != receiver would close it here too.
-  it("cannot pin controller against receiver, because this tx has them equal", () => {
-    const swapped = liveRedeemLog(
-      [LIVE_SHARES_WORD, LIVE_ASSETS_WORD, LIVE_FEE_WORD],
-      [
-        "0x8caf04742286d017f9ac3924388e188c73e6e5094311c5e59a61a7ef86dda8bf",
-        "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
-        "0x0000000000000000000000007c5f36507a74f22661eb793176811fef11438ea3",
-        "0x00000000000000000000000000000000000000000000000000000000000028e6",
-      ],
-    );
-    expect(swapped).toEqual(liveRedeemLog());
   });
 });
 

@@ -3,40 +3,18 @@
 //              (aPriori's official aprMON integration reference; signatures
 //              vendored verbatim)
 //   Retrieved: 2026-07-26 (UTC)
-//
-// Open-source ABI search, so the next reader does not repeat it. Re-run
-// 2026-09-05 (UTC) rather than quoted from an earlier note:
-//   npm            no aPriori SDK. `apriori` returns 19 packages, all the
-//                  frequent-itemset mining algorithm, `aprmon` returns 0.
-//   GitHub         the `Apriori-labs` organisation exists with
-//                  `public_repos: 0` and an empty repository listing.
-//   Sourcify       chain 143 has no entry for either address. The v2 record
-//                  reads `{"match":null,"creationMatch":null,
-//                  "runtimeMatch":null}` for the proxy and the implementation.
-//   MonadScan      the implementation IS NOW VERIFIED. See below.
-//
-// STALE PREMISE, 2026-09-05: this package chose the vendored tier because the
-// aprMON EIP-1967 implementation 0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2 was
-// unverified on MonadScan, so no explorer artifact existed to fetch or compare.
-// That is no longer true. The implementation address now serves verified source
-// on MonadScan under contract name `aprMON`, compiler v0.8.28+commit.7893614a,
-// optimizer on, carrying the exact-match badge ("This contract's deployed
-// bytecode exactly matches its submitted source code"). The proxy remains
-// verified as TransparentUpgradeableProxy, labeled "aPriori: aprMON Token":
+//   Why not explorer (2026-07-26): the aprMON EIP-1967 implementation
+//   0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2 had no verified source on
+//   MonadScan or Sourcify, npm had no aPriori SDK and the `Apriori-labs`
+//   GitHub organisation had no public repositories.
+//   Update 2026-09-05: the implementation is now verified on MonadScan
+//   (contract `aprMON`, compiler v0.8.28+commit.7893614a, optimizer on, exact
+//   bytecode match); the proxy's live EIP-1967 slot resolves to it, matching
+//   abis.json. Its explorer ABI agrees with every signature below, `indexed`
+//   layouts included. ADR 0007 now wants this package on the explorer tier with
+//   a keyed compareDeployedAbi cross-check; that switch is tracked in #197.
 //   https://monadscan.com/address/0x0c65A0BC65a5D819235B71F554D210D3F80E0852
 //   https://monadscan.com/address/0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2
-// The live EIP-1967 slot on the proxy resolves to that same implementation, so
-// the verified source is the code actually executing.
-//
-// What the verified source confirms, read 2026-09-05: every signature vendored
-// below is correct, all three `indexed` layouts included, so the docs tier and
-// the source tier agree. So this is not a defect, it is a derivation that ADR
-// 0007 now wants moved up a tier: an ABI must come from source where source
-// exists. Switching means the explorer derivation plus a keyed
-// compareDeployedAbi cross-check (see @themoss/protocol-kuru's abi-explorer
-// suite), which is a larger change than a provenance note, so it is recorded
-// here rather than done quietly. The verified source also makes the two view
-// helpers below machine-verifiable for the first time.
 //
 // Derivation is test-enforced, not asserted (reproducible selector/topic
 // record). `test-online/abi-explorer.test.ts` recomputes every selector and
@@ -47,11 +25,10 @@
 // Deposit tx 0x0e949bd6cc0ccaf608c8b679459b4ef19e18a5a82f359c56e873986576f27327,
 // RedeemRequest tx 0x68316b21056b865c5d54fd17808716693da59d83392bb6420c03d9f1615b810d,
 // Redeem tx 0x7413c8200dbec7806270958c68619f6f1458f70411cff80c84d6fd4eb9ced13f.
-// The Redeem transaction's own logs and call trace are now a test
-// (`test/adapter.test.ts`), because a topic hash cannot certify an `indexed`
-// flag: `indexed` never enters the event signature, so a mis-flagged ABI keeps
-// the same topic0 and a fixture encoded off the ABI under test decodes
-// consistently either way.
+// The Redeem transaction's own logs and call trace are also a test
+// (`test/adapter.test.ts`): `indexed` never enters the event signature, so a
+// topic hash cannot certify a layout, and a fixture encoded off the ABI under
+// test can only fail by accident. The chain's bytes pin it.
 //
 //   deposit(uint256,address)                 0x6e553f65  payable, assets == msg.value
 //   requestRedeem(uint256,address,address)   0x7d41c86e  (shares, controller, owner)
@@ -68,10 +45,9 @@
 //   Redeem(address,address,uint256,uint256,uint256,uint256)
 //     0x8caf04742286d017f9ac3924388e188c73e6e5094311c5e59a61a7ef86dda8bf
 //
-// The docs also describe view helpers (viewRedeemRequest, getUserRequestData)
-// whose full parameter/return layouts are not machine-verifiable without a
-// verified source artifact; they are deliberately not vendored. Every entry
-// below is selector/topic-verified against the deployed bytecode.
+// The docs also describe view helpers (viewRedeemRequest, getUserRequestData);
+// they are not vendored here and enter with the explorer-tier artifact (#197).
+// Every entry below is selector/topic-verified against the deployed bytecode.
 import { parseAbi } from "viem";
 
 export const AprMonAbi = parseAbi([

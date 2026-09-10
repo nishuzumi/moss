@@ -19,18 +19,21 @@ withdrawal queue:
 | Contract | Address | Status |
 |----------|---------|--------|
 | aprMON (proxy, token + vault) | `0x0c65A0BC65a5D819235B71F554D210D3F80E0852` | [Verified TransparentUpgradeableProxy on MonadScan](https://monadscan.com/address/0x0c65A0BC65a5D819235B71F554D210D3F80E0852), labeled "aPriori: aprMON Token" |
-| Implementation (EIP-1967) | `0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2` | Source unverified on MonadScan; set at block 40,124,891 per the proxy's upgrade history |
+| Implementation (EIP-1967) | `0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2` | [Verified `aprMON` on MonadScan](https://monadscan.com/address/0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2) since 2026-09-05 (v0.8.28, exact bytecode match); set at block 40,124,891 per the proxy's upgrade history |
 
 Canonical deployment source: [aPriori's official integration docs](https://apriori-docs.gitbook.io/apriori-docs/aprmon/smart-contract-integration),
 which publish the mainnet address and the exact function/event signatures.
 
 ## ABI provenance (ADR 0007, vendored tier)
 
-The implementation contract is **not** explorer-verified (MonadScan shows raw
-bytecode only; Sourcify has no match), so no explorer artifact exists to fetch
-or compare. The ABI in `src/abis/apriori.ts` is instead vendored verbatim from
-the official docs, restricted to entries whose signatures are machine-verifiable,
-and the derivation is test-enforced rather than asserted:
+When this adapter landed the implementation contract was not explorer-verified,
+so no explorer artifact existed to fetch or compare. The ABI in
+`src/abis/apriori.ts` is vendored verbatim from the official docs, restricted to
+entries whose signatures are machine-verifiable, and the derivation is
+test-enforced rather than asserted. The implementation is verified on MonadScan
+since 2026-09-05 and its explorer ABI agrees with every vendored signature;
+moving the package to the explorer tier with a keyed `compareDeployedAbi`
+cross-check is tracked in [#197](https://github.com/nishuzumi/moss/issues/197).
 
 - `abis.json` records the proxy/implementation pair.
 - `test-online/abi-explorer.test.ts` (keyless, RPC-only) verifies on chain that
