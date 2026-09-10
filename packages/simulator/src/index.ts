@@ -65,6 +65,14 @@ export interface SimulateOutcome {
    * before treating a clean outcome as safe to sign.
    */
   syntheticState?: readonly Address[];
+  /**
+   * The base block this run resolved once via `eth_blockNumber` and pinned for every trace, diff,
+   * and gas estimate in the run (ADR 0002). Present on every outcome except the one where block
+   * resolution itself failed before any transaction could be attempted — a caller that needs to
+   * identify the exact state a Live outcome was proven against, without re-deriving it from a
+   * stage RPC observation or from log inference, reads this field.
+   */
+  simulatorPinnedBlock?: Hex;
 }
 
 export interface Simulator {
@@ -152,8 +160,13 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
     ]),
   ) as StateOverrides;
   const syntheticState = Object.freeze(Object.keys(initialOverrides)) as readonly Address[];
-  const finish = (outcome: SimulateOutcome): SimulateOutcome =>
-    syntheticState.length > 0 ? { ...outcome, syntheticState } : outcome;
+  // `pinnedBlock` is undefined only for the one outcome finished before resolveSimulationBlock
+  // succeeds — every other call site below has a block to pin and passes it.
+  const finish = (outcome: SimulateOutcome, pinnedBlock?: Hex): SimulateOutcome => {
+    const withBlock =
+      pinnedBlock !== undefined ? { ...outcome, simulatorPinnedBlock: pinnedBlock } : outcome;
+    return syntheticState.length > 0 ? { ...withBlock, syntheticState } : withBlock;
+  };
 
   return {
     async simulate(root): Promise<SimulateOutcome> {
@@ -214,7 +227,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "TRACE_FAILED", message: reason }],
             gas: null,
           });
-          return finish({ results, halted: { transactionIndex, reason } });
+          return finish({ results, halted: { transactionIndex, reason } }, block);
         }
 
         if (frame.error) {
@@ -237,7 +250,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [{ code: "REVERTED", message: `transaction reverted: ${reason}` }],
             gas: null,
           });
-          return finish({ results, halted: { transactionIndex, reason } });
+          return finish({ results, halted: { transactionIndex, reason } }, block);
         }
 
         let changes: readonly Change[];
@@ -257,7 +270,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             warnings: [warning],
             gas: null,
           });
-          return finish({ results, halted: { transactionIndex, reason } });
+          return finish({ results, halted: { transactionIndex, reason } }, block);
         }
 
         let receipt: Receipt;
@@ -283,7 +296,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
             ],
             gas: null,
           });
-          return finish({ results, halted: { transactionIndex, reason } });
+          return finish({ results, halted: { transactionIndex, reason } }, block);
         }
 
         const gas = await estimateGasWithOverrides(runtime.client, call, block, overrides);
@@ -310,7 +323,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
               warnings: [{ code: "STATE_CHAIN_FAILED", message: reason }],
               gas: gas?.toString() ?? null,
             });
-            return finish({ results, halted: { transactionIndex, reason } });
+            return finish({ results, halted: { transactionIndex, reason } }, block);
           }
         }
         results.push({
@@ -324,7 +337,7 @@ export function createTraceSimulator(runtime: MossRuntime, options: SimulatorOpt
           gas: gas?.toString() ?? null,
         });
       }
-      return finish({ results });
+      return finish({ results }, block);
     },
   };
 }

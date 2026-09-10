@@ -221,6 +221,7 @@ describe("Capability simulation", () => {
       { code: "STATE_CHAIN_FAILED", message: "prestate unavailable" },
     ]);
     expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "prestate unavailable" });
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("returns no Receipt for a revert and stops later transactions", async () => {
@@ -411,6 +412,7 @@ describe("Capability simulation", () => {
       { code: "TRACE_FAILED", message: "debug_traceCall unavailable" },
     ]);
     expect(outcome.halted?.transactionIndex).toBe(0);
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("halts before any trace when the base block cannot be resolved", async () => {
@@ -434,6 +436,7 @@ describe("Capability simulation", () => {
       { code: "TRACE_FAILED", message: "rpc unreachable" },
     ]);
     expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "rpc unreachable" });
+    expect(outcome).not.toHaveProperty("simulatorPinnedBlock");
   });
 
   it("classifies forged Change coverage and halts before later work", async () => {
@@ -498,6 +501,7 @@ describe("Capability simulation", () => {
       transactionIndex: 0,
       reason: "parser rejected ambiguous evidence",
     });
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("reports the addresses whose prestate the caller supplied", async () => {
@@ -577,6 +581,28 @@ describe("Capability simulation", () => {
 
     expect(outcome.halted).toBeDefined();
     expect(outcome.syntheticState).toEqual([B]);
+  });
+
+  it("reports the exact base block it pinned and reused for the whole run", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, logs: [] }]),
+      {
+        receipt: (node, changes) => coveringReceipt(node.protocol, changes),
+      },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeUndefined();
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
+  });
+
+  it("still reports the pinned block on a halted run", async () => {
+    const outcome = await createTraceSimulator(
+      runtimeWithFrames([{ type: "CALL", from: A, to: B, error: "execution reverted" }]),
+      { receipt: (node, changes) => coveringReceipt(node.protocol, changes) },
+    ).simulate(capability("fixture", B));
+
+    expect(outcome.halted).toBeDefined();
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("explains a terse require message by its exact payload", async () => {
