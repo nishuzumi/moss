@@ -29,7 +29,11 @@ Monad retains logs inside a failed child frame even though the frame reports `er
   different base states. Verified 2026-07-20 on `rpc.monad.xyz`:
   `debug_traceCall` accepts an explicit block number together with
   `stateOverrides`. If the base block cannot be resolved, simulation halts
-  before the first trace. Re-verified the same day that `eth_simulateV1`,
+  before the first trace. The outcome reports the pinned block as
+  `SimulateOutcome.simulatorPinnedBlock` — run-scoped provenance a consumer
+  can cite as the exact state a Live result was proven against; it is absent
+  only on the resolution-failure outcome, and the MCP Agent-facing projection
+  does not expose it. Re-verified the same day that `eth_simulateV1`,
   `debug_traceCallMany`, `trace_callMany`, and `eth_callMany` all remain
   unavailable (`-32601`) on `rpc.monad.xyz` and `rpc-mainnet.monadinfra.com`.
 - Monad's `debug_traceCall` **enforces sender balance** (discovered 2026-07-07: a 2-MON transfer from an underfunded address is rejected with `insufficient balance`, unlike geth's default). The simulator therefore pre-funds the transaction sender via a balance override — matching `eth_simulateV1`'s validation-off semantics. Simulation answers "what would this transaction do", not "can the account afford it"; affordability is the wallet's question at signing time.

@@ -221,6 +221,7 @@ describe("Capability simulation", () => {
       { code: "STATE_CHAIN_FAILED", message: "prestate unavailable" },
     ]);
     expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "prestate unavailable" });
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("returns no Receipt for a revert and stops later transactions", async () => {
@@ -411,6 +412,7 @@ describe("Capability simulation", () => {
       { code: "TRACE_FAILED", message: "debug_traceCall unavailable" },
     ]);
     expect(outcome.halted?.transactionIndex).toBe(0);
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("halts before any trace when the base block cannot be resolved", async () => {
@@ -434,6 +436,7 @@ describe("Capability simulation", () => {
       { code: "TRACE_FAILED", message: "rpc unreachable" },
     ]);
     expect(outcome.halted).toEqual({ transactionIndex: 0, reason: "rpc unreachable" });
+    expect(outcome).not.toHaveProperty("simulatorPinnedBlock");
   });
 
   it("classifies forged Change coverage and halts before later work", async () => {
@@ -498,6 +501,7 @@ describe("Capability simulation", () => {
       transactionIndex: 0,
       reason: "parser rejected ambiguous evidence",
     });
+    expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
   });
 
   it("reports the addresses whose prestate the caller supplied", async () => {
@@ -599,24 +603,6 @@ describe("Capability simulation", () => {
 
     expect(outcome.halted).toBeDefined();
     expect(outcome.simulatorPinnedBlock).toBe(PINNED_BLOCK);
-  });
-
-  it("omits simulatorPinnedBlock when block resolution itself fails, since no block was ever pinned", async () => {
-    const runtime: MossRuntime = {
-      rpcUrl: "http://offline",
-      client: {
-        request: async () => {
-          throw new Error("rpc unreachable");
-        },
-        // biome-ignore lint/suspicious/noExplicitAny: minimal failing RPC fixture
-      } as any,
-    };
-    const outcome = await createTraceSimulator(runtime, {
-      receipt: (node, changes) => coveringReceipt(node.protocol, changes),
-    }).simulate(capability("fixture", B));
-
-    expect(outcome.halted).toBeDefined();
-    expect(outcome).not.toHaveProperty("simulatorPinnedBlock");
   });
 
   it("explains a terse require message by its exact payload", async () => {
