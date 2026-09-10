@@ -25,9 +25,9 @@
  * - 0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD — source verified
  *   (https://monadscan.com/address/0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD,
  *   Exact Match);
- * - 0x4C0bA1BA8404076E2B09c7a5d014EC999c3a27e2 — the current
- *   `orderBookImplementation()` template, source NOT verified on Monadscan
- *   (`fetchAbi` refuses: "Contract source code not verified").
+ * - 0x5e3446c600524Be453bbCEFD46a9E4C9bE8899a0 — the current
+ *   `orderBookImplementation()` template as of the 2026-09-10 re-verification
+ *   below; the Moss-required surface is confirmed present in its bytecode.
  *
  * kuru-sdk@0.0.95's OrderBook.json matches NEITHER of the two checked
  * implementations. Vs 0xea2Cc876… (via `fetchAbi` + `compareDeployedAbi`):
@@ -40,7 +40,7 @@
  *   field-for-field identical between the vendored ABI and the explorer ABI
  *   of 0xea2Cc876… (same comparison as above; all five are absent from every
  *   issue bucket), and
- * - present in 0x4C0bA1BA…'s deployed bytecode (`eth_getCode`, then search
+ * - present in 0x5e3446c6…'s deployed bytecode (`eth_getCode`, then search
  *   the hex for the dispatcher selectors and the event topic):
  *     placeAndExecuteMarketBuy(uint96,uint256,bool,bool)  = 0x7c51d6cf
  *     placeAndExecuteMarketSell(uint96,uint256,bool,bool) = 0x532c46db
@@ -52,6 +52,17 @@
  *       topic0 = 0x49496a41b922bdba3ff7f57bb0992ab1a1a3ee95b5ae5bd7271c67861f018352
  * The template assertion below is the tripwire that forces this record to
  * be redone whenever Kuru upgrades.
+ *
+ * 2026-09-10 re-verification (the tripwire fired): the Router proxy was
+ * upgraded, so abis.json now records implementation
+ * 0xf1635175914acF4Db170395D524323225e1F1a04 and template
+ * 0x5e3446c600524Be453bbCEFD46a9E4C9bE8899a0 (both re-read from the ERC-1967
+ * slot and `orderBookImplementation()` on Monad mainnet). The Moss-required
+ * surface survived the upgrade: `anyToAnySwap` (0xffa5210a), `verifiedMarket`
+ * (0x5f71a07c) and `orderBookImplementation` (0xa0416499) are present in the
+ * new Router implementation's bytecode, and `placeAndExecuteMarketBuy`,
+ * `placeAndExecuteMarketSell`, the `Trade` topic and the `FlipOrderUpdated`
+ * topic are present in the new template's bytecode.
  */
 
 import { readFileSync } from "node:fs";
