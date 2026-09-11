@@ -73,10 +73,13 @@ Every address comes from the Aave DAO address book (`AaveV3Monad`, `CHAIN_ID`
 The generator refuses to emit for any other chain id.
 
 `src/tokens.ts` derives the reserve table from that record: symbol, decimals,
-underlying, aToken and variable debt token. The Receipt parsers may not read
+underlying, aToken and variable debt token. Display symbols come from the same
+release's verbatim `tokenlist.json`, matched by chain and underlying address;
+address-book keys are source identifiers, not token symbols. Missing or duplicate
+metadata and conflicting decimals fail generation. The Receipt parsers may not read
 chain state, so this is what tells them which token addresses are legitimate
 emitters. The live Monad suite is the tripwire: it asserts the table equals
-`Pool.getReservesList()` and checks each reserve's position tokens and decimals
+`Pool.getReservesList()` and checks each reserve's position tokens, symbol and decimals
 on chain, so a new governance listing turns the suite red and forces a release
 rather than being silently unsupported.
 

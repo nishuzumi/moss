@@ -90,16 +90,17 @@ execSync(`tar -xzf "${tarball}" -C "${work}"`);
 const REFERENCE = /^\s*(?:import\s+["'](\.[^"']+)["'];?|\/\/# sourceMappingURL=(\S+))\s*$/gm;
 
 /**
- * Upstream publishes everything under `dist/`, which this repository ignores at
- * any depth, so a vendored copy keeping that segment could never be committed.
- * The walk therefore runs in upstream space and the tree is re-rooted one level
- * up on the way out. Re-rooting the whole tree uniformly leaves every relative
- * specifier resolving exactly as published.
+ * Modules are published under `dist/`, which this repository ignores at any
+ * depth, so re-root them one level up while preserving relative specifiers.
+ * The token list is published at the package root and keeps its original path.
  */
 const UPSTREAM_ROOT = "dist";
-const stored = (upstream: string): string => relative(UPSTREAM_ROOT, upstream);
+const stored = (upstream: string): string =>
+  upstream === "tokenlist.json" ? upstream : relative(UPSTREAM_ROOT, upstream);
 
-const pending: string[] = VENDORED_FILES.map((file) => join(UPSTREAM_ROOT, file));
+const pending: string[] = VENDORED_FILES.map((file) =>
+  file === "tokenlist.json" ? file : join(UPSTREAM_ROOT, file),
+);
 const copied = new Set<string>();
 while (pending.length > 0) {
   const file = pending.shift();
