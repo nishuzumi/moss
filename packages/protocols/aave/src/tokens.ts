@@ -31,9 +31,9 @@ export interface AaveReserve {
   variableDebtToken: AddressValue;
 }
 
-export const AAVE_RESERVES: readonly AaveReserve[] = Object.entries(AAVE_V3_MONAD.ASSETS).map(
-  ([symbol, asset]) => ({
-    symbol,
+export const AAVE_RESERVES: readonly AaveReserve[] = Object.values(AAVE_V3_MONAD.ASSETS).map(
+  (asset) => ({
+    symbol: asset.symbol,
     decimals: asset.decimals,
     underlying: getAddress(asset.UNDERLYING),
     aToken: getAddress(asset.A_TOKEN),

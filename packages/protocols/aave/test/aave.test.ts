@@ -42,26 +42,6 @@ const UNLISTED = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
 const STUB_TREASURY = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
 /**
- * Issue #185: a live governance listing whose first official address-book
- * release is still inside ADR 0007's seven-day supply-chain guard. It is
- * test-only: the adapter
- * must not accept it until an eligible official release can be vendored. Exact
- * equality below still fails closed on every other unknown reserve, and this
- * quarantine expires when 4.66.2 becomes eligible.
- */
-const PENDING_RESERVES = [
-  {
-    sourceId: "PT_AUSD_8OCT2026",
-    symbol: "PT-AUSD-8OCT2026",
-    decimals: 6,
-    underlying: getAddress("0x9FC74f8Ed616B5BaF52a170caa97d6d3898602d1"),
-    aToken: getAddress("0xb93Ce4EB85eBA317f954Dadcbe112Ce6c3af9ae4"),
-    variableDebtToken: getAddress("0x4d2D334Ff7b0A82394bc95668d99369e9EE06748"),
-    eligibleAfter: "2026-09-03T02:00:12.549Z",
-  },
-] as const;
-
-/**
  * Seed accounts for the live role search below. Simulation is read-only and Moss
  * never signs, so naming a real account costs nothing and needs no key, but no
  * account we do not control keeps a position: the one the live withdraw was
@@ -1183,12 +1163,16 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
       functionName: "getReservesList",
     });
     // Checksum with one argument: map would otherwise hand getAddress the
-    // array index as an EIP-1191 chain id. A reviewed quarantine keeps the gate
-    // exact without exposing a release that has not cleared the age guard.
+    // array index as an EIP-1191 chain id. The equality is intentionally exact;
+    // a new governance listing must be vendored through the age-guarded pipeline
+    // before it can be surfaced.
     expect([...listed].map((address) => getAddress(address)).sort()).toEqual(
-      [...AAVE_RESERVES, ...PENDING_RESERVES].map(({ underlying }) => underlying).sort(),
+      AAVE_RESERVES.map(({ underlying }) => underlying).sort(),
     );
     for (const reserve of AAVE_RESERVES) {
+      for (const address of [reserve.underlying, reserve.aToken, reserve.variableDebtToken]) {
+        expect((await runtime.client.getCode({ address }))?.length, address).toBeGreaterThan(2);
+      }
       const data = await registry.action("aave", "reserve", ACCOUNT, { asset: reserve.underlying });
       if (data.kind !== "query") throw new Error("expected a Query");
       // The Query itself fails when the Pool disagrees about either position
@@ -1202,7 +1186,10 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
         token: reserve.underlying,
       });
       if (metadata.kind !== "query") throw new Error("expected a Query");
-      expect(metadata.data, reserve.symbol).toMatchObject({ decimals: reserve.decimals });
+      expect(metadata.data, reserve.symbol).toMatchObject({
+        symbol: reserve.symbol,
+        decimals: reserve.decimals,
+      });
       // Aave v3.2 removed stable-rate borrowing and this deployment agrees, so
       // pinning the variable mode instead of exposing interestRateMode rests on
       // a deployment fact this suite checks rather than on a preference.
@@ -1213,44 +1200,6 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
         args: [reserve.underlying],
       });
       expect(getAddress(onChain.stableDebtTokenAddress), reserve.symbol).toBe(ZERO);
-    }
-    for (const pending of PENDING_RESERVES) {
-      expect(
-        Date.now(),
-        `${pending.sourceId} cleared the address-book age guard; vendor it and remove this quarantine`,
-      ).toBeLessThan(Date.parse(pending.eligibleAfter));
-      expect(AAVE_RESERVES.some(({ underlying }) => underlying === pending.underlying)).toBe(false);
-
-      const metadata = await registry.action("erc20", "metadata", ACCOUNT, {
-        token: pending.underlying,
-      });
-      if (metadata.kind !== "query") throw new Error("expected a Query");
-      expect(metadata.data, pending.sourceId).toMatchObject({
-        symbol: pending.symbol,
-        decimals: pending.decimals,
-      });
-
-      const onChain = await runtime.client.readContract({
-        address: AAVE_POOL_ADDRESS,
-        abi: AavePoolAbi,
-        functionName: "getReserveData",
-        args: [pending.underlying],
-      });
-      expect(
-        {
-          aToken: getAddress(onChain.aTokenAddress),
-          stableDebtToken: getAddress(onChain.stableDebtTokenAddress),
-          variableDebtToken: getAddress(onChain.variableDebtTokenAddress),
-        },
-        pending.sourceId,
-      ).toEqual({
-        aToken: pending.aToken,
-        stableDebtToken: ZERO,
-        variableDebtToken: pending.variableDebtToken,
-      });
-      for (const address of [pending.underlying, pending.aToken, pending.variableDebtToken]) {
-        expect((await runtime.client.getCode({ address }))?.length, address).toBeGreaterThan(2);
-      }
     }
   });
 

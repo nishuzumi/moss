@@ -50,7 +50,12 @@ export function readVendor(packageRoot: string): VendorInfo {
  * layout. `chunk-2MM5EJJX.mjs` carries no ABI: the three modules below import
  * it, so it has to sit where their relative specifiers point.
  */
-export const VENDORED_FILES = ["abis/IPool.mjs", "abis/IAToken.mjs", "AaveV3Monad.mjs"] as const;
+export const VENDORED_FILES = [
+  "abis/IPool.mjs",
+  "abis/IAToken.mjs",
+  "AaveV3Monad.mjs",
+  "tokenlist.json",
+] as const;
 
 /**
  * Full upstream ABIs are exported (ADR 0007). `IAToken` also carries the
@@ -73,6 +78,13 @@ interface UpstreamAsset {
   V_TOKEN: string;
 }
 
+interface UpstreamToken {
+  chainId: number;
+  address: string;
+  symbol: string;
+  decimals: number;
+}
+
 async function importVendored(packageRoot: string, file: string): Promise<Record<string, unknown>> {
   const url = pathToFileURL(join(packageRoot, "abis-src", file)).href;
   return (await import(url)) as Record<string, unknown>;
@@ -83,7 +95,7 @@ function vendorHeader(vendor: VendorInfo, what: string): string {
 //   regenerate offline from abis-src/:  pnpm gen:abis
 //   re-vendor from upstream:            pnpm update:abis
 // ${what} origin: vendored (ADR 0007)
-//   source:   ${vendor.name}@${vendor.version} (npm), dist/**.mjs re-rooted verbatim into ../../abis-src/
+//   source:   ${vendor.name}@${vendor.version} (npm), dist/**.mjs and tokenlist.json vendored verbatim into ../../abis-src/
 //   tarball:  sha256 ${vendor.tarballSha256}
 //   vendored: ${vendor.vendoredAt} (release-age guard: ${vendor.releaseAgeGuardDays}d)
 `;
@@ -114,6 +126,10 @@ export async function generate(packageRoot: string): Promise<Record<string, stri
     );
   }
   const assets = book.ASSETS as Record<string, UpstreamAsset>;
+  const tokenList = JSON.parse(
+    readFileSync(join(packageRoot, "abis-src", "tokenlist.json"), "utf8"),
+  ) as { tokens: UpstreamToken[] };
+  if (!Array.isArray(tokenList.tokens)) throw new Error("tokenlist.json: tokens is not an array");
   const record = {
     POOL: book.POOL,
     POOL_ADDRESSES_PROVIDER: book.POOL_ADDRESSES_PROVIDER,
@@ -121,20 +137,40 @@ export async function generate(packageRoot: string): Promise<Record<string, stri
     ORACLE: book.ORACLE,
     AAVE_PROTOCOL_DATA_PROVIDER: book.AAVE_PROTOCOL_DATA_PROVIDER,
     ASSETS: Object.fromEntries(
-      Object.entries(assets).map(([symbol, asset]) => [
-        symbol,
-        {
-          decimals: asset.decimals,
-          UNDERLYING: asset.UNDERLYING,
-          A_TOKEN: asset.A_TOKEN,
-          V_TOKEN: asset.V_TOKEN,
-        },
-      ]),
+      Object.entries(assets).map(([sourceId, asset]) => {
+        // Match identity, not the source key: PT_AUSD_8OCT2026 is an identifier,
+        // while the official token list carries the ERC-20 display symbol.
+        const candidates = tokenList.tokens.filter(
+          (token) =>
+            token.chainId === MONAD_CHAIN_ID &&
+            token.address.toLowerCase() === asset.UNDERLYING.toLowerCase(),
+        );
+        const token = candidates[0];
+        if (candidates.length !== 1 || !token) {
+          throw new Error(`${sourceId}: expected exactly one Monad underlying in tokenlist.json`);
+        }
+        if (typeof token.symbol !== "string" || token.symbol.trim().length === 0) {
+          throw new Error(`${sourceId}: tokenlist.json has an empty or invalid symbol`);
+        }
+        if (token.decimals !== asset.decimals) {
+          throw new Error(`${sourceId}: tokenlist.json decimals disagree with the address book`);
+        }
+        return [
+          sourceId,
+          {
+            symbol: token.symbol,
+            decimals: asset.decimals,
+            UNDERLYING: asset.UNDERLYING,
+            A_TOKEN: asset.A_TOKEN,
+            V_TOKEN: asset.V_TOKEN,
+          },
+        ];
+      }),
     ),
   };
 
   const addressBook = `${vendorHeader(vendor, "Deployment record")}\
-//   upstream: dist/AaveV3Monad.ts, the Aave DAO's own registry of the Monad
+//   upstream: dist/AaveV3Monad.mjs and tokenlist.json, the Aave DAO's registry of the Monad
 //   market. The generator refuses to emit unless it reports CHAIN_ID ${MONAD_CHAIN_ID}, and the
 //   live Monad suite verifies every address on chain: deployed bytecode, the
 //   provider/Pool round trip, the ERC-1967 implementation slot, and each

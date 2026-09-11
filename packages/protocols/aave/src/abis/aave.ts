@@ -2,9 +2,9 @@
 //   regenerate offline from abis-src/:  pnpm gen:abis
 //   re-vendor from upstream:            pnpm update:abis
 // ABI origin: vendored (ADR 0007)
-//   source:   @aave-dao/aave-address-book@4.61.2 (npm), dist/**.mjs re-rooted verbatim into ../../abis-src/
-//   tarball:  sha256 c3947b04fef6f096faf881950462dadde17744481a7a1d80a858ba62e35b15be
-//   vendored: 2026-08-01 (release-age guard: 7d)
+//   source:   @aave-dao/aave-address-book@4.66.3 (npm), dist/**.mjs and tokenlist.json vendored verbatim into ../../abis-src/
+//   tarball:  sha256 021486f9ec73c490a6962de4fe1bde6771e33a42bfc9540fb7d0a134afb9c0c8
+//   vendored: 2026-09-10 (release-age guard: 7d)
 //   verification: every selector and event topic the adapter uses was found in
 //   the deployed Pool implementation and in the Supply/Borrow logic libraries it
 //   delegates to; the live Monad suite re-checks that on every run and decodes

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAddress } from "viem";
@@ -14,6 +15,24 @@ import {
 } from "../src/index.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+interface TokenList {
+  tokens: { chainId: number; address: string; symbol: string; decimals: number }[];
+}
+
+async function generateWithTokenList(edit: (list: TokenList) => void) {
+  const root = mkdtempSync(join(tmpdir(), "aave-tokenlist-test-"));
+  try {
+    cpSync(join(packageRoot, "abis-src"), join(root, "abis-src"), { recursive: true });
+    const path = join(root, "abis-src", "tokenlist.json");
+    const list = JSON.parse(readFileSync(path, "utf8")) as TokenList;
+    edit(list);
+    writeFileSync(path, JSON.stringify(list));
+    return await generate(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 // The provenance chain, enforced: the committed generated TS must be exactly
 // what the deterministic generator derives from the committed abis-src/.
@@ -52,14 +71,83 @@ describe("abi and deployment provenance chain", () => {
   });
 
   it("every listed reserve comes from the address book", () => {
-    expect(AAVE_RESERVES).toHaveLength(Object.keys(AAVE_V3_MONAD.ASSETS).length);
-    for (const reserve of AAVE_RESERVES) {
-      const asset = (AAVE_V3_MONAD.ASSETS as Record<string, { decimals: number } | undefined>)[
-        reserve.symbol
-      ];
-      expect(asset, reserve.symbol).toBeDefined();
-      expect(reserve.decimals).toBe(asset?.decimals);
+    const assets = Object.entries(AAVE_V3_MONAD.ASSETS);
+    expect(AAVE_RESERVES).toHaveLength(assets.length);
+    for (const [sourceId, asset] of assets) {
+      const reserve = AAVE_RESERVES.find(
+        ({ underlying }) => underlying.toLowerCase() === getAddress(asset.UNDERLYING).toLowerCase(),
+      );
+      expect(reserve, sourceId).toEqual({
+        symbol: asset.symbol,
+        decimals: asset.decimals,
+        underlying: getAddress(asset.UNDERLYING),
+        aToken: getAddress(asset.A_TOKEN),
+        variableDebtToken: getAddress(asset.V_TOKEN),
+      });
     }
+
+    const newReserve = AAVE_RESERVES.find(
+      ({ underlying }) =>
+        underlying.toLowerCase() ===
+        getAddress(AAVE_V3_MONAD.ASSETS.PT_AUSD_8OCT2026.UNDERLYING).toLowerCase(),
+    );
+    expect(newReserve).toEqual({
+      symbol: "PT-AUSD-8OCT2026",
+      decimals: 6,
+      underlying: getAddress("0x9FC74f8Ed616B5BaF52a170caa97d6d3898602d1"),
+      aToken: getAddress("0xb93Ce4EB85eBA317f954Dadcbe112Ce6c3af9ae4"),
+      variableDebtToken: getAddress("0x4d2D334Ff7b0A82394bc95668d99369e9EE06748"),
+    });
+  });
+
+  it.each([
+    ["missing", "expected exactly one Monad underlying"],
+    ["wrong chain", "expected exactly one Monad underlying"],
+    ["duplicate", "expected exactly one Monad underlying"],
+    ["decimals", "decimals disagree"],
+    ["empty symbol", "empty or invalid symbol"],
+  ] as const)("rejects %s token-list metadata", async (mutation, message) => {
+    await expect(
+      generateWithTokenList((list) => {
+        const address = AAVE_V3_MONAD.ASSETS.PT_AUSD_8OCT2026.UNDERLYING.toLowerCase();
+        const index = list.tokens.findIndex(
+          (token) => token.chainId === 143 && token.address.toLowerCase() === address,
+        );
+        const token = list.tokens[index];
+        if (!token) throw new Error("test fixture has no PT underlying");
+        switch (mutation) {
+          case "missing":
+            list.tokens.splice(index, 1);
+            break;
+          case "wrong chain":
+            token.chainId = 1;
+            break;
+          case "duplicate":
+            list.tokens.push({ ...token, address: address.toUpperCase() });
+            break;
+          case "decimals":
+            token.decimals = 18;
+            break;
+          case "empty symbol":
+            token.symbol = " ";
+            break;
+        }
+      }),
+    ).rejects.toThrow(message);
+  });
+
+  it("matches token-list addresses case-insensitively without accepting another chain", async () => {
+    const generated = await generateWithTokenList((list) => {
+      for (const token of list.tokens) token.address = token.address.toLowerCase();
+      const token = list.tokens.find(
+        (entry) =>
+          entry.chainId === 143 &&
+          entry.address === AAVE_V3_MONAD.ASSETS.PT_AUSD_8OCT2026.UNDERLYING.toLowerCase(),
+      );
+      if (!token) throw new Error("test fixture has no PT underlying");
+      list.tokens.push({ ...token, chainId: 1, symbol: "WRONG_CHAIN", decimals: 18 });
+    });
+    expect(generated).toEqual(await generate(packageRoot));
   });
 
   it("assigns every reserve a distinct position token", () => {
