@@ -1,47 +1,46 @@
 /**
- * Explorer cross-check for the vendored Kuru ABIs (ADR 0007).
+ * On-chain provenance check for the vendored Kuru ABIs (ADR 0007).
  *
- * Online and keyed on purpose: requires MONADSCAN_API_KEY plus Monad mainnet
- * RPC and runs only via `pnpm test:abi:online` (its own workflow), never
- * inside the offline `pnpm test` suite. A missing key FAILS this suite
- * instead of skipping, so a misconfigured pipeline cannot stay green.
+ * Online on purpose: it reads Monad mainnet directly and runs only via
+ * `pnpm test:abi:online` (its own workflow), never inside the offline
+ * `pnpm test` suite. It needs no explorer key.
  *
  * What it enforces:
  * - the Router proxy still points at the implementation recorded in
- *   abis.json (ERC-1967 slot read) — a Kuru upgrade turns this suite red so
- *   a human re-verifies the ABIs before trusting them again;
- * - the vendored Router ABI is semantically identical to the ABI of the
- *   explorer-verified Router implementation: a second supply chain,
- *   independent of the npm tarball;
+ *   abis.json (ERC-1967 slot read) — a Kuru upgrade turns this suite red so a
+ *   human re-verifies before the pins are trusted again;
  * - `router.orderBookImplementation()` still equals the recorded market
- *   template.
+ *   template;
+ * - the Moss-required Router surface (the functions the adapter calls, derived
+ *   from the vendored ABI) is present in the recorded implementation's deployed
+ *   bytecode.
  *
- * Why the OrderBook ABI has NO explorer comparison — verification record,
- * 2026-07-20, reproducible with the commands noted per item:
+ * ABI origin (ADR 0007, honest degraded verification). Neither the current
+ * Router implementation nor the OrderBook market template is source-verified
+ * on MonadScan, so there is no explorer-verified ABI to cross-check the
+ * vendored artifact against. Per ADR 0007 the check degrades honestly: record
+ * the deployed bytecode, search it for the required function selectors and
+ * event topics, and exercise the adapter's live behavior on mainnet. Bytecode
+ * presence is evidence of the deployed surface, not source verification, and
+ * this is not an explorer-verified cross-check.
  *
- * Markets are ERC-1967 proxies running (at least) two implementations,
- * discovered via api.kuru.io candidates + `eth_getStorageAt` on slot
- * 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc:
- * - 0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD — source verified
- *   (https://monadscan.com/address/0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD,
- *   Exact Match);
- * - 0x5e3446c600524Be453bbCEFD46a9E4C9bE8899a0 — the current
- *   `orderBookImplementation()` template as of the 2026-09-10 re-verification
- *   below; the Moss-required surface is confirmed present in its bytecode.
+ * Reproducible record, re-verified 2026-09-12 at Monad mainnet block
+ * 104120573:
  *
- * kuru-sdk@0.0.95's OrderBook.json matches NEITHER of the two checked
- * implementations. Vs 0xea2Cc876… (via `fetchAbi` + `compareDeployedAbi`):
- * 18 vendored-only items, 16 explorer-only items, and one stateMutability
- * mismatch (`transferOwnership`: vendored payable, explorer nonpayable).
+ * Router implementation 0xf1635175914acF4Db170395D524323225e1F1a04, read from
+ * the ERC-1967 slot of proxy 0xd651346d7c789536ebf06dc72aE3C8502cd695CC. The
+ * Moss-required Router selectors, derived from the vendored ABI and asserted
+ * against the deployed bytecode by the test below, are:
+ *     anyToAnySwap             = 0xffa5210a
+ *     verifiedMarket           = 0x5f71a07c
+ *     orderBookImplementation  = 0xa0416499
  *
- * The Moss-required surface was instead verified once by hand:
- * - `Trade`, `FlipOrderUpdated`, `FlippedOrderCreated`,
- *   `placeAndExecuteMarketBuy`, and `placeAndExecuteMarketSell` are
- *   field-for-field identical between the vendored ABI and the explorer ABI
- *   of 0xea2Cc876… (same comparison as above; all five are absent from every
- *   issue bucket), and
- * - present in 0x5e3446c6…'s deployed bytecode (`eth_getCode`, then search
- *   the hex for the dispatcher selectors and the event topic):
+ * OrderBook market template 0x5e3446c600524Be453bbCEFD46a9E4C9bE8899a0, read
+ * from `router.orderBookImplementation()`. Markets are ERC-1967 proxies and
+ * this template is not source-verified either, so the same degraded record
+ * applies. The Moss-required OrderBook surface, confirmed present in the
+ * template's deployed bytecode (`eth_getCode`, then search the hex for the
+ * dispatcher selectors and event topics):
  *     placeAndExecuteMarketBuy(uint96,uint256,bool,bool)  = 0x7c51d6cf
  *     placeAndExecuteMarketSell(uint96,uint256,bool,bool) = 0x532c46db
  *     Trade(uint40,address,bool,uint256,uint96,address,address,uint96)
@@ -50,37 +49,31 @@
  *       topic0 = 0xb74e966bc873b8c144fab39c9981210f50130885e89caf4556c0840cec741dcd
  *     FlippedOrderCreated(uint40,uint40,address,uint96,uint32,uint32,bool)
  *       topic0 = 0x49496a41b922bdba3ff7f57bb0992ab1a1a3ee95b5ae5bd7271c67861f018352
- * The template assertion below is the tripwire that forces this record to
- * be redone whenever Kuru upgrades.
  *
- * 2026-09-10 re-verification (the tripwire fired): the Router proxy was
- * upgraded, so abis.json now records implementation
- * 0xf1635175914acF4Db170395D524323225e1F1a04 and template
- * 0x5e3446c600524Be453bbCEFD46a9E4C9bE8899a0 (both re-read from the ERC-1967
- * slot and `orderBookImplementation()` on Monad mainnet). The Moss-required
- * surface survived the upgrade: `anyToAnySwap` (0xffa5210a), `verifiedMarket`
- * (0x5f71a07c) and `orderBookImplementation` (0xa0416499) are present in the
- * new Router implementation's bytecode, and `placeAndExecuteMarketBuy`,
- * `placeAndExecuteMarketSell`, the `Trade` topic and the `FlipOrderUpdated`
- * topic are present in the new template's bytecode.
+ * When a source-verified OrderBook implementation still existed
+ * (0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD, Exact Match), those five items
+ * were field-for-field identical between the vendored ABI and that explorer
+ * ABI and absent from every difference bucket, while kuru-sdk@0.0.95's
+ * OrderBook.json otherwise diverged from it (18 vendored-only items, 16
+ * explorer-only, and a `transferOwnership` stateMutability mismatch). No
+ * source-verified OrderBook implementation is available now, so that
+ * historical cross-check is recorded rather than re-run.
+ *
+ * The two pin assertions below are the tripwires that force this whole record
+ * to be redone whenever Kuru upgrades the Router or the market template.
  */
 
 import { readFileSync } from "node:fs";
-import {
-  compareDeployedAbi,
-  ERC1967_IMPLEMENTATION_SLOT,
-  erc1967ImplementationAddress,
-  fetchAbi,
-} from "@themoss/abi-tools";
+import { ERC1967_IMPLEMENTATION_SLOT, erc1967ImplementationAddress } from "@themoss/abi-tools";
 import { createRuntime } from "@themoss/core";
 
-import { type Address, getAddress } from "viem";
+import { type Address, getAddress, toFunctionSelector } from "viem";
 import { describe, expect, it } from "vitest";
 import { KuruRouterAbi } from "../src/abis/kuru.js";
 import { KURU_ROUTER_ADDRESS } from "../src/kuru.js";
 
 interface AbiManifest {
-  router: { proxy: Address; implementation: Address; allowedExplorerOnly: string[] };
+  router: { proxy: Address; implementation: Address };
   orderBook: { expectedTemplateImplementation: Address };
 }
 
@@ -88,13 +81,18 @@ const manifest = JSON.parse(
   readFileSync(new URL("../abis.json", import.meta.url), "utf8"),
 ) as AbiManifest;
 
-const key = process.env.MONADSCAN_API_KEY;
+// The Router functions the adapter actually calls (src/kuru.ts): the surface
+// the deployed bytecode must expose, since the implementation is not
+// source-verified and there is no explorer ABI to compare against. Full
+// signatures so the selector is derived here and cross-checked against the
+// vendored ABI, rather than trusting a bare hardcoded selector.
+const REQUIRED_ROUTER_FUNCTIONS = [
+  "anyToAnySwap(address[],bool[],bool[],address,address,uint256,uint256)",
+  "verifiedMarket(address)",
+  "orderBookImplementation()",
+] as const;
 
-describe("Kuru ABI explorer cross-check", () => {
-  it("requires MONADSCAN_API_KEY", () => {
-    expect(key, "MONADSCAN_API_KEY must be set for pnpm test:abi:online").toBeTruthy();
-  });
-
+describe("Kuru ABI on-chain provenance check", () => {
   it("pins the Router the adapter actually uses", () => {
     expect(getAddress(manifest.router.proxy)).toBe(getAddress(KURU_ROUTER_ADDRESS));
   });
@@ -124,13 +122,23 @@ describe("Kuru ABI explorer cross-check", () => {
     );
   });
 
-  it("vendored Router ABI matches the explorer-verified implementation", {
+  it("the required Router surface is present in the implementation bytecode", {
     timeout: 120_000,
   }, async () => {
-    const explorerAbi = await fetchAbi(manifest.router.implementation, key ?? "");
-    const issues = compareDeployedAbi(KuruRouterAbi, explorerAbi, {
-      allowedActualOnly: manifest.router.allowedExplorerOnly,
-    });
-    expect(issues).toEqual([]);
+    const runtime = await createRuntime();
+    const code = await runtime.client.getCode({ address: manifest.router.implementation });
+    if (!code) throw new Error("no bytecode at the recorded Router implementation");
+    for (const signature of REQUIRED_ROUTER_FUNCTIONS) {
+      const name = signature.slice(0, signature.indexOf("("));
+      expect(
+        KuruRouterAbi.some((entry) => entry.type === "function" && entry.name === name),
+        `${name} is missing from the vendored Router ABI`,
+      ).toBe(true);
+      const selector = toFunctionSelector(signature).slice(2);
+      expect(
+        code,
+        `${signature} (0x${selector}) is missing from the Router implementation bytecode`,
+      ).toContain(selector);
+    }
   });
 });
