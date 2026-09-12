@@ -9,6 +9,7 @@ import {
 import { ERC20Abi } from "@themoss/erc";
 import {
   concatHex,
+  decodeEventLog,
   decodeFunctionData,
   encodeAbiParameters,
   encodeEventTopics,
@@ -532,6 +533,34 @@ function flattenReceiptTexts(receipt: ReceiptResult): string[] {
   );
 }
 
+function receiptMovesAssetsOut(receipt: ReceiptResult, account: string): boolean {
+  return receipt.changes.some((entry) => {
+    if (entry.kind === "receipt") return receiptMovesAssetsOut(entry, account);
+    const change = entry.change;
+    if (change.kind === "nativeTransfer") {
+      return (
+        change.from.toLowerCase() === account.toLowerCase() &&
+        change.to.toLowerCase() !== account.toLowerCase()
+      );
+    }
+    try {
+      const decoded = decodeEventLog({
+        abi: ERC20Abi,
+        topics: change.topics as [Hex, ...Hex[]],
+        data: change.data,
+        strict: true,
+      });
+      return (
+        decoded.eventName === "Transfer" &&
+        decoded.args.from.toLowerCase() === account.toLowerCase() &&
+        decoded.args.to.toLowerCase() !== account.toLowerCase()
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 describe("Merkl claim Receipt evidence", () => {
   it("parses a valid single-token claim with original identity and Package label", async () => {
     const { registry, capability } = await claimCapability();
@@ -554,6 +583,7 @@ describe("Merkl claim Receipt evidence", () => {
     const transferText = `ERC20 Transfer: 60 ${TOKEN_A} from Package(Merkl:Distributor) to ${ACCOUNT}`;
     expect(receipt.text).toBe(`Merkl Claim: 1 reward token(s) paid to ${ACCOUNT}`);
     expect(flattenReceiptTexts(receipt)).toEqual([claimText, transferText]);
+    expect(receiptMovesAssetsOut(receipt, ACCOUNT)).toBe(false);
   });
 
   it("preserves observed multi-token execution order", async () => {
@@ -698,7 +728,7 @@ describe("Merkl metadata and Registry", () => {
       },
     });
     expect(claim).toMatchObject({
-      risk: ["fundOut"],
+      risk: [],
       tags: ["rewards", "merkle", "batch-claim", "incentives"],
       params: {
         tokens: {

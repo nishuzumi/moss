@@ -54,7 +54,7 @@ assertClaimSpec({
   verb: "claim",
   params: {},
   receipt: "claimReceipt",
-  risk: ["fundOut"],
+  risk: [],
 });
 
 assertClaimSpec({
@@ -63,7 +63,7 @@ assertClaimSpec({
   params: {},
   // @ts-expect-error Query methods are not valid Receipt bindings.
   receipt: "rewards",
-  risk: ["fundOut"],
+  risk: [],
 });
 
 assertClaimSpec({
@@ -72,7 +72,7 @@ assertClaimSpec({
   params: {},
   // @ts-expect-error Receipt bindings must name an existing ReceiptResult method.
   receipt: "notAReceipt",
-  risk: ["fundOut"],
+  risk: [],
 });
 
 // @ts-expect-error Query account must be an EVM address.

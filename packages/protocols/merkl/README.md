@@ -59,7 +59,7 @@ It deliberately does not reconstruct cumulative amounts, proofs, campaigns, or t
 
 ## Risk metadata and exclusions
 
-The claim is inflow-only. `fundOut` is a temporary Registry-compatible placeholder. The maintainer-approved representation is tracked in [#164](https://github.com/nishuzumi/moss/issues/164) and should replace this label once Core resolves that issue.
+The claim is inflow-only and uses the explicitly authored `risk: []` now supported by Core. This records that the operation was reviewed and none of the current closed-set RiskLabels accurately applies. Receipt tests retain the relevant Changes and assert that no asset leaves the acting account, as required by [#164](https://github.com/nishuzumi/moss/issues/164).
 
 This v1 package does not expose claiming for another user, operator or main-operator controls, `toggleOperator`, `toggleMainOperatorStatus`, recipient configuration, `setClaimRecipient`, `claimWithRecipient`, callback data or contract callbacks, swaps, vault deposits, campaign management, disputes, tree updates, governance/admin methods, cross-chain claiming, or arbitrary Distributor addresses.
 

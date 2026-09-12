@@ -118,10 +118,7 @@ export class MerklProtocol {
     verb: "claim",
     params: claimParams,
     receipt: "claimReceipt",
-    // The claim is inflow-only. fundOut is a temporary Registry-compatible
-    // placeholder; the maintainer-approved representation is tracked in #164:
-    // https://github.com/nishuzumi/moss/issues/164
-    risk: ["fundOut"],
+    risk: [],
     tags: ["rewards", "merkle", "batch-claim", "incentives"],
   })
   async claim(params: InferParams<typeof claimParams>, ctx: ActionCtx) {
