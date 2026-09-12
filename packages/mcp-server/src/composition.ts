@@ -4,6 +4,7 @@ import * as apriori from "@themoss/protocol-apriori";
 import * as clober from "@themoss/protocol-clober";
 import * as kintsu from "@themoss/protocol-kintsu";
 import * as kuru from "@themoss/protocol-kuru";
+import * as merkl from "@themoss/protocol-merkl";
 import * as monadCards from "@themoss/protocol-monad-cards";
 import * as morpho from "@themoss/protocol-morpho";
 import * as nadfun from "@themoss/protocol-nadfun";
@@ -21,6 +22,7 @@ export const defaultProtocolModules = [
   clober,
   kintsu,
   kuru,
+  merkl,
   monadCards,
   morpho,
   nadfun,
