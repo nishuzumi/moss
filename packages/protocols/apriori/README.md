@@ -44,9 +44,11 @@ MONADSCAN_API_KEY=... pnpm --filter @themoss/protocol-apriori update:abis
   name, module file); `update:abis` re-fetches and renders from it.
 - `abis.json` pins the expected proxy/implementation pair and the reviewed
   `allowedExplorerOnly` exceptions (none today).
-- `test/abis.test.ts` (offline) re-derives the committed module from its own
-  embedded ABI and retrieval date and asserts byte-for-byte equality, so a
-  hand-edit or drift from `renderAbiModule` fails closed.
+- `test/abis.test.ts` (offline) asserts the source table fetches the implementation
+  `abis.json` pins, and re-derives the committed module from its own embedded ABI
+  and retrieval date, so drift from `renderAbiModule`'s canonical rendering or from
+  the recorded address fails closed. ABI content itself is defended by the keyed
+  cross-check below and, for the three decoded events, by the real-log Receipt test.
 - `test-online/abi-explorer.test.ts` (keyed, needs `MONADSCAN_API_KEY`) verifies
   on chain that the proxy's EIP-1967 slot still resolves to the recorded
   implementation, that the proxy has deployed bytecode, that on-chain

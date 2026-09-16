@@ -1,5 +1,5 @@
 ---
-"@themoss/protocol-apriori": patch
+"@themoss/protocol-apriori": minor
 ---
 
 Move the aprMON ABI to the explorer tier (ADR 0007). The EIP-1967 implementation

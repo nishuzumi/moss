@@ -49,11 +49,13 @@ describe("aPriori ABI explorer cross-check", () => {
     expect(getAddress(manifest.aprMon.proxy)).toBe(getAddress(APRMON_ADDRESS));
   });
 
-  it("has deployed bytecode at the aprMON proxy address", { timeout: 60_000 }, async () => {
+  it("has deployed bytecode at the proxy and the recorded implementation", {
+    timeout: 60_000,
+  }, async () => {
     const runtime = await createRuntime();
-    expect(
-      (await runtime.client.getCode({ address: manifest.aprMon.proxy }))?.length,
-    ).toBeGreaterThan(2);
+    for (const address of [manifest.aprMon.proxy, manifest.aprMon.implementation]) {
+      expect((await runtime.client.getCode({ address }))?.length, address).toBeGreaterThan(2);
+    }
   });
 
   it("aprMON proxy still points at the recorded implementation", { timeout: 60_000 }, async () => {

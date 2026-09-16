@@ -3,11 +3,20 @@ import { type RenderAbiModuleOptions, renderAbiModule } from "@themoss/abi-tools
 import { describe, expect, it } from "vitest";
 import { SOURCES } from "../scripts/abis.js";
 
+interface AbiManifest {
+  aprMon: { proxy: string; implementation: string; allowedExplorerOnly: string[] };
+}
+
 describe("aPriori explorer ABI provenance", () => {
   it("derives the committed ABI from the verified implementation source", () => {
     const [source] = SOURCES;
+    // The fetch address is the implementation the online suite pins on chain, so
+    // the offline and keyed checks can never point at different contracts.
+    const manifest = JSON.parse(
+      readFileSync(new URL("../abis.json", import.meta.url), "utf8"),
+    ) as AbiManifest;
     expect(source).toEqual({
-      address: "0x7D2F8dc5a67CA1911bb1A2429552CDf507d106F2",
+      address: manifest.aprMon.implementation,
       exportName: "AprMon",
       file: "apriori.ts",
     });
@@ -30,8 +39,8 @@ describe("aPriori explorer ABI provenance", () => {
     );
     expect(committed).toBe(
       renderAbiModule({
-        exportName: source?.exportName ?? "",
-        address: source?.address ?? "0x0000000000000000000000000000000000000000",
+        exportName: source.exportName,
+        address: source.address,
         abi,
         retrievedAt: new Date(`${retrieved}T00:00:00Z`),
       }),

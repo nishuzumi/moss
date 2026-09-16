@@ -3,12 +3,9 @@ import { defineConfig } from "vitest/config";
 
 const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
-// The online ABI derivation suite (pnpm test:abi:online). Keyless: written
-// while the aprMON implementation was unverified on MonadScan, so the vendored
-// ABI is enforced directly against mainnet RPC (EIP-1967 linkage, bytecode
-// selector/topic presence, token metadata) instead of a keyed explorer fetch.
-// The keyed cross-check is tracked in #197. Kept apart from the offline
-// default `pnpm test`.
+// The online explorer cross-check suite (pnpm test:abi:online). Kept apart
+// from the offline default so a missing MONADSCAN_API_KEY fails loudly here
+// without ever gating `pnpm test`.
 export default defineConfig({
   esbuild: { target: "es2022" },
   test: { include: ["test-online/**/*.test.ts"] },
