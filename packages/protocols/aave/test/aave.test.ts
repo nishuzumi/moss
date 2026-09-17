@@ -16,6 +16,7 @@ import {
   encodeAbiParameters,
   encodeEventTopics,
   formatUnits,
+  getAbiItem,
   getAddress,
   toEventSelector,
   toEventSignature,
@@ -47,14 +48,58 @@ const STUB_TREASURY = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
  * account we do not control keeps a position: the one the live withdraw was
  * pinned to had its aUSDC drained to zero on chain between 2026-08-01 and
  * 2026-08-04, which turned the suite red with no commit behind it and nothing in
- * the repository to fix. So these are candidates a role search starts from
- * rather than fixtures any test depends on. A role that outlives all of them
- * fails by name rather than by revert.
+ * the repository to fix. Then all of them emptied at once and took four roles
+ * with them. So these are a fast path a role search starts from rather than
+ * fixtures any test depends on: when none of them qualifies the search reads
+ * fresh candidates off recent chain state instead of waiting to be re-seeded,
+ * and a role that outlives both sources fails by name rather than by revert.
  */
 const LIVE_CANDIDATES = [
   getAddress("0xa7b6296945906D190Fc0ddFDc0fa1Da03382B891"),
   getAddress("0xa6B08DacBc644EeEA9143EFc8a07fBcA9F0e4F72"),
 ] as const;
+
+/**
+ * The block span one `eth_getLogs` request may cover. `rpc.monad.xyz` refuses a
+ * wider range outright (`-32614 eth_getLogs is limited to a 100 range`), so a
+ * search that wants more history pages backwards a window at a time rather than
+ * asking for it in one call. A single window answers in about 0.4 seconds.
+ */
+const DISCOVERY_WINDOW = 100n;
+
+/**
+ * How far a candidate search pages before it gives up, and how many distinct
+ * accounts it wants. Measured against Monad mainnet on 2026-09-16: one window of
+ * the busiest reserve's own Transfer log already names 37 distinct recipients,
+ * while the Pool's Supply log is thin enough to need about 60 windows to name 5
+ * accounts. The budget covers the sparse source and costs one request on the
+ * dense one.
+ */
+const DISCOVERY_WINDOWS = 80;
+const DISCOVERY_WANTED = 8;
+
+/**
+ * Addresses that appear in a token's Transfer log without being able to play a
+ * role. The market's own position tokens and the Pool hold balances the protocol
+ * manages rather than balances an account controls, and a transfer to the zero
+ * address is a burn.
+ */
+const PROTOCOL_ADDRESSES: ReadonlySet<string> = new Set<string>([
+  AAVE_POOL_ADDRESS,
+  ...AAVE_RESERVES.flatMap(({ underlying, aToken, variableDebtToken }) => [
+    underlying,
+    aToken,
+    variableDebtToken,
+  ]),
+]);
+
+/**
+ * The two logs a candidate search reads, taken from the derived ABIs this
+ * package already ships rather than written out here. ADR 0007 owns where an ABI
+ * comes from, and a filter is as much a use of the ABI as a decode is.
+ */
+const TRANSFER_EVENT = getAbiItem({ abi: ERC20Abi, name: "Transfer" });
+const SUPPLY_EVENT = getAbiItem({ abi: AavePoolAbi, name: "Supply" });
 
 /**
  * What every live role asks of a reserve: a thousand of its base units. That is
@@ -1056,7 +1101,8 @@ describe("Aave", () => {
     // drained to zero on chain, which failed on a bare balance assertion with no
     // commit behind it. Roles are searched against chain state now, so a market
     // where nothing qualifies has to report the role, the reserves it tried and
-    // what each of them lacked.
+    // what each of them lacked. The count separates the two passes, so a reader
+    // can tell an empty market from a market the search never looked at.
     await expect(
       resolveRoleOn(
         stubRuntime(() => 0n),
@@ -1065,7 +1111,7 @@ describe("Aave", () => {
         holdsPosition,
       ),
     ).rejects.toThrow(
-      `no live account can play the Aave withdraw role: tried 3 candidates against 2 of the market's ${AAVE_RESERVES.length} reserves: USDC: the reserve has 0 USDC left to pay out, not 1000; USDT0: the reserve has 0 USDT0 left to pay out, not 1000`,
+      `no live account can play the Aave withdraw role: tried 3 candidates (3 seeded, 0 discovered from recent chain state) against 2 of the market's ${AAVE_RESERVES.length} reserves: USDC: the reserve has 0 USDC left to pay out, not 1000; USDT0: the reserve has 0 USDT0 left to pay out, not 1000`,
     );
 
     // And a search settles on whichever candidate does hold the position, with
@@ -1080,6 +1126,57 @@ describe("Aave", () => {
       units: "1000",
       amount: "0.000000000000001",
     });
+  });
+
+  it("falls back to an account discovered from a log when no seed qualifies", async () => {
+    // The failure this fixes: every seeded account emptied its positions on the
+    // same market and four live roles went red with nothing in the repository to
+    // change. The second pass reads candidates off recent chain state, so the
+    // search recovers on its own. Stranger is a fresh account no seed names, and
+    // only it and the reserve hold anything, which is what proves the role was
+    // filled by the discovered candidate rather than by a seed or the treasury.
+    const stranger = getAddress("0x1111111111111111111111111111111111111111");
+    const gho = reserveFor("GHO");
+    const drifted = (logs: readonly { args: Record<string, Address> }[]) =>
+      stubRuntime(
+        (owner) => (owner === stranger || owner === gho.aToken ? 10n ** 18n : 0n),
+        () => 0n,
+        logs,
+      );
+
+    await expect(
+      resolveRoleOn(
+        drifted([{ args: { to: stranger } }]),
+        "withdraw",
+        [gho],
+        holdsPosition,
+        recentHolders((reserve) => reserve.aToken),
+      ),
+    ).resolves.toMatchObject({ account: stranger, units: "1000" });
+
+    // The Pool's own Supply log names the account under a different field, so a
+    // source reading the wrong one would silently discover nobody.
+    await expect(
+      resolveRoleOn(
+        drifted([{ args: { onBehalfOf: stranger } }]),
+        "withdraw",
+        [gho],
+        holdsPosition,
+        recentSuppliers,
+      ),
+    ).resolves.toMatchObject({ account: stranger, units: "1000" });
+
+    // A log that only ever names the protocol's own addresses discovers nobody,
+    // because a position token's balance is not a balance an account controls.
+    await expect(
+      resolveRoleOn(
+        drifted([{ args: { to: gho.aToken } }, { args: { to: ZERO } }]),
+        "withdraw",
+        [gho],
+        holdsPosition,
+        recentHolders((reserve) => reserve.aToken),
+      ),
+    ).rejects.toThrow("tried 3 candidates (3 seeded, 0 discovered from recent chain state)");
   });
 
   it("selects an account the fixed base-currency gate rejected but the amount clears", async () => {
@@ -1257,11 +1354,22 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
     }
   });
 
-  it("reads account health and reserve rates", { timeout: 60_000 }, async () => {
+  // The first role to want the Pool's Supply log pays for the scan and every
+  // later role reads it back, so this budget covers a full 80-window page rather
+  // than the handful of reads the assertions themselves make. A run on
+  // 2026-09-16 spent 24.7 seconds here and under a second on each of the two
+  // roles that reused it.
+  it("reads account health and reserve rates", { timeout: 120_000 }, async () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
     const live = liveState(runtime, registry);
-    const { account } = await resolveRole(live, "account health", [USDC], holdsCollateral(live));
+    const { account } = await resolveRole(
+      live,
+      "account health",
+      [USDC],
+      holdsCollateral(live),
+      recentSuppliers,
+    );
     const data = await registry.action("aave", "accountData", account, { user: account });
     if (data.kind !== "query") throw new Error("expected a Query");
     expect(data.data).toMatchObject({
@@ -1288,6 +1396,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
       "supply",
       reservesPreferring("USDT0"),
       holdsUnderlying(live),
+      recentHolders((reserve) => reserve.underlying),
     );
     const outcome = await simulate(runtime, registry, "supply", role.account, {
       asset: role.reserve.underlying,
@@ -1314,6 +1423,7 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
       "withdraw",
       reservesPreferring("USDC"),
       holdsPosition(live),
+      recentHolders((reserve) => reserve.aToken),
     );
     const outcome = await simulate(runtime, registry, "withdraw", role.account, {
       asset: role.reserve.underlying,
@@ -1333,7 +1443,13 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
     const live = liveState(runtime, registry);
-    const role = await resolveRole(live, "borrow", borrowReserves("USDC"), canBorrow(live));
+    const role = await resolveRole(
+      live,
+      "borrow",
+      borrowReserves("USDC"),
+      canBorrow(live),
+      recentSuppliers,
+    );
     const outcome = await simulate(runtime, registry, "borrow", role.account, {
       asset: role.reserve.underlying,
       amount: role.amount,
@@ -1360,7 +1476,13 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
     const runtime = await createRuntime();
     const registry = new Registry(runtime).use(Aave);
     const live = liveState(runtime, registry);
-    const role = await resolveRole(live, "repay", borrowReserves("USDC"), canBorrow(live));
+    const role = await resolveRole(
+      live,
+      "repay",
+      borrowReserves("USDC"),
+      canBorrow(live),
+      recentSuppliers,
+    );
     const params = { asset: role.reserve.underlying, amount: role.amount };
     const [borrow, repay] = await Promise.all([
       registry.action("aave", "borrow", role.account, params),
@@ -1398,6 +1520,8 @@ interface LiveState {
   account(user: Address): Promise<AaveAccountData>;
   /** A reserve's treasury, read off its own aToken rather than pinned here. */
   treasury(reserve: AaveReserve): Promise<Address>;
+  /** Fresh candidates off recent chain state, for when the seeds stop qualifying. */
+  discover(from: Discovery, reserve: AaveReserve): Promise<readonly Address[]>;
 }
 
 function liveState(runtime: MossRuntime, registry: Registry): LiveState {
@@ -1435,6 +1559,9 @@ function liveState(runtime: MossRuntime, registry: Registry): LiveState {
         ),
       );
     },
+    discover(from, reserve) {
+      return from(runtime, reserve);
+    },
   };
 }
 
@@ -1450,11 +1577,16 @@ interface LiveRole {
 
 /**
  * The first reserve and account that can play a role, searched against chain
- * state when the test runs instead of pinned in this file. Every reserve is
- * tried against the reserve's own treasury and then the seed candidates. `need`
- * answers with the reason a pair cannot play the role or with nothing when it
- * can, so a role no pair can play fails naming the role, the reserves it tried
- * and what each of them lacked rather than asserting on one balance.
+ * state when the test runs instead of pinned in this file. `need` answers with
+ * the reason a pair cannot play the role or with nothing when it can, so a role
+ * no pair can play fails naming the role, the reserves it tried and what each of
+ * them lacked rather than asserting on one balance.
+ *
+ * Two passes, cheapest first. The seeds and the reserve's own treasury cost no
+ * request, so a market where they still qualify never reads a log. When none of
+ * them does, `from` pages recent chain state for accounts that are active now,
+ * which is what keeps the role alive after the seeds empty their positions
+ * instead of waiting for somebody to commit a new list.
  *
  * The treasury leads because protocol fees accrue to it, which makes it the one
  * holder no stranger can move. `aToken.RESERVE_TREASURY_ADDRESS()` is a read
@@ -1469,29 +1601,138 @@ async function resolveRole(
   role: string,
   over: readonly AaveReserve[],
   need: (reserve: AaveReserve, account: Address) => Promise<string | undefined>,
+  from: Discovery,
 ): Promise<LiveRole> {
   const reasons: string[] = [];
-  for (const reserve of over) {
-    for (const account of [await live.treasury(reserve), ...LIVE_CANDIDATES]) {
-      const missing = await need(reserve, account);
-      if (!missing) {
-        return {
-          reserve,
-          account,
-          amount: formatUnits(ROLE_UNITS, reserve.decimals),
-          units: ROLE_UNITS.toString(),
-        };
+  const tried = new Set<Address>();
+  const search = async (
+    accounts: (reserve: AaveReserve) => Promise<readonly Address[]>,
+  ): Promise<LiveRole | undefined> => {
+    for (const reserve of over) {
+      for (const account of await accounts(reserve)) {
+        tried.add(account);
+        const missing = await need(reserve, account);
+        if (!missing) {
+          return {
+            reserve,
+            account,
+            amount: formatUnits(ROLE_UNITS, reserve.decimals),
+            units: ROLE_UNITS.toString(),
+          };
+        }
+        const reason = `${reserve.symbol}: ${missing}`;
+        if (!reasons.includes(reason)) reasons.push(reason);
       }
-      const reason = `${reserve.symbol}: ${missing}`;
-      if (!reasons.includes(reason)) reasons.push(reason);
     }
-  }
+    return undefined;
+  };
+
+  const seeded = await search(async (reserve) => [
+    await live.treasury(reserve),
+    ...LIVE_CANDIDATES,
+  ]);
+  if (seeded) return seeded;
+  const seedCount = tried.size;
+  const fresh = await search((reserve) => live.discover(from, reserve));
+  if (fresh) return fresh;
+
   const shown = reasons.slice(0, 6).join("; ");
   const rest = reasons.length > 6 ? ` (+${reasons.length - 6} more)` : "";
   throw new Error(
-    `no live account can play the Aave ${role} role: tried ${LIVE_CANDIDATES.length + 1} candidates against ${over.length} of the market's ${AAVE_RESERVES.length} reserves: ${shown}${rest}`,
+    `no live account can play the Aave ${role} role: tried ${tried.size} candidates (${seedCount} seeded, ${tried.size - seedCount} discovered from recent chain state) against ${over.length} of the market's ${AAVE_RESERVES.length} reserves: ${shown}${rest}`,
   );
 }
+
+/** Where a role reads fresh candidates when the seeds no longer qualify. */
+type Discovery = (runtime: MossRuntime, reserve: AaveReserve) => Promise<readonly Address[]>;
+
+/**
+ * One paged scan per source per endpoint per run. Every role in this file
+ * searches the same recent window, so reading it once keeps a drifted fixture
+ * costing one scan rather than one per test. The endpoint is part of the key
+ * because the offline suite searches a stub whose chain is empty, and that empty
+ * answer must not be served to a live role.
+ */
+const SCANS = new Map<string, Promise<readonly Address[]>>();
+
+function scanned(
+  key: string,
+  read: () => Promise<readonly Address[]>,
+): Promise<readonly Address[]> {
+  const known = SCANS.get(key);
+  if (known) return known;
+  const pending = read();
+  SCANS.set(key, pending);
+  return pending;
+}
+
+/**
+ * Pages backwards from the head block one `DISCOVERY_WINDOW` at a time, keeping
+ * the accounts `held` reads off each log, until it has `DISCOVERY_WANTED` of them
+ * or it has spent `DISCOVERY_WINDOWS`. Newest first, so the most recently active
+ * account is the first one a role tries.
+ */
+async function pageBackwards<T>(
+  runtime: MossRuntime,
+  logs: (fromBlock: bigint, toBlock: bigint) => Promise<readonly { args: T }[]>,
+  held: (args: T) => Address | undefined,
+): Promise<readonly Address[]> {
+  const found = new Set<Address>();
+  let toBlock = await runtime.client.getBlockNumber();
+  for (let window = 0; window < DISCOVERY_WINDOWS && found.size < DISCOVERY_WANTED; window++) {
+    const fromBlock = toBlock > DISCOVERY_WINDOW ? toBlock - DISCOVERY_WINDOW + 1n : 0n;
+    for (const log of await logs(fromBlock, toBlock)) {
+      const account = held(log.args);
+      if (!account) continue;
+      const checksummed = getAddress(account);
+      if (checksummed === ZERO || PROTOCOL_ADDRESSES.has(checksummed)) continue;
+      found.add(checksummed);
+    }
+    if (fromBlock === 0n) break;
+    toBlock = fromBlock - 1n;
+  }
+  return [...found];
+}
+
+/**
+ * Accounts that recently received the token a role searches on. A holder of the
+ * underlying can supply it and a holder of the aToken holds a position, so this
+ * answers both of the balance-shaped roles off the token's own Transfer log.
+ */
+const recentHolders =
+  (of: (reserve: AaveReserve) => Address): Discovery =>
+  (runtime, reserve) => {
+    const address = of(reserve);
+    return scanned(`${runtime.rpcUrl}:holders:${address}`, () =>
+      pageBackwards(
+        runtime,
+        (fromBlock, toBlock) =>
+          runtime.client.getLogs({ address, event: TRANSFER_EVENT, fromBlock, toBlock }),
+        (args: { to?: Address }) => args.to,
+      ),
+    );
+  };
+
+/**
+ * Accounts that recently took a supply position in this market, read off the
+ * Pool's own Supply log. A supplier holds collateral, which is what the roles
+ * that read `getUserAccountData` need and what no ERC-20 balance can show. The
+ * scan is reserve-independent, so every reserve a role offers shares it.
+ */
+const recentSuppliers: Discovery = (runtime) =>
+  scanned(`${runtime.rpcUrl}:suppliers`, () =>
+    pageBackwards(
+      runtime,
+      (fromBlock, toBlock) =>
+        runtime.client.getLogs({
+          address: AAVE_POOL_ADDRESS,
+          event: SUPPLY_EVENT,
+          fromBlock,
+          toBlock,
+        }),
+      (args: { onBehalfOf?: Address }) => args.onBehalfOf,
+    ),
+  );
 
 /** Every listed reserve, with the one a role would rather have tried first. */
 function reservesPreferring(symbol: string): AaveReserve[] {
@@ -1520,12 +1761,21 @@ function borrowValueBase(reserve: AaveReserve): bigint {
   return (ROLE_UNITS * 100_000_000n) / 10n ** BigInt(reserve.decimals);
 }
 
-/** A runtime whose reads come from one balance function, to search a role offline. */
+/**
+ * A runtime whose reads come from one balance function, to search a role offline.
+ * Its chain carries no logs unless a test hands it some, so a search against it
+ * exercises the discovery pass too and finds exactly what the test put there.
+ * Each stub gets its own endpoint, so one test's empty scan is never served to
+ * the next. That is the same reason the live cache keys on the RPC URL.
+ */
 function stubRuntime(
   balance: (owner: Address) => bigint,
   borrowsBase: (owner: Address) => bigint = () => 0n,
+  logs: readonly { args: Record<string, Address> }[] = [],
 ): MossRuntime {
   const client = {
+    getBlockNumber: async () => DISCOVERY_WINDOW,
+    getLogs: async () => logs,
     readContract: async ({
       functionName,
       args,
@@ -1546,8 +1796,10 @@ function stubRuntime(
       throw new Error(`unexpected read ${functionName}`);
     },
   } as unknown as MossRuntime["client"];
-  return { rpcUrl: "http://offline", client };
+  return { rpcUrl: `http://offline/${STUB_ENDPOINTS++}`, client };
 }
+
+let STUB_ENDPOINTS = 0;
 
 /** One role search against one runtime, live or stubbed. */
 function resolveRoleOn(
@@ -1557,9 +1809,10 @@ function resolveRoleOn(
   need: (
     live: LiveState,
   ) => (reserve: AaveReserve, account: Address) => Promise<string | undefined>,
+  from: Discovery = recentSuppliers,
 ): Promise<LiveRole> {
   const live = liveState(runtime, new Registry(runtime).use(Aave));
-  return resolveRole(live, role, over, need(live));
+  return resolveRole(live, role, over, need(live), from);
 }
 
 /** Holds enough of the underlying to supply it. */
