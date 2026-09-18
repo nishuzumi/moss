@@ -22,6 +22,12 @@ pnpm test
 
 `pnpm test:offline` skips live Monad tests when offline. Build must precede typecheck because cross-package declarations resolve through built output.
 
+Hosted CI uses `pnpm -r --no-bail test` so every workspace package reports its
+result even when an earlier package fails. Local `pnpm test` keeps its current
+fail-fast behavior. When a hosted failure is outside the files changed by a
+pull request, reproduce it locally and compare it with the current `main`
+baseline before changing unrelated protocol code.
+
 Toolchain notes you shouldn't fight:
 
 - **Stage-3 decorators** are lowered by esbuild (tsup/tsx/vitest 3). Don't bump vitest to 4.x until vite's oxc transform lowers decorators. Don't enable `experimentalDecorators`. See [ADR 0001](./docs/adr/0001-decorator-authoring-model.md).

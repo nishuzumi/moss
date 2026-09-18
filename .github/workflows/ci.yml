@@ -100,7 +100,7 @@ jobs:
       # the MOSS_RPC_URL set by the mint step above, or falls back to the public
       # endpoint when that step had no token.
       - name: Test
-        run: pnpm test
+        run: pnpm -r --no-bail test
 
   windows-offline:
     runs-on: windows-latest
