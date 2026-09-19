@@ -530,6 +530,20 @@ describe("Clober", () => {
     expect(receipt.changes.map(firstChange)[0]).toBe(take);
     expect(receipt.changes.map(firstChange)[1]).toBe(debit);
     expect(receipt.changes.map(firstChange)[2]).toBe(credit);
+
+    // Lock the exact text an Agent reads. Raw base-unit amounts, decimal ids,
+    // checksummed hex for unlabeled addresses and the `native` sentinel are the
+    // accepted convention.
+    const takeText = `Clober Take: 9 units at tick 123 from book ${expectedBookId} by Controller ${CLOBER_CONTROLLER_ADDRESS}`;
+    const debitText = `ERC20 Transfer: 1000000 ${USDC_ADDRESS} from ${ACCOUNT} to ${CLOBER_BOOK_MANAGER_ADDRESS}`;
+    const creditText = `ERC20 Transfer: 2000000 native from ${CLOBER_BOOK_MANAGER_ADDRESS} to ${ACCOUNT}`;
+    expect(receipt.text).toBe(
+      `Clober Swap: ${ACCOUNT} spent 1000000 ${USDC_ADDRESS}, received 2000000 native, and received 0 ${USDC_ADDRESS} as refund across 1 fill`,
+    );
+    // Both settlements are delegated ERC20 evidence, so only the Take is a
+    // top-level leaf.
+    expect(topLevelTexts(receipt)).toEqual([takeText, null, null]);
+    expect(flattenReceiptTexts(receipt)).toEqual([takeText, debitText, creditText]);
   });
 
   it("allows multiple fills from one book but rejects a second book", async () => {
@@ -558,6 +572,22 @@ describe("Clober", () => {
         { bookId: expectedBookId.toString(), tick: "-13", unit: "3" },
       ],
     });
+
+    // Two fills from one book each keep their own Take leaf, in evidence order,
+    // and the summary pluralises "fills".
+    const firstText = `Clober Take: 2 units at tick -12 from book ${expectedBookId} by Controller ${CLOBER_CONTROLLER_ADDRESS}`;
+    const secondText = `Clober Take: 3 units at tick -13 from book ${expectedBookId} by Controller ${CLOBER_CONTROLLER_ADDRESS}`;
+    expect(receipt.text).toBe(
+      `Clober Swap: ${ACCOUNT} spent 1000000000000000000 native, received 2000000 ${USDC_ADDRESS}, and received 0 native as refund across 2 fills`,
+    );
+    expect(topLevelTexts(receipt)).toEqual([null, firstText, secondText, null, null]);
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      `ERC20 Transfer: 1000000000000000000 native from ${ACCOUNT} to ${CLOBER_CONTROLLER_ADDRESS}`,
+      firstText,
+      secondText,
+      `ERC20 Transfer: 1000000000000000000 native from ${CLOBER_CONTROLLER_ADDRESS} to ${CLOBER_BOOK_MANAGER_ADDRESS}`,
+      `ERC20 Transfer: 2000000 ${USDC_ADDRESS} from ${CLOBER_BOOK_MANAGER_ADDRESS} to ${ACCOUNT}`,
+    ]);
     expect(() =>
       registry.parseReceipt(capability, [
         debit,
@@ -1051,6 +1081,21 @@ function erc20Approval(
 
 function nativeTransfer(from: `0x${string}`, to: `0x${string}`, amount: bigint): Change {
   return { kind: "nativeTransfer", from, to, value: amount.toString() };
+}
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
+// Leaf text per top-level entry; a delegated settlement is a nested Receipt, so
+// its slot is null while flattenReceiptTexts still carries its text.
+function topLevelTexts(receipt: ReceiptResult): (string | null)[] {
+  return receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null));
 }
 
 function firstChange(entry: ReceiptResult["changes"][number]): Change {

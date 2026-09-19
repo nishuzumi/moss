@@ -5,6 +5,7 @@ import {
   type Hex,
   type MossRuntime,
   Protocol,
+  type ReceiptResult,
   Registry,
   RISK_LABELS,
 } from "@themoss/core";
@@ -189,6 +190,26 @@ function withdrawChanges(): Change[] {
     transfer(ASSET, VAULT, OWNER, ASSETS),
   ];
 }
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
+// Leaf text per top-level entry; a delegated ERC-20 movement is a nested Receipt,
+// so its slot is null while flattenReceiptTexts still carries its text.
+function topLevelTexts(receipt: ReceiptResult): (string | null)[] {
+  return receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null));
+}
+
+// The disclosure the asset-candidate leaf carries: a Receipt cannot read
+// asset(), so an Agent must not read the emitter as the confirmed underlying.
+const UNAUTHENTICATED =
+  "Unauthenticated token: a Receipt cannot read asset(), so this emitter is a candidate for the vault's underlying, not the confirmed asset. Authenticate it with vaultInfo or position.";
 
 function leafChanges(entry: unknown, into: Change[] = []): Change[] {
   if (typeof entry !== "object" || entry === null) return into;
@@ -445,6 +466,46 @@ describe("Morpho registry metadata", () => {
 // ── Receipts ─────────────────────────────────────────────────────────────
 
 describe("Morpho supply Receipt", () => {
+  it("locks the Receipt text an Agent reads, leaf by leaf and in order", async () => {
+    const { registry, capability } = await buildSupply();
+    const receipt = registry.parseReceipt(capability, supplyChanges());
+
+    const lastTotal = (assets: string) =>
+      `Morpho vault UpdateLastTotalAssets at ${VAULT}: updatedTotalAssets=${assets}`;
+    const texts = [
+      lastTotal("363127972191"),
+      `Morpho vault UpdateLostAssets at ${VAULT}: newLostAssets=0`,
+      `Morpho vault AccrueInterest at ${VAULT}: newTotalAssets=363127972191, feeShares=0`,
+      `ERC20 Transfer: ${SHARES} ${VAULT} from ${ZERO} to ${OWNER}`,
+      `Morpho vault Deposit at ${VAULT}: ${ASSETS} assets for ${SHARES} shares`,
+      lastTotal("363128972191"),
+      `Morpho supply: ${ASSETS} moved from ${OWNER} into vault ${VAULT}, emitted by ${ASSET}. ${UNAUTHENTICATED}`,
+      `Morpho Blue AccrueInterest at Package(Morpho:Blue): id=${MARKET_ID}, prevBorrowRate=1928436063, interest=4131745, feeShares=0`,
+      `Morpho IRM BorrowRateUpdate at Package(Morpho:Irm): id=${MARKET_ID}, avgBorrowRate=1928436063, rateAtTarget=1081100606`,
+      `Morpho Blue Supply at Package(Morpho:Blue): id=${MARKET_ID}, caller=${VAULT}, onBehalf=${VAULT}, assets=${ASSETS}, shares=977598996901`,
+      `ERC20 Transfer: ${ASSETS} ${ASSET} from ${VAULT} to Package(Morpho:Blue)`,
+    ];
+    // The share mint and the vault-to-Blue asset leg are delegated ERC-20
+    // evidence (nested Receipts); the selected asset candidate is Morpho's own.
+    expect(topLevelTexts(receipt)).toEqual([
+      texts[0],
+      texts[1],
+      texts[2],
+      null,
+      texts[4],
+      texts[5],
+      texts[6],
+      texts[7],
+      texts[8],
+      texts[9],
+      null,
+    ]);
+    expect(receipt.text).toBe(
+      `Morpho supply: ${ASSETS} assets into vault ${VAULT} for ${OWNER}, ${SHARES} shares`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual(texts);
+  });
+
   it("covers every Change in order and reports the evidenced outcome", async () => {
     const { registry, capability } = await buildSupply();
     const changes = supplyChanges();
@@ -664,6 +725,34 @@ describe("Morpho supply Receipt", () => {
 });
 
 describe("Morpho withdraw Receipt", () => {
+  it("locks the Receipt text an Agent reads, leaf by leaf and in order", async () => {
+    const { registry, capability } = await buildWithdraw();
+    const receipt = registry.parseReceipt(capability, withdrawChanges());
+
+    const texts = [
+      `Morpho vault UpdateLastTotalAssets at ${VAULT}: updatedTotalAssets=363128972191`,
+      `Morpho vault UpdateLostAssets at ${VAULT}: newLostAssets=0`,
+      `ERC20 Transfer: ${SHARES} ${VAULT} from ${OWNER} to ${ZERO}`,
+      `Morpho vault Withdraw at ${VAULT}: ${ASSETS} assets for ${SHARES} shares`,
+      `Morpho Blue Withdraw at Package(Morpho:Blue): id=${MARKET_ID}, onBehalf=${VAULT}, receiver=${VAULT}, caller=${VAULT}, assets=${ASSETS}, shares=977598996901`,
+      `ERC20 Transfer: ${ASSETS} ${ASSET} from Package(Morpho:Blue) to ${VAULT}`,
+      `Morpho withdraw: ${ASSETS} moved out of vault ${VAULT} to ${OWNER}, emitted by ${ASSET}. ${UNAUTHENTICATED}`,
+    ];
+    expect(topLevelTexts(receipt)).toEqual([
+      texts[0],
+      texts[1],
+      null,
+      texts[3],
+      texts[4],
+      null,
+      texts[6],
+    ]);
+    expect(receipt.text).toBe(
+      `Morpho withdraw: ${ASSETS} assets out of vault ${VAULT} for ${OWNER}, ${SHARES} shares`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual(texts);
+  });
+
   it("covers every Change in order and reports the evidenced outcome", async () => {
     const { registry, capability } = await buildWithdraw();
     const changes = withdrawChanges();
