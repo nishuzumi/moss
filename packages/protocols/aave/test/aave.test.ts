@@ -371,6 +371,15 @@ function withdrawWithFlag(flag: Change): Change[] {
   return [...changes.slice(0, 4), flag, ...changes.slice(4)];
 }
 
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
 function firstChange(entry: ReceiptResult["changes"][number]): Change {
   if (entry.kind === "change") return entry.change;
   const [child] = entry.changes;
@@ -591,6 +600,109 @@ describe("Aave", () => {
       position: { event: "Burn", token: USDC.variableDebtToken, balanceIncrease: "1" },
     });
     expect(receipt.changes.map(firstChange)).toEqual(changes);
+  });
+
+  it("locks the Receipt text an Agent reads for a supply", async () => {
+    const receipt = await parse(
+      "supply",
+      { asset: USDT0.underlying, amount: "1" },
+      supplyChanges(),
+    );
+
+    // Raw base-unit amounts, checksummed hex for unlabeled addresses and the
+    // Registry's Package labels are the accepted convention.
+    const texts = [
+      `Aave Reserve Rates Updated: ${USDT0.underlying} supply 23455889043532674173894415, variable borrow 34034034558403462868347260 (ray)`,
+      `ERC20 Transfer: 1000000 ${USDT0.underlying} from ${ACCOUNT} to Package(Aave:aUSDT0)`,
+      `ERC20 Approval: ${ACCOUNT} approved Package(Aave:Pool) for 0 ${USDT0.underlying}`,
+      `ERC20 Transfer: 999999 Package(Aave:aUSDT0) from ${ZERO} to ${ACCOUNT}`,
+      `Aave Position Mint: 999999 of Package(Aave:aUSDT0) for ${ACCOUNT}, 0 interest accrued`,
+      `Aave Collateral enabled: ${USDT0.underlying} for ${ACCOUNT}`,
+      `Aave Pool Supply: reserve ${USDT0.underlying}, onBehalfOf ${ACCOUNT}, referralCode 0, user ${ACCOUNT}, amount 1000000`,
+    ];
+    // Delegated ERC20 movements surface as nested Receipts, not top-level
+    // leaves, so the per-position map is null there while the flattened
+    // sequence below still carries their text.
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      texts[0],
+      null,
+      null,
+      null,
+      texts[4],
+      texts[5],
+      texts[6],
+    ]);
+    // The top-level text is the operation summary, not a join of the leaves.
+    expect(receipt.text).toBe(`Aave Supply: 1000000 ${USDT0.underlying} for ${ACCOUNT}`);
+    // Flattened exactly as receiptTexts projects it, so order and completeness
+    // are locked together.
+    expect(flattenReceiptTexts(receipt)).toEqual(texts);
+  });
+
+  it("locks the Receipt text an Agent reads for a withdraw, with and without a collateral flag", async () => {
+    const rates = `Aave Reserve Rates Updated: ${USDC.underlying} supply 23455889043532674173894415, variable borrow 34034034558403462868347260 (ray)`;
+    const burn = `ERC20 Transfer: 996381 Package(Aave:aUSDC) from ${ACCOUNT} to ${ZERO}`;
+    const position = `Aave Position Burn: 996381 of Package(Aave:aUSDC) for ${ACCOUNT}, 3619 interest accrued`;
+    const payout = `ERC20 Transfer: 1000000 ${USDC.underlying} from Package(Aave:aUSDC) to ${ACCOUNT}`;
+    const pool = `Aave Pool Withdraw: reserve ${USDC.underlying}, user ${ACCOUNT}, to ${ACCOUNT}, amount 1000000`;
+    const top = `Aave Withdraw: 1000000 ${USDC.underlying} to ${ACCOUNT}`;
+
+    const plain = await parse(
+      "withdraw",
+      { asset: USDC.underlying, amount: "1" },
+      withdrawChanges(),
+    );
+    expect(plain.text).toBe(top);
+    expect(flattenReceiptTexts(plain)).toEqual([rates, burn, position, payout, pool]);
+
+    const flagged = await parse(
+      "withdraw",
+      { asset: USDC.underlying, amount: "1" },
+      withdrawWithFlag(poolCollateral(USDC, ACCOUNT, false)),
+    );
+    expect(flagged.text).toBe(top);
+    expect(flattenReceiptTexts(flagged)).toEqual([
+      rates,
+      burn,
+      position,
+      payout,
+      `Aave Collateral disabled: ${USDC.underlying} for ${ACCOUNT}`,
+      pool,
+    ]);
+  });
+
+  it("locks the Receipt text an Agent reads for a borrow", async () => {
+    const receipt = await parse("borrow", { asset: USDC.underlying, amount: "1" }, borrowChanges());
+    const texts = [
+      `ERC20 Transfer: 1000001 Package(Aave:vUSDC) from ${ZERO} to ${ACCOUNT}`,
+      `Aave Position Mint: 1000001 of Package(Aave:vUSDC) for ${ACCOUNT}, 0 interest accrued`,
+      `Aave Reserve Rates Updated: ${USDC.underlying} supply 23455889043532674173894415, variable borrow 34034034558403462868347260 (ray)`,
+      `ERC20 Transfer: 1000000 ${USDC.underlying} from Package(Aave:aUSDC) to ${ACCOUNT}`,
+      `Aave Pool Borrow: reserve ${USDC.underlying}, onBehalfOf ${ACCOUNT}, referralCode 0, user ${ACCOUNT}, amount 1000000, interestRateMode 2, borrowRate 36669230592558996100227567`,
+    ];
+    expect(receipt.text).toBe(
+      `Aave Borrow: 1000000 ${USDC.underlying} to ${ACCOUNT} as variable-rate debt for ${ACCOUNT}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual(texts);
+  });
+
+  it("locks the Receipt text an Agent reads for a repay", async () => {
+    const receipt = await parse(
+      "repay",
+      { asset: USDC.underlying, amount: "0.001" },
+      repayChanges(),
+    );
+    const texts = [
+      `ERC20 Transfer: 999 Package(Aave:vUSDC) from ${ACCOUNT} to ${ZERO}`,
+      `Aave Position Burn: 999 of Package(Aave:vUSDC) for ${ACCOUNT}, 1 interest accrued`,
+      `Aave Reserve Rates Updated: ${USDC.underlying} supply 23455889043532674173894415, variable borrow 34034034558403462868347260 (ray)`,
+      `ERC20 Transfer: 1000 ${USDC.underlying} from ${ACCOUNT} to Package(Aave:aUSDC)`,
+      `Aave Pool Repay: reserve ${USDC.underlying}, user ${ACCOUNT}, repayer ${ACCOUNT}, amount 1000, useATokens false`,
+    ];
+    expect(receipt.text).toBe(
+      `Aave Repay: 1000 ${USDC.underlying} of ${ACCOUNT}'s variable-rate debt, paid by ${ACCOUNT}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual(texts);
   });
 
   it("accepts the Mint a withdraw emits when accrued interest exceeds the amount", async () => {

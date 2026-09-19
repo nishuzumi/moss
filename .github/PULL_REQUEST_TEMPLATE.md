@@ -30,6 +30,7 @@
 - [ ] Parameters separate reusable Zod value types from field-purpose descriptions
 - [ ] Every Capability owns one direct TransactionNode and one typed Receipt
 - [ ] Receipt tests preserve every original Change object in exact length and order
+- [ ] Receipt tests assert exact leaf text, top-level text, and the ordered leaf-text sequence
 - [ ] Positive and `@ts-expect-error` fixtures cover exported type behavior
 - [ ] Fixed addresses and ABIs include sources and verification
 - [ ] A live Monad happy path returns zero Warnings

@@ -249,6 +249,27 @@ describe("Pendle swap Receipt parser", () => {
     });
     expect(receipt.changes.at(-1)).toMatchObject({ kind: "change", change: changes.at(-1) });
     expect(() => verifyReceiptCoverage(changes, receipt)).not.toThrow();
+
+    // Lock the exact text an Agent reads for each Pendle-owned Change class. The
+    // ERC-20 legs are delegated (nested Receipts, null here), so only the
+    // parser's own leaves and the swap summary are pinned. Raw base units and
+    // checksummed hex are the accepted convention.
+    expect(receipt.text).toBe(
+      `Pendle buy-pt: 1000000 ${UNDERLYING} -> 1009082 PT in market ${MARKET}`,
+    );
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      null,
+      null,
+      `SY.Deposit @ ${SY}`,
+      `Unattributed NewInterestIndex-compatible event @ ${YT}`,
+      `Unattributed NewInterestIndex-compatible event @ ${YT}`,
+      null,
+      null,
+      `Market.UpdateImpliedRate @ ${MARKET}`,
+      `Market.Swap @ ${MARKET}`,
+      `Pendle buy-pt: 1000000 ${UNDERLYING} -> 1009082 PT in market ${MARKET}`,
+    ]);
   });
 
   it("parses a full sell-PT trace into a typed outcome", () => {
@@ -262,6 +283,24 @@ describe("Pendle swap Receipt parser", () => {
       token: UNDERLYING,
     });
     expect(() => verifyReceiptCoverage(changes, receipt)).not.toThrow();
+
+    // The sell direction swaps the labels: PT is what is spent, the token is
+    // what is received.
+    expect(receipt.text).toBe(
+      `Pendle sell-pt: 1000000 PT -> 990561 ${UNDERLYING} in market ${MARKET}`,
+    );
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      null,
+      `Unattributed NewInterestIndex-compatible event @ ${YT}`,
+      null,
+      `Market.UpdateImpliedRate @ ${MARKET}`,
+      `Market.Swap @ ${MARKET}`,
+      null,
+      null,
+      `SY.Redeem @ ${SY}`,
+      `Pendle sell-pt: 1000000 PT -> 990561 ${UNDERLYING} in market ${MARKET}`,
+    ]);
   });
 
   it("rejects a trace without the Router SwapPtAndToken event", () => {

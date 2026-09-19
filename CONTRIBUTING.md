@@ -45,6 +45,7 @@ Toolchain notes you shouldn't fight:
 - [ ] Generated JSON Schema shown by `load` preserves the type description separately from the field description.
 - [ ] Every Capability owns exactly one direct TransactionNode and names exactly one typed Receipt parser. Additional transactions belong to nested Capabilities.
 - [ ] Every Receipt parser is pure, receives only the immutable ordered Changes of one successful transaction, and returns a structured Outcome plus exact ordered coverage.
+- [ ] Receipt tests assert the exact leaf text per Change class, the top-level Receipt text, and the full ordered leaf-text sequence Agents read, following the template's `test/adapter.test.ts`.
 - [ ] Positive and negative compile-time fixtures prove exported decorator inference, parameter inference, and Receipt-name autocomplete. Invalid usage uses `@ts-expect-error`.
 - [ ] Registry runtime checks reject invalid metadata, missing dependencies, bad Receipt bindings, and malformed Capability trees.
 - [ ] Every ABI has a documented origin and follows [ADR 0007](./docs/adr/0007-abi-origin.md). Vendored generation uses the full upstream artifact.

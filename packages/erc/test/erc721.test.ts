@@ -3,6 +3,7 @@ import {
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
+  type ReceiptResult,
   Registry,
 } from "@themoss/core";
 import { decodeFunctionData, encodeEventTopics, getAddress } from "viem";
@@ -15,6 +16,15 @@ const RECIPIENT = "0x1111111111111111111111111111111111111111";
 const COLLECTION = "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa";
 
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
 
 describe("ERC721", () => {
   it("registers directly and builds safeTransferFrom", async () => {
@@ -54,6 +64,14 @@ describe("ERC721", () => {
       tokenId: "7",
     });
     expect(receipt.changes[0]).toMatchObject({ kind: "change", change });
-    expect(receipt.text).toContain("ERC721 Transfer:");
+
+    // Lock the exact text an Agent reads: the token id keeps its `#` prefix and
+    // addresses render as checksummed hex.
+    const transferText = `ERC721 Transfer: ${COLLECTION} #7 from ${ACCOUNT} to ${RECIPIENT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      transferText,
+    ]);
+    expect(receipt.text).toBe(transferText);
+    expect(flattenReceiptTexts(receipt)).toEqual([transferText]);
   });
 });

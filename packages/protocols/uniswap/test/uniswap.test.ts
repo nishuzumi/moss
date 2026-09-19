@@ -340,6 +340,22 @@ describe("Uniswap", () => {
       text: "Uniswap v4 Swap: 1000000000000000000 in, 20000000 out at fee tier 500 by Package(Uniswap:UniversalRouter)",
     });
     expect(receipt.changes.map(firstChange)).toEqual(changes);
+
+    // The full ordered leaf-text sequence, flattened exactly as receiptTexts
+    // projects it to Agents. The native and ERC-20 legs are delegated Receipts,
+    // so only the Swap leaf is a top-level change.
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      null,
+      "Uniswap v4 Swap: 1000000000000000000 in, 20000000 out at fee tier 500 by Package(Uniswap:UniversalRouter)",
+      null,
+      null,
+    ]);
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      `ERC20 Transfer: 1000000000000000000 native from ${ACCOUNT} to Package(Uniswap:UniversalRouter)`,
+      "Uniswap v4 Swap: 1000000000000000000 in, 20000000 out at fee tier 500 by Package(Uniswap:UniversalRouter)",
+      `ERC20 Transfer: 1000000000000000000 native from Package(Uniswap:UniversalRouter) to Package(Uniswap:PoolManager)`,
+      `ERC20 Transfer: 20000000 ${USDC_ADDRESS} from Package(Uniswap:PoolManager) to ${ACCOUNT}`,
+    ]);
   });
 
   it("parses a native-output swap where the PoolManager pays the recipient", async () => {
@@ -519,6 +535,12 @@ describe("Uniswap", () => {
       kind: "change",
       text: `Permit2 Approval: ${ACCOUNT} approved Package(Uniswap:UniversalRouter) for 1000000 ${USDC_ADDRESS} until ${expiration}`,
     });
+    expect(receipt.text).toBe(
+      `Permit2 Approval: 1000000 ${USDC_ADDRESS} for Package(Uniswap:UniversalRouter) until ${expiration}`,
+    );
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      `Permit2 Approval: ${ACCOUNT} approved Package(Uniswap:UniversalRouter) for 1000000 ${USDC_ADDRESS} until ${expiration}`,
+    ]);
     expect(receipt.changes.map(firstChange)).toEqual([approval]);
 
     const foreignSpender: Change = {
@@ -815,6 +837,15 @@ function permit2Approval(
       [amount, Number(expiration)],
     ),
   };
+}
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
 }
 
 function firstChange(entry: ReceiptResult["changes"][number]): Change {
