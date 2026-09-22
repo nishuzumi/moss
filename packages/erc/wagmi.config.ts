@@ -17,6 +17,7 @@ export default defineConfig({
         "IERC721.sol/**",
         "IERC1155.sol/**",
         "IERC1155MetadataURI.sol/**",
+        "IERC4626.sol/**",
         "IWETH9.sol/**",
       ],
       // wagmi's default excludes assume IERC20 is someone else's vendored
