@@ -1663,6 +1663,9 @@ function scanned(
   if (known) return known;
   const pending = read();
   SCANS.set(key, pending);
+  // A scan that failed on a transient RPC error must not be served to the next
+  // role as a permanent answer; let that role page again.
+  pending.catch(() => SCANS.delete(key));
   return pending;
 }
 
@@ -1680,7 +1683,7 @@ async function pageBackwards<T>(
   const found = new Set<Address>();
   let toBlock = await runtime.client.getBlockNumber();
   for (let window = 0; window < DISCOVERY_WINDOWS && found.size < DISCOVERY_WANTED; window++) {
-    const fromBlock = toBlock > DISCOVERY_WINDOW ? toBlock - DISCOVERY_WINDOW + 1n : 0n;
+    const fromBlock = toBlock >= DISCOVERY_WINDOW ? toBlock - DISCOVERY_WINDOW + 1n : 0n;
     for (const log of await logs(fromBlock, toBlock)) {
       const account = held(log.args);
       if (!account) continue;
