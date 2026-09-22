@@ -46,7 +46,7 @@ describe("ERC4626Abi", () => {
     for (const [name, [inputs, mutability, outputs]] of Object.entries(expected)) {
       const item = fn(name);
       expect(item, `${name} present`).toBeDefined();
-      if (!item || item.type !== "function") throw new Error(`${name} is not a function`);
+      if (item?.type !== "function") throw new Error(`${name} is not a function`);
       expect(item.inputs.map((input) => input.type)).toEqual(inputs);
       expect(item.stateMutability).toBe(mutability);
       expect(item.outputs.map((output) => output.type)).toEqual(outputs);
