@@ -14,6 +14,7 @@ import { AUSD_ADDRESS, USDC_ADDRESS } from "@themoss/system";
 import {
   decodeFunctionData,
   encodeAbiParameters,
+  encodeErrorResult,
   encodeEventTopics,
   encodeFunctionResult,
   formatUnits,
@@ -31,6 +32,11 @@ const MON_USDC_WORSE = getAddress("0x2222222222222222222222222222222222222222");
 const MON_AUSD = getAddress("0x3333333333333333333333333333333333333333");
 const DIRECT_USDC_AUSD = getAddress("0x4444444444444444444444444444444444444444");
 const DIRECT_USDC_AUSD_BETTER = getAddress("0x5555555555555555555555555555555555555555");
+/** What a Kuru market reverts with when it is not in a state to accept orders. */
+const MARKET_STATE_ERROR = encodeErrorResult({
+  abi: KuruOrderbookAbi,
+  errorName: "MarketStateError",
+});
 
 type MockMarket = {
   address: `0x${string}`;
@@ -1755,6 +1761,75 @@ describe("Kuru", () => {
       requireExhaustive: false,
     });
     expect(built.kind).toBe("capability");
+  });
+
+  it("reads a market that answers MarketStateError as not trading, not as a gap", async () => {
+    // Mainnet MON/USDC: of four verified markets, 0x764b…29D5 has answered every probe with
+    // MarketStateError since 2026-09-08 while the other three fill (#194). The market names itself
+    // as the cause, so its route is measured at zero and the swap stays exhaustive. A bare revert
+    // still refuses (the test above). The dead market is the better-priced one here, so the swap
+    // can only route around it because it is not trading, not because it lost the comparison.
+    const { registry } = offlineRegistry([
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      {
+        ...market(MON_USDC_WORSE, ZERO, USDC_ADDRESS, 18, 6, 11n, 10n),
+        quoteFails: true,
+        quoteFailName: "CallExecutionError",
+        quoteFailData: MARKET_STATE_ERROR,
+        quoteFailDataNested: true,
+        quoteFailDepth: 2,
+      },
+    ]);
+    const quote = await registry.action("kuru", "quote", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (quote.kind !== "query") throw new Error("expected query");
+    expect((quote.data as KuruQuote).unavailable).toEqual([]);
+
+    const capability = await registry.action("kuru", "swap", ACCOUNT, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const swap = flattenCapabilityTree(capability).at(-1);
+    if (!swap) throw new Error("missing Kuru transaction");
+    const decoded = decodeFunctionData({ abi: KuruRouterAbi, data: swap.transaction.data });
+    expect(decoded.args[0]).toEqual([MON_USDC]);
+  });
+
+  it("does not pay twice to hear that a market is not trading", async () => {
+    // The reverse search walks many sizes. Once a market has said it is not trading, asking again at
+    // another size would only spend the request's allowance on the same answer.
+    const dead: MockMarket = {
+      ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      quoteFails: true,
+      quoteFailName: "CallExecutionError",
+      quoteFailData: MARKET_STATE_ERROR,
+    };
+    let calls = 0;
+    const { registry } = offlineRegistry([dead], undefined, () => {
+      calls += 1;
+    });
+    const target = await quoteError(registry, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "1",
+    });
+    // Measured and out of reach, not unmeasured.
+    expect(target.code).toBe("TARGET_OUTPUT_UNSATISFIABLE");
+    expect(target.unavailable).toEqual([]);
+    expect(calls).toBe(1);
+
+    const input = await quoteError(registry, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountIn: "1",
+    });
+    expect(input.code).toBe("NO_POSITIVE_QUOTE");
+    expect(input.unavailable).toEqual([]);
   });
 
   it("reads a Panic that arrives wrapped, and nested under viem's outer errors", async () => {

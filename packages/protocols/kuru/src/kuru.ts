@@ -24,7 +24,15 @@ import {
   TokenReference,
 } from "@themoss/core";
 import { ERC20 } from "@themoss/erc";
-import { decodeEventLog, formatUnits, getAddress, isAddress, parseUnits } from "viem";
+import {
+  decodeErrorResult,
+  decodeEventLog,
+  formatUnits,
+  getAddress,
+  isAddress,
+  isHex,
+  parseUnits,
+} from "viem";
 import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
 import type {
   KuruQuote,
@@ -959,6 +967,10 @@ export class Kuru {
         10n ** BigInt(leg.market.params.baseDecimals);
     // Nothing is asked of the chain, so nothing is charged.
     if (size <= 0n) return 0n;
+    // A market that already answered MarketStateError in this request prices nothing at any size,
+    // so the reverse search, which walks many sizes, does not pay to hear it again.
+    const market = leg.market.address.toLowerCase();
+    if (request.notTrading.has(market)) return 0n;
 
     // The market, the side and the size are the whole question. Two routes asking it are asking
     // for the same answer, and the second one should not pay for it again — the budget counts
@@ -970,7 +982,7 @@ export class Kuru {
     // Charged before the call, not after: a leg that priced and a later one that refused to
     // encode have both been paid for by then.
     spendCall(request, route);
-    const pending = leg.isBuy
+    const call = leg.isBuy
       ? leg.market.handle.call.placeAndExecuteMarketBuy([size, 0n, false, false], {
           from: KURU_NATIVE,
         })
@@ -980,6 +992,14 @@ export class Kuru {
             ? { value: amountIn, balance: amountIn }
             : { from: KURU_NATIVE },
         );
+    // The market saying it is not trading is an answer, not a gap: it fills nothing, so the leg
+    // prices zero and the route is measured. Every other failure keeps rejecting and stays an
+    // unmeasured route.
+    const pending = call.catch((error: unknown) => {
+      if (!isMarketNotTrading(error)) throw error;
+      request.notTrading.add(market);
+      return 0n;
+    });
     // Remembered as the promise, so concurrent routes asking at the same moment share one call
     // rather than racing to make two. A rejection is remembered too: the same question put to the
     // same market in the same request has the same answer, and re-asking it would only re-spend.
@@ -1347,6 +1367,8 @@ type CallBudget = { left: number };
  */
 type QuoteRequest = CallBudget & {
   memo: Map<string, Promise<bigint>>;
+  /** Markets that answered MarketStateError during this request, by lowercased address. */
+  notTrading: Set<string>;
   /**
    * The side the caller actually asked for. A budget refusal is raised deep inside route
    * evaluation, where only the route is in scope, yet it answers this request — so the side has to
@@ -1356,7 +1378,7 @@ type QuoteRequest = CallBudget & {
 };
 
 function requestBudget(side: KuruQuote["amountSide"]): QuoteRequest {
-  return { left: MAX_CALLS_PER_REQUEST, memo: new Map(), side };
+  return { left: MAX_CALLS_PER_REQUEST, memo: new Map(), notTrading: new Set(), side };
 }
 
 /**
@@ -1533,8 +1555,9 @@ function isUnsatisfiableTarget(error: Error): boolean {
  * would prove nothing.
  *
  * An on-chain revert is deliberately NOT accepted here. It looks similar and is not: `eth_call`
- * reverts for a paused market, a failed require, or the provider's own gas cap, none of which
- * say anything about the priceable range. Calling those "the target cannot be reached" would
+ * reverts for a failed require or the provider's own gas cap, neither of which says anything
+ * about the priceable range. (A market that names itself not trading with `MarketStateError` is
+ * answered earlier, in `#quoteFill`, as a zero fill.) Calling those "the target cannot be reached" would
  * state a definitive no from evidence that establishes nothing — the very failure this change
  * exists to prevent. They stay unavailable, which is the honest reading: we could not find out.
  *
@@ -1545,6 +1568,48 @@ function isProbeBeyondEncodableSize(error: unknown): boolean {
   for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
     if (current.name === "IntegerOutOfRangeError") return true;
     current = current.cause;
+  }
+  return false;
+}
+
+/**
+ * The revert data viem attached to one level of an error chain.
+ *
+ * viem hands it back either as the hex itself or wrapped a level down, and its own
+ * `getRevertErrorData` unwraps exactly this shape. Reading only the string form would miss a real
+ * revert on whichever providers use the object one, and miss it silently.
+ */
+function revertData(error: Error): unknown {
+  const raw = (error as { data?: unknown }).data;
+  return typeof raw === "object" && raw !== null ? (raw as { data?: unknown }).data : raw;
+}
+
+/**
+ * True when the market itself refused the probe with `MarketStateError()`.
+ *
+ * A bare revert attributes nothing to the market; this one does. The OrderBook reports that it is
+ * not in a state to accept orders, and it says so whatever the size: mainnet MON/USDC market
+ * 0x764b4c2AF968c97b4ae95490d264c14d955129D5 has answered every probe with it since 2026-09-08
+ * while three markets on the same template kept filling (#194). Decoded against the vendored
+ * OrderBook ABI rather than matched on a hand-typed selector. Never throws: this runs on errors the
+ * adapter did not build, and an unreadable one is simply not this case.
+ */
+function isMarketNotTrading(error: unknown): boolean {
+  try {
+    for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
+      const data = revertData(current);
+      if (isHex(data) && data.length === 10) {
+        try {
+          const decoded = decodeErrorResult({ abi: KuruOrderbookAbi, data });
+          if (decoded.errorName === "MarketStateError") return true;
+        } catch {
+          // Some other four-byte error: not this case.
+        }
+      }
+      current = current.cause;
+    }
+  } catch {
+    return false;
   }
   return false;
 }
@@ -1566,11 +1631,7 @@ const PANIC_ARITHMETIC_OVERFLOW = 0x11n;
  */
 function isMarketArithmeticOverflow(error: unknown): boolean {
   for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
-    // viem hands revert data back either as the hex itself or wrapped a level down, and its own
-    // `getRevertErrorData` unwraps exactly this shape. Reading only the string form would miss a
-    // real Panic on whichever providers use the object one, and miss it silently.
-    const raw = (current as { data?: unknown }).data;
-    const data = typeof raw === "object" && raw !== null ? (raw as { data?: unknown }).data : raw;
+    const data = revertData(current);
     if (
       typeof data === "string" &&
       data.startsWith(PANIC_SELECTOR) &&
