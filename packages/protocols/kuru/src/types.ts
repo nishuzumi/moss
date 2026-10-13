@@ -1,5 +1,4 @@
-import type { AddressValue, Handle, TokenRef } from "@themoss/core";
-import type { KuruOrderbookAbi } from "./abis/kuru.js";
+import type { AddressValue, TokenRef } from "@themoss/core";
 
 /**
  * A route evaluation that did not complete, and which route it was.
@@ -91,7 +90,6 @@ export type MarketCandidate = {
 
 export type VerifiedMarket = {
   address: AddressValue;
-  handle: Handle<typeof KuruOrderbookAbi>;
   params: MarketParams;
 };
 

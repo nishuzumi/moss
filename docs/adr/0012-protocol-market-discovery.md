@@ -46,3 +46,19 @@ These two were weighed for Kuru alone. They turn on comparing several candidates
 
 - **Fail closed everywhere** — rejected because an incomplete comparison is the normal state for a liquid pair on mainnet, so refusing advisory quotes would make it unquotable for a reason no caller can act on.
 - **Report the gap and never refuse** — rejected because a Capability spends funds on a route chosen from a subset, and the transaction tree has nowhere to carry the caveat the caller would need.
+
+### Proven paused Kuru markets
+
+Verification and every probe in one Kuru request are pinned to one freshly read
+block. A decoded `MarketStateError()` alone is still insufficient to exclude a
+route. The adapter confirms the market's reviewed delegate-proxy runtime hash and ERC-1967 implementation runtime hash
+against the reviewed guard/getter bytecode and reads its `marketState()` at that
+same block. Only `SOFT_PAUSED` (1) or `HARD_PAUSED` (2) proves every market buy and
+sell is disabled. Such a route is measured as unable to execute, including during
+reverse search. Active/unknown state, unknown runtime, malformed errors, and any
+failed evidence read remain gaps. Evidence is memoized only for that request,
+shared by concurrent routes and charged to the existing call allowance. The next
+request re-reads the block and state; there is no long-lived paused-market list.
+This runtime hash authorizes only interpreting pause evidence, never selecting a
+static market or bypassing Router verification. See the Kuru package's deployment
+record for the reproducible bytecode proof and degraded verification limits.

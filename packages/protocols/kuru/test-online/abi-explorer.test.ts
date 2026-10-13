@@ -11,47 +11,16 @@
  *   abis.json (ERC-1967 slot read) — a Kuru upgrade turns this suite red so
  *   a human re-verifies the ABIs before trusting them again;
  * - the vendored Router ABI is semantically identical to the ABI of the
- *   explorer-verified Router implementation: a second supply chain,
+ *   implementation, if explorer source verification is available: a second supply chain,
  *   independent of the npm tarball;
  * - `router.orderBookImplementation()` still equals the recorded market
  *   template.
  *
- * Why the OrderBook ABI has NO explorer comparison — verification record,
- * 2026-07-20, reproducible with the commands noted per item:
- *
- * Markets are ERC-1967 proxies running (at least) two implementations,
- * discovered via api.kuru.io candidates + `eth_getStorageAt` on slot
- * 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc:
- * - 0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD — source verified
- *   (https://monadscan.com/address/0xea2Cc8769Fb04Ff1893Ed11cf517b7F040C823CD,
- *   Exact Match);
- * - 0x4C0bA1BA8404076E2B09c7a5d014EC999c3a27e2 — the current
- *   `orderBookImplementation()` template, source NOT verified on Monadscan
- *   (`fetchAbi` refuses: "Contract source code not verified").
- *
- * kuru-sdk@0.0.95's OrderBook.json matches NEITHER of the two checked
- * implementations. Vs 0xea2Cc876… (via `fetchAbi` + `compareDeployedAbi`):
- * 18 vendored-only items, 16 explorer-only items, and one stateMutability
- * mismatch (`transferOwnership`: vendored payable, explorer nonpayable).
- *
- * The Moss-required surface was instead verified once by hand:
- * - `Trade`, `FlipOrderUpdated`, `FlippedOrderCreated`,
- *   `placeAndExecuteMarketBuy`, and `placeAndExecuteMarketSell` are
- *   field-for-field identical between the vendored ABI and the explorer ABI
- *   of 0xea2Cc876… (same comparison as above; all five are absent from every
- *   issue bucket), and
- * - present in 0x4C0bA1BA…'s deployed bytecode (`eth_getCode`, then search
- *   the hex for the dispatcher selectors and the event topic):
- *     placeAndExecuteMarketBuy(uint96,uint256,bool,bool)  = 0x7c51d6cf
- *     placeAndExecuteMarketSell(uint96,uint256,bool,bool) = 0x532c46db
- *     Trade(uint40,address,bool,uint256,uint96,address,address,uint96)
- *       topic0 = 0xf16924fba1c18c108912fcacaac7450c98eb3f2d8c0a3cdf3df7066c08f21581
- *     FlipOrderUpdated(uint40,uint96)
- *       topic0 = 0xb74e966bc873b8c144fab39c9981210f50130885e89caf4556c0840cec741dcd
- *     FlippedOrderCreated(uint40,uint40,address,uint96,uint32,uint32,bool)
- *       topic0 = 0x49496a41b922bdba3ff7f57bb0992ab1a1a3ee95b5ae5bd7271c67861f018352
- * The template assertion below is the tripwire that forces this record to
- * be redone whenever Kuru upgrades.
+ * Current deployment/state re-verification: 2026-10-12, block 112692350.
+ * See ../DEPLOYMENT.md for exact addresses, runtime hash, getter/guard bytecode
+ * proof, provenance limits, and reproducible RPC checks. The OrderBook remains
+ * degraded verification, NOT explorer-source verified. Router semantic ABI
+ * comparison below still requires a key and has not been replaced by selectors.
  */
 
 import { readFileSync } from "node:fs";
@@ -63,10 +32,12 @@ import {
 } from "@themoss/abi-tools";
 import { createRuntime } from "@themoss/core";
 
-import { type Address, getAddress } from "viem";
+import { type Address, getAddress, keccak256 } from "viem";
 import { describe, expect, it } from "vitest";
 import { KuruRouterAbi } from "../src/abis/kuru.js";
+import { REVIEWED_ORDERBOOK_CODE_HASH } from "../src/deployment.js";
 import { KURU_ROUTER_ADDRESS } from "../src/kuru.js";
+import { requiredOrderbookSurface, requiredRouterSurface } from "../test/required-surface.js";
 
 interface AbiManifest {
   router: { proxy: Address; implementation: Address; allowedExplorerOnly: string[] };
@@ -88,32 +59,42 @@ describe("Kuru ABI explorer cross-check", () => {
     expect(getAddress(manifest.router.proxy)).toBe(getAddress(KURU_ROUTER_ADDRESS));
   });
 
-  it("Router proxy still points at the recorded implementation", { timeout: 60_000 }, async () => {
+  it("pins Router implementation and market template at the same block", {
+    timeout: 60_000,
+  }, async () => {
     const runtime = await createRuntime();
+    const blockNumber = await runtime.client.getBlockNumber({ cacheTime: 0 });
     const slot = await runtime.client.getStorageAt({
       address: manifest.router.proxy,
       slot: ERC1967_IMPLEMENTATION_SLOT,
+      blockNumber,
     });
     expect(getAddress(erc1967ImplementationAddress(slot))).toBe(
       getAddress(manifest.router.implementation),
     );
-  });
-
-  it("orderBookImplementation() still equals the recorded market template", {
-    timeout: 60_000,
-  }, async () => {
-    const runtime = await createRuntime();
     const template = await runtime.client.readContract({
       address: manifest.router.proxy,
       abi: KuruRouterAbi,
       functionName: "orderBookImplementation",
+      blockNumber,
     });
     expect(getAddress(template)).toBe(
       getAddress(manifest.orderBook.expectedTemplateImplementation),
     );
+    const orderbookCode = await runtime.client.getCode({ address: template, blockNumber });
+    expect(orderbookCode).toBeDefined();
+    if (!orderbookCode) throw new Error("OrderBook code missing");
+    expect(keccak256(orderbookCode)).toBe(REVIEWED_ORDERBOOK_CODE_HASH);
+    for (const item of requiredOrderbookSurface)
+      expect(orderbookCode, item.name).toContain(item.hex);
+    const routerCode = await runtime.client.getCode({
+      address: manifest.router.implementation,
+      blockNumber,
+    });
+    for (const item of requiredRouterSurface) expect(routerCode, item.name).toContain(item.hex);
   });
 
-  it("vendored Router ABI matches the explorer-verified implementation", {
+  it("requires a full Router ABI match against explorer-verified source", {
     timeout: 120_000,
   }, async () => {
     const explorerAbi = await fetchAbi(manifest.router.implementation, key ?? "");

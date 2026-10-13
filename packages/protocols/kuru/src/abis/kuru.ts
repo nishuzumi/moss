@@ -7,8 +7,10 @@
 //   vendored: 2026-07-07 (release-age guard: 7d)
 //   verification: functions exercised live on Monad mainnet via rpc.monad.xyz;
 //   the adapter's e2e tests pin observable behavior. The Router ABI is also
-//   cross-checked against the explorer-verified implementation by
-//   `pnpm test:abi:online` (abis.json records the expected addresses).
+//   required to pass an explorer-verified implementation comparison by
+//   `pnpm test:abi:online` (abis.json records observed deployment addresses).
+//   This requirement is not evidence that the current deployment is source-verified;
+//   see DEPLOYMENT.md for the current verification limits.
 //   caveat:   Kuru contracts are upgradeable proxies (ERC-1967). The OrderBook
 //   ABI is vendored-only: this SDK version matches neither of the two deployed
 //   implementations checked on 2026-07-20 — see test-online/abi-explorer.test.ts
