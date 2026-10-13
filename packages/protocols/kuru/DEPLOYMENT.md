@@ -51,9 +51,19 @@ Fresh checks on 2026-10-12 found the current Router implementation
 the page offers “Verify and Publish” and contains empty source JSON.
 [Sourcify's v2 response](https://sourcify.dev/server/v2/contract/143/0xf1635175914acF4Db170395D524323225e1F1a04?fields=all)
 also returns `match:null`, `creationMatch:null`, and `runtimeMatch:null`.
-Thus no independently explorer-verified full Router ABI was obtained. The
-keyed explorer ABI equality gate remains a gate; a bytecode surface check
-must not replace it or be described as equivalent verification.
+Thus no independently explorer-verified full Router ABI was obtained.
+Under ADR 0007, `abis.json` explicitly selects `deployment-evidence` for
+this exact reviewed proxy/implementation pair. The online check pins both
+addresses and both runtime hashes at one block, checks the required
+selectors/topics below, and retains the OrderBook template/code checks.
+The normal live tests exercise quoting and unsigned swap/Receipt simulation.
+This is degraded deployment verification, not full ABI equivalence.
+
+`explorer` mode still requires `MONADSCAN_API_KEY` and a full semantic ABI
+comparison. Missing keys, explorer failures and ABI mismatches never trigger
+an automatic fallback. Evidence mode rejects any other address pair, changed
+proxy or implementation code, or unknown mode. A new deployment must undergo
+explicit review rather than inheriting this exception.
 
 At block 112692350 its runtime code keccak256 is
 `0xee2c47d70994c70feea9e7ae98ce9810e0f1893f377b7d949f2b6ec6f0cc53dc`.
@@ -74,7 +84,7 @@ Presence of these selectors and event topic establishes only this narrow
 surface. It does not establish complete ABI equivalence, event indexed-field
 layout, output layout for untested functions, or every execution behavior.
 The Router ABI therefore retains degraded, vendored-only provenance for this
-new deployment pending actual independent source/ABI verification.
+new deployment; independent full source/ABI verification remains unavailable.
 
 ## Same-block failing quote reproduction
 
@@ -137,3 +147,24 @@ same RPC with curl's `--data` argument:
 Historical reads require the provider to retain the specified block. If a read
 is unavailable, report missing verification; do not substitute latest-state
 evidence for a pinned-block quote.
+
+## Executable Router fingerprints (2026-10-13)
+
+Rechecked read-only at Monad block 113057643 (`0x6bd1f6b`), block hash
+`0x41d1322298b6d663f5ac43a5c79d2554eca9ebdc75ab7ac6088b36ec4991cb63`.
+The implementation address, implementation runtime hash, market template and
+OrderBook code hash still match the 2026-10-12 record above. The Router proxy
+has the same full runtime as `test/fixtures/orderbook-proxy.hex`, hash
+`0xb3fcfca704395c210e969b841f35fff7483f99721de8d65b219615dd5e03f43b`.
+Its delegation proof is the same straight-line bytecode proof recorded above.
+The complete Router implementation runtime is retained in
+`test/fixtures/router-runtime.hex`. `scripts/verify-router.ts` binds the
+reviewed address pair to these two hashes; unit tests reject code/address
+changes, wrong modes and attempted explorer-error fallbacks.
+
+Run `pnpm --filter @themoss/protocol-kuru test:abi:online` for the current
+pinned-block deployment check (no explorer key required for this selected
+mode), then `pnpm --filter @themoss/protocol-kuru test` for provenance,
+negative tests and live quote/unsigned Receipt coverage. Fingerprints prove
+identity with reviewed bytes, not every contract behavior, full ABI equality,
+or all event layouts. Code changes fail and require a new review.

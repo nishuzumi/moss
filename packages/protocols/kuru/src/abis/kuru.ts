@@ -6,15 +6,13 @@
 //   tarball:  sha256 44ba2d2c08c8cdf176555a23551e3504efb372dc7db7a487919cd9973002cd04
 //   vendored: 2026-07-07 (release-age guard: 7d)
 //   verification: functions exercised live on Monad mainnet via rpc.monad.xyz;
-//   the adapter's e2e tests pin observable behavior. The Router ABI is also
-//   required to pass an explorer-verified implementation comparison by
-//   `pnpm test:abi:online` (abis.json records observed deployment addresses).
-//   This requirement is not evidence that the current deployment is source-verified;
-//   see DEPLOYMENT.md for the current verification limits.
-//   caveat:   Kuru contracts are upgradeable proxies (ERC-1967). The OrderBook
-//   ABI is vendored-only: this SDK version matches neither of the two deployed
-//   implementations checked on 2026-07-20 — see test-online/abi-explorer.test.ts
-//   for the required-surface verification record and the upgrade tripwire.
+//   the adapter's e2e tests pin observable behavior. abis.json explicitly selects
+//   exact-deployment evidence for the reviewed unverified Router: proxy and
+//   implementation code hashes plus required selectors/topics. Explorer mode
+//   requires full verified ABI comparison; failures never select evidence mode.
+//   Run `pnpm test:abi:online`; see DEPLOYMENT.md for the proof and limits.
+//   caveat: upgradeable ERC-1967 deployments; code/surface checks and live tests
+//   do not prove full ABI equivalence. Both trading ABIs retain vendored provenance.
 
 export const KuruRouterAbi = [
   {
