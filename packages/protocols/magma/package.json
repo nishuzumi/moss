@@ -1,0 +1,33 @@
+{
+  "name": "@themoss/protocol-magma",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Moss Protocol for Magma gMON liquid staking on Monad",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "gen:abis": "wagmi generate"
+  },
+  "dependencies": {
+    "@themoss/core": "workspace:*",
+    "viem": "^2.54.3"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.6",
+    "@wagmi/cli": "^2.10.0"
+  }
+}
