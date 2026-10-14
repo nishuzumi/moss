@@ -36,6 +36,7 @@
     "@themoss/protocol-nadfun": "workspace:*",
     "@themoss/protocol-pancakeswap": "workspace:*",
     "@themoss/protocol-pendle": "workspace:*",
+    "@themoss/protocol-pyth": "workspace:*",
     "@themoss/protocol-uniswap": "workspace:*",
     "@themoss/simulator": "workspace:*",
     "@themoss/system": "workspace:*",

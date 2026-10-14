@@ -10,6 +10,7 @@ import * as morpho from "@themoss/protocol-morpho";
 import * as nadfun from "@themoss/protocol-nadfun";
 import * as pancakeswap from "@themoss/protocol-pancakeswap";
 import * as pendle from "@themoss/protocol-pendle";
+import * as pyth from "@themoss/protocol-pyth";
 import * as uniswap from "@themoss/protocol-uniswap";
 import * as system from "@themoss/system";
 
@@ -28,5 +29,6 @@ export const defaultProtocolModules = [
   nadfun,
   pancakeswap,
   pendle,
+  pyth,
   uniswap,
 ] as const;

@@ -236,6 +236,32 @@ describe("moss MCP server", () => {
     expect(pendleLoaded[0]?.params.slippageBps?.type).toMatchObject({ default: 50 });
     expect(pendleLoaded[0]?.params.amountIn?.description).toContain("may spend");
     expect(pendleLoaded[1]?.params.amountIn?.description).toContain("price");
+
+    const oracleQueries = parseText(
+      await client.callTool({ name: "discover", arguments: { category: "oracle" } }),
+    ) as { protocol: string; method: string }[];
+    expect(oracleQueries).toEqual([
+      expect.objectContaining({
+        protocol: "pyth",
+        method: "price",
+        kind: "query",
+      }),
+    ]);
+    const [pythPrice] = parseText(
+      await client.callTool({
+        name: "load",
+        arguments: { items: [{ protocol: "pyth", method: "price" }] },
+      }),
+    ) as { params: Record<string, { type: Record<string, unknown>; description: string }> }[];
+    expect(pythPrice?.params).toMatchObject({
+      feed: {
+        type: { enum: expect.arrayContaining(["MON_USD", "BTC_USD", "ETH_USD"]) },
+      },
+      maxAgeSeconds: {
+        type: { default: 3_600, minimum: 1, maximum: 86_400 },
+        description: expect.stringContaining("older"),
+      },
+    });
   });
 
   it("round-trips a Capability tree through action JSON", async () => {

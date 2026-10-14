@@ -108,7 +108,7 @@ describe("capability vocabulary", () => {
       "open",
       "close",
     ]);
-    expect(CATEGORIES).toEqual(["dex", "perps", "lending", "staking", "rewards", "token", "nft"]);
+    expect(CATEGORIES).toEqual(["dex", "perps", "lending", "staking", "rewards", "token", "nft", "oracle"]);
     expect(RISK_LABELS).toEqual([
       "fundOut",
       "approval",
