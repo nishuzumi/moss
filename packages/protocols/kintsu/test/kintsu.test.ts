@@ -133,6 +133,19 @@ describe("Kintsu", () => {
     expect(flattenReceiptChanges(receipt)[1]).toBe(snapshot);
     expect(flattenReceiptChanges(receipt)[2]).toBe(minted);
     expect(flattenReceiptChanges(receipt)[3]).toBe(deposited);
+
+    // Lock the exact text an Agent reads. Raw wei and share amounts, checksummed
+    // hex and the Registry's Package label are the accepted convention.
+    const nativeText = `Native MON Transfer: 1000 from ${ACCOUNT} to Package(Kintsu:StakedMonad)`;
+    const snapshotText = "Kintsu Virtual Shares Snapshot: 0";
+    const mintText = `ERC20 Transfer: 950 Package(Kintsu:StakedMonad) from ${ZERO} to ${RECEIVER}`;
+    const depositText = `Kintsu Deposit: 1000 MON wei for 950 sMON shares to ${RECEIVER}`;
+    expect(receipt.text).toBe(
+      `Kintsu Deposit: 1000 MON wei from ${ACCOUNT} minted 950 sMON shares to ${RECEIVER}`,
+    );
+    // The sMON mint is delegated ERC20 evidence, a nested Receipt at the top level.
+    expect(topLevelTexts(receipt)).toEqual([nativeText, snapshotText, null, depositText]);
+    expect(flattenReceiptTexts(receipt)).toEqual([nativeText, snapshotText, mintText, depositText]);
   });
 
   it("preserves an additional fee mint while selecting the Deposit-matching mint", async () => {
@@ -152,6 +165,16 @@ describe("Kintsu", () => {
       shares: "950",
     });
     expect(flattenReceiptChanges(receipt)).toEqual(changes);
+
+    // The unrelated fee mint keeps its own leaf, in evidence order, ahead of the
+    // receiver's mint; only the Deposit-matching mint drives the summary.
+    expect(flattenReceiptTexts(receipt)).toEqual([
+      `Native MON Transfer: 1000 from ${ACCOUNT} to Package(Kintsu:StakedMonad)`,
+      "Kintsu Virtual Shares Snapshot: 50",
+      `ERC20 Transfer: 50 Package(Kintsu:StakedMonad) from ${ZERO} to ${OTHER}`,
+      `ERC20 Transfer: 950 Package(Kintsu:StakedMonad) from ${ZERO} to ${RECEIVER}`,
+      `Kintsu Deposit: 1000 MON wei for 950 sMON shares to ${RECEIVER}`,
+    ]);
   });
 
   it("uses the observed native sender instead of capability parameters", async () => {
@@ -485,6 +508,21 @@ function kintsuDeposit(staker: AddressValue, shares: bigint, value: bigint): Cha
     }) as readonly Hex[],
     data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [shares, value]),
   };
+}
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
+// Leaf text per top-level entry; a delegated ERC20 movement is a nested Receipt,
+// so its slot is null while flattenReceiptTexts still carries its text.
+function topLevelTexts(receipt: ReceiptResult): (string | null)[] {
+  return receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null));
 }
 
 function flattenReceiptChanges(receipt: ReceiptResult): Change[] {

@@ -199,6 +199,7 @@ Fixed official Monad constants may be imported from `@themoss/system`. Caller-su
 - A compile-time fixture proves valid inferred parameter and Receipt names, plus invalid cases marked with `@ts-expect-error`.
 - Unit tests cover Registry metadata validation and the Capability's exactly-one-direct-transaction invariant.
 - Receipt tests prove complete ordered coverage using the original Change object references, including nested Receipts.
+- Receipt tests lock the exact text an Agent reads: each leaf `text` per Change class, the top-level Receipt `text`, and the complete ordered leaf-text sequence flattened the way the MCP adapter projects it. Assert with `toBe`/`toEqual`, never a substring, and lock the accepted rendering (raw base-unit amounts, checksummed addresses, the `native` sentinel, Registry labels). The template's `test/adapter.test.ts` is the canonical example.
 - Failure tests cover missing, duplicated, replaced, and reordered Changes.
 - Live Monad-mainnet tests verify fixed addresses and run the happy path with zero Warnings.
 
