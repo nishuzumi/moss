@@ -43,28 +43,6 @@ const UNLISTED = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
 const STUB_TREASURY = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
 /**
- * Issue #207: a live governance listing whose first official address-book
- * release (@aave-dao/aave-address-book 4.72.3, published 2026-10-09) is still
- * inside ADR 0007's seven-day supply-chain guard, so `pnpm update:abis` will
- * not vendor it yet. It is test-only: the adapter must not surface it until an
- * eligible release can be vendored. The equality below stays exact and fails
- * closed on every other unknown reserve. This quarantine expires once 4.72.3
- * clears the guard on 2026-10-16, which turns the test red again and forces the
- * vendor.
- */
-const PENDING_RESERVES = [
-  {
-    sourceId: "PT_AUSD_17DEC2026",
-    symbol: "PT-AUSD-17DEC2026",
-    decimals: 6,
-    underlying: getAddress("0x8B562578b2f9Aa8C14cCda3c5d6CBCEaD3B06a57"),
-    aToken: getAddress("0x8F8d143F1FCe0A57A6e80D8DF7f7288703b2Eb7e"),
-    variableDebtToken: getAddress("0x7C10Ebde9C6ba023d4410Da645E013Fd8677795e"),
-    eligibleAfter: "2026-10-16T00:35:19.744Z",
-  },
-] as const;
-
-/**
  * Seed accounts for the live role search below. Simulation is read-only and Moss
  * never signs, so naming a real account costs nothing and needs no key, but no
  * account we do not control keeps a position: the one the live withdraw was
@@ -1284,11 +1262,9 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
     // Checksum with one argument: map would otherwise hand getAddress the
     // array index as an EIP-1191 chain id. The equality is intentionally exact;
     // a new governance listing must be vendored through the age-guarded pipeline
-    // before it can be surfaced. A reviewed quarantine (PENDING_RESERVES) keeps
-    // the gate exact for a listing whose official release has not cleared the
-    // guard yet.
+    // before it can be surfaced.
     expect([...listed].map((address) => getAddress(address)).sort()).toEqual(
-      [...AAVE_RESERVES, ...PENDING_RESERVES].map(({ underlying }) => underlying).sort(),
+      AAVE_RESERVES.map(({ underlying }) => underlying).sort(),
     );
     for (const reserve of AAVE_RESERVES) {
       for (const address of [reserve.underlying, reserve.aToken, reserve.variableDebtToken]) {
@@ -1321,44 +1297,6 @@ describe.skipIf(!!process.env.MOSS_SKIP_E2E)("Aave mainnet", () => {
         args: [reserve.underlying],
       });
       expect(getAddress(onChain.stableDebtTokenAddress), reserve.symbol).toBe(ZERO);
-    }
-    for (const pending of PENDING_RESERVES) {
-      expect(
-        Date.now(),
-        `${pending.sourceId} cleared the address-book age guard; vendor it and remove this quarantine`,
-      ).toBeLessThan(Date.parse(pending.eligibleAfter));
-      expect(AAVE_RESERVES.some(({ underlying }) => underlying === pending.underlying)).toBe(false);
-
-      const metadata = await registry.action("erc20", "metadata", ACCOUNT, {
-        token: pending.underlying,
-      });
-      if (metadata.kind !== "query") throw new Error("expected a Query");
-      expect(metadata.data, pending.sourceId).toMatchObject({
-        symbol: pending.symbol,
-        decimals: pending.decimals,
-      });
-
-      const onChain = await runtime.client.readContract({
-        address: AAVE_POOL_ADDRESS,
-        abi: AavePoolAbi,
-        functionName: "getReserveData",
-        args: [pending.underlying],
-      });
-      expect(
-        {
-          aToken: getAddress(onChain.aTokenAddress),
-          stableDebtToken: getAddress(onChain.stableDebtTokenAddress),
-          variableDebtToken: getAddress(onChain.variableDebtTokenAddress),
-        },
-        pending.sourceId,
-      ).toEqual({
-        aToken: pending.aToken,
-        stableDebtToken: ZERO,
-        variableDebtToken: pending.variableDebtToken,
-      });
-      for (const address of [pending.underlying, pending.aToken, pending.variableDebtToken]) {
-        expect((await runtime.client.getCode({ address }))?.length, address).toBeGreaterThan(2);
-      }
     }
   });
 

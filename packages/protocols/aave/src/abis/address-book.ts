@@ -2,9 +2,9 @@
 //   regenerate offline from abis-src/:  pnpm gen:abis
 //   re-vendor from upstream:            pnpm update:abis
 // Deployment record origin: vendored (ADR 0007)
-//   source:   @aave-dao/aave-address-book@4.66.3 (npm), dist/**.mjs and tokenlist.json vendored verbatim into ../../abis-src/
-//   tarball:  sha256 021486f9ec73c490a6962de4fe1bde6771e33a42bfc9540fb7d0a134afb9c0c8
-//   vendored: 2026-09-10 (release-age guard: 7d)
+//   source:   @aave-dao/aave-address-book@4.74.2 (npm), dist/**.mjs and tokenlist.json vendored verbatim into ../../abis-src/
+//   tarball:  sha256 5381465779ffa4ed42f539378f9ba9ca4f6e0e122cd33b0280dd64f80d2f2b01
+//   vendored: 2026-10-26 (release-age guard: 7d)
 //   upstream: dist/AaveV3Monad.mjs and tokenlist.json, the Aave DAO's registry of the Monad
 //   market. The generator refuses to emit unless it reports CHAIN_ID 143, and the
 //   live Monad suite verifies every address on chain: deployed bytecode, the
@@ -108,6 +108,13 @@ export const AAVE_V3_MONAD = {
       "UNDERLYING": "0x9FC74f8Ed616B5BaF52a170caa97d6d3898602d1",
       "A_TOKEN": "0xb93Ce4EB85eBA317f954Dadcbe112Ce6c3af9ae4",
       "V_TOKEN": "0x4d2D334Ff7b0A82394bc95668d99369e9EE06748"
+    },
+    "PT_AUSD_17DEC2026": {
+      "symbol": "PT-AUSD-17DEC2026",
+      "decimals": 6,
+      "UNDERLYING": "0x8B562578b2f9Aa8C14cCda3c5d6CBCEaD3B06a57",
+      "A_TOKEN": "0x8F8d143F1FCe0A57A6e80D8DF7f7288703b2Eb7e",
+      "V_TOKEN": "0x7C10Ebde9C6ba023d4410Da645E013Fd8677795e"
     }
   }
 } as const;
