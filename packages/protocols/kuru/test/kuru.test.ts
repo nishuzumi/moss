@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   type Change,
   createRuntime,
@@ -49,6 +50,9 @@ type MockMarket = {
    * express "quotes fine" and "quotes zero", which is why the collapse below went untested.
    */
   quoteFails?: boolean;
+  marketState?: number;
+  stateFails?: boolean;
+  unknownImplementation?: boolean;
   /** Error `name` for the injected failure; viem's names are what the classifier reads. */
   quoteFailName?: string;
   /** Raw revert data, so an authenticated Panic can be told from a bare revert. */
@@ -97,6 +101,179 @@ afterEach(() => {
 });
 
 describe("Kuru", () => {
+  it.each([
+    1, 2,
+  ])("excludes a proven paused market (state %s) without weakening native swap exhaustiveness", async (marketState) => {
+    const markets = MARKETS.map((entry) =>
+      entry.address === MON_USDC
+        ? {
+            ...entry,
+            quoteFails: true,
+            quoteFailData: "0x004b65ba",
+            quoteFailDepth: 2,
+            quoteFailDataNested: true,
+            marketState,
+          }
+        : entry,
+    );
+    const { registry } = offlineRegistry(markets);
+    const params = { tokenIn: NATIVE, tokenOut: USDC_ADDRESS, amountIn: "1" };
+    const quoted = await registry.action("kuru", "quote", ACCOUNT, params);
+    expect(quoted.kind === "query" && (quoted.data as KuruQuote).unavailable).toEqual([]);
+    const swap = await registry.action("kuru", "swap", ACCOUNT, params);
+    expect(swap.kind).toBe("capability");
+  });
+
+  it.each([
+    { marketState: 0 },
+    { marketState: 3 },
+    { marketState: 255 },
+    { marketState: 1, stateFails: true },
+    { marketState: 1, unknownImplementation: true },
+    { marketState: 1, quoteFailData: "0x004b65ba00" },
+    { marketState: 1, quoteFailData: "0x" },
+  ])("keeps unproven state refusals unavailable: %j", async (proof) => {
+    const markets = MARKETS.map((entry) =>
+      entry.address === MON_USDC
+        ? { ...entry, quoteFails: true, quoteFailData: "0x004b65ba", ...proof }
+        : entry,
+    );
+    const { registry } = offlineRegistry(markets);
+    const params = { tokenIn: NATIVE, tokenOut: USDC_ADDRESS, amountIn: "1" };
+    const quoted = await registry.action("kuru", "quote", ACCOUNT, params);
+    expect(quoted.kind === "query" && (quoted.data as KuruQuote).unavailable).toHaveLength(1);
+    await expect(registry.action("kuru", "swap", ACCOUNT, params)).rejects.toMatchObject({
+      code: "ROUTE_QUOTE_UNAVAILABLE",
+    });
+  });
+
+  it.each([
+    "amountIn",
+    "amountOut",
+  ] as const)("all proven paused routes give a definitive no for %s", async (side) => {
+    let calls = 0;
+    const paused = {
+      ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      quoteFails: true,
+      quoteFailData: "0x004b65ba",
+      marketState: 1,
+    };
+    const { registry } = offlineRegistry([paused], undefined, () => {
+      calls += 1;
+    });
+    const error = await quoteError(registry, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      ...(side === "amountIn" ? { amountIn: "1" } : { amountOut: "1" }),
+    });
+    expect(error.code).toBe(
+      side === "amountIn" ? "NO_POSITIVE_QUOTE" : "TARGET_OUTPUT_UNSATISFIABLE",
+    );
+    expect(error.unavailable).toEqual([]);
+    expect(calls).toBe(1);
+  });
+
+  it("shares concurrent pause proofs across via-MON routes, but rechecks on the next request", async () => {
+    const paused: MockMarket = {
+      ...market(MON_AUSD, ZERO, AUSD_ADDRESS, 18, 6, 1n, 1n),
+      quoteFails: true,
+      quoteFailData: "0x004b65ba",
+      marketState: 1,
+    };
+    const markets = [
+      market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      market(MON_USDC_WORSE, ZERO, USDC_ADDRESS, 18, 6, 2n, 1n),
+      paused,
+      market(DIRECT_USDC_AUSD, USDC_ADDRESS, AUSD_ADDRESS, 6, 6, 1n, 1n),
+    ];
+    const { registry, client } = offlineRegistry(markets);
+    const storage = vi.spyOn(client, "getStorageAt");
+    const code = vi.spyOn(client, "getCode");
+    const reads = vi.spyOn(client, "readContract");
+    const params = { tokenIn: USDC_ADDRESS, tokenOut: AUSD_ADDRESS, amountOut: "1" };
+    const quote = await registry.action("kuru", "quote", ACCOUNT, params);
+    expect(quote.kind === "query" && (quote.data as KuruQuote).unavailable).toEqual([]);
+    expect(storage).toHaveBeenCalledTimes(1);
+    expect(code).toHaveBeenCalledTimes(2);
+    expect(reads.mock.calls.filter(([call]) => call.functionName === "marketState")).toHaveLength(
+      1,
+    );
+    paused.marketState = 0;
+    const next = await registry.action("kuru", "quote", ACCOUNT, params);
+    expect(next.kind === "query" && (next.data as KuruQuote).unavailable).toHaveLength(2);
+    expect(storage).toHaveBeenCalledTimes(2);
+    expect(code).toHaveBeenCalledTimes(4);
+  });
+
+  it("authenticates pause on the buy side too", async () => {
+    const paused = {
+      ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      quoteFails: true,
+      quoteFailData: "0x004b65ba",
+      marketState: 2,
+    };
+    const { registry } = offlineRegistry([paused]);
+    const error = await quoteError(registry, {
+      tokenIn: USDC_ADDRESS,
+      tokenOut: NATIVE,
+      amountIn: "1",
+    });
+    expect(error.code).toBe("NO_POSITIVE_QUOTE");
+    expect(error.unavailable).toEqual([]);
+  });
+
+  it("keeps an unknown failure beside a proven pause as an incomplete comparison", async () => {
+    const markets = [
+      {
+        ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+        quoteFails: true,
+        quoteFailData: "0x004b65ba",
+        marketState: 1,
+      },
+      { ...market(MON_USDC_WORSE, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n), quoteFails: true },
+    ];
+    const { registry } = offlineRegistry(markets);
+    const error = await quoteError(registry, {
+      tokenIn: NATIVE,
+      tokenOut: USDC_ADDRESS,
+      amountOut: "1",
+    });
+    expect(error.code).toBe("ROUTE_QUOTE_UNAVAILABLE");
+    expect(error.unavailable).toHaveLength(1);
+  });
+
+  it("does not trust an implementation address when its code hash differs", async () => {
+    const paused = {
+      ...market(MON_USDC, ZERO, USDC_ADDRESS, 18, 6, 1n, 1n),
+      quoteFails: true,
+      quoteFailData: "0x004b65ba",
+      marketState: 1,
+    };
+    const { registry, client } = offlineRegistry([paused]);
+    const readCode = client.getCode;
+    vi.spyOn(client, "getCode").mockImplementation(async (args) =>
+      args.address.toLowerCase() === MON_USDC.toLowerCase() ? readCode(args) : "0x6000",
+    );
+    expect(
+      (await quoteError(registry, { tokenIn: NATIVE, tokenOut: USDC_ADDRESS, amountIn: "1" })).code,
+    ).toBe("ROUTE_QUOTE_UNAVAILABLE");
+  });
+
+  it("sanitizes a block lookup failure before any discovery or quote", async () => {
+    const { registry, client, fetchMock } = offlineRegistry();
+    vi.spyOn(client, "getBlockNumber").mockRejectedValue(
+      new Error("https://endpoint/SUPERSECRETKEY"),
+    );
+    await expect(
+      registry.action("kuru", "quote", ACCOUNT, {
+        tokenIn: NATIVE,
+        tokenOut: USDC_ADDRESS,
+        amountIn: "1",
+      }),
+    ).rejects.toThrow("Kuru quote block could not be read (unknown)");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("loads separate human-amount fields and requires exactly one side", async () => {
     const { registry } = offlineRegistry();
     const [loaded] = registry.load([{ protocol: "kuru", method: "swap" }]);
@@ -2262,13 +2439,42 @@ function offlineRegistry(
   const byAddress = new Map(markets.map((entry) => [entry.address.toLowerCase(), entry]));
   vi.stubGlobal("fetch", fetchMock);
   const client = {
+    getBlockNumber: async () => 123n,
+    getStorageAt: async ({ address, blockNumber }: { address: string; blockNumber: bigint }) => {
+      expect(blockNumber).toBe(123n);
+      const entry = byAddress.get(address.toLowerCase());
+      if (entry?.unknownImplementation) return "0x";
+      return "0x0000000000000000000000005e3446c600524be453bbcefd46a9e4c9be8899a0";
+    },
+    getCode: async ({ address, blockNumber }: { address: string; blockNumber: bigint }) => {
+      expect(blockNumber).toBe(123n);
+      return readFileSync(
+        new URL(
+          byAddress.has(address.toLowerCase())
+            ? "./fixtures/orderbook-proxy.hex"
+            : "./fixtures/orderbook-runtime.hex",
+          import.meta.url,
+        ),
+        "utf8",
+      ).trim();
+    },
     readContract: async ({
       functionName,
       args,
+      address,
+      blockNumber,
     }: {
       functionName: string;
       args: readonly unknown[];
+      address: string;
+      blockNumber: bigint;
     }) => {
+      expect(blockNumber).toBe(123n);
+      if (functionName === "marketState") {
+        const entry = byAddress.get(address.toLowerCase());
+        if (entry?.stateFails) throw new Error("state read failed");
+        return entry?.marketState ?? 0;
+      }
       if (functionName !== "verifiedMarket") throw new Error(`unexpected read ${functionName}`);
       onVerify();
       const entry = byAddress.get(String(args[0]).toLowerCase());
@@ -2288,7 +2494,18 @@ function offlineRegistry(
         0n,
       ];
     },
-    call: async ({ to, account, data }: { to: string; account: string; data: Hex }) => {
+    call: async ({
+      to,
+      account,
+      data,
+      blockNumber,
+    }: {
+      to: string;
+      account: string;
+      data: Hex;
+      blockNumber: bigint;
+    }) => {
+      expect(blockNumber).toBe(123n);
       onCall();
       const entry = byAddress.get(to.toLowerCase());
       if (!entry) throw new Error(`unexpected call ${to}`);
@@ -2375,6 +2592,7 @@ function offlineRegistry(
   return {
     registry: new Registry({ rpcUrl: "http://offline", client }).use(Kuru),
     fetchMock,
+    client,
   };
 }
 

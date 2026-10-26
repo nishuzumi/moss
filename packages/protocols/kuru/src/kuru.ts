@@ -6,7 +6,6 @@ import {
   Capability,
   type CapabilityResult,
   type Change,
-  createHandle,
   type Handle,
   type Hex,
   type InferParams,
@@ -24,8 +23,24 @@ import {
   TokenReference,
 } from "@themoss/core";
 import { ERC20 } from "@themoss/erc";
-import { decodeEventLog, formatUnits, getAddress, isAddress, parseUnits } from "viem";
+import {
+  decodeErrorResult,
+  decodeEventLog,
+  decodeFunctionResult,
+  encodeFunctionData,
+  formatUnits,
+  getAddress,
+  isAddress,
+  keccak256,
+  parseUnits,
+} from "viem";
 import { KuruOrderbookAbi, KuruRouterAbi } from "./abis/kuru.js";
+import { KuruStateOrderbookAbi } from "./abis/kuru-state.js";
+import {
+  ERC1967_SLOT,
+  REVIEWED_ORDERBOOK_CODE_HASH,
+  REVIEWED_ORDERBOOK_PROXY_HASH,
+} from "./deployment.js";
 import type {
   KuruQuote,
   KuruSwapOutcome,
@@ -381,8 +396,14 @@ export class Kuru {
     // inside the quoting that follows it. Verification is up to 256 `verifiedMarket` reads, and it
     // was width-limited but uncharged — so "one quote request is bounded" held for the quoting and
     // not for the request, which is the thing the ADR and the changeset promise.
-    const request = requestBudget(side.kind);
-    const routes = await this.#discoverRoutes(params.tokenIn, params.tokenOut, account, request);
+    const request = requestBudget(side.kind, account);
+    try {
+      spendCall(request, { left: 1 });
+      request.blockNumber = await this.runtime.client.getBlockNumber({ cacheTime: 0 });
+    } catch (error) {
+      throw sanitized(`Kuru quote block could not be read (${categorized(error)})`, error);
+    }
+    const routes = await this.#discoverRoutes(params.tokenIn, params.tokenOut, request);
     const [firstRoute] = routes;
     const firstLeg = firstRoute?.[0];
     const lastLeg = firstRoute?.at(-1);
@@ -454,12 +475,7 @@ export class Kuru {
     };
   }
 
-  async #discoverRoutes(
-    tokenIn: TokenRef,
-    tokenOut: TokenRef,
-    account: AddressValue,
-    request: QuoteRequest,
-  ) {
+  async #discoverRoutes(tokenIn: TokenRef, tokenOut: TokenRef, request: QuoteRequest) {
     const candidates = await fetchMarketCandidates(tokenIn, tokenOut);
     // Verification is the one on-chain read outside the quoting path, and it used to escape raw:
     // a provider hiccup here threw viem's error, whose message carries the RPC URL and request
@@ -478,7 +494,7 @@ export class Kuru {
         // Charged like any other read, against a per-candidate allowance of one: verifying a market
         // is a single `verifiedMarket` call, and what needs bounding is how many one request makes.
         spendCall(request, { left: 1 });
-        return await this.#verifyMarket(candidate, account);
+        return await this.#verifyMarket(candidate, request);
       } catch (error) {
         // One identity lookup, and nothing else. `error instanceof KuruQuoteError` used to stand
         // here and went through the value's `getPrototypeOf`, which a Proxy may trap and throw
@@ -531,9 +547,15 @@ export class Kuru {
     );
   }
 
-  async #verifyMarket(candidate: MarketCandidate, account: AddressValue): Promise<VerifiedMarket> {
+  async #verifyMarket(candidate: MarketCandidate, request: QuoteRequest): Promise<VerifiedMarket> {
     const [pricePrecision, sizePrecision, baseAsset, baseDecimals, quoteAsset, quoteDecimals] =
-      await this.router.read.verifiedMarket([candidate.address]);
+      await this.runtime.client.readContract({
+        address: KURU_ROUTER_ADDRESS,
+        abi: KuruRouterAbi,
+        functionName: "verifiedMarket",
+        args: [candidate.address],
+        blockNumber: request.blockNumber,
+      });
     if (
       pricePrecision === 0 ||
       sizePrecision === 0n ||
@@ -546,7 +568,6 @@ export class Kuru {
     const parsedQuoteDecimals = tokenDecimals(quoteDecimals, candidate.address, "quote");
     return {
       address: candidate.address,
-      handle: createHandle(KuruOrderbookAbi, candidate.address, this.runtime.client, account),
       params: {
         pricePrecision: BigInt(pricePrecision),
         sizePrecision,
@@ -885,6 +906,13 @@ export class Kuru {
     // A refusal there is evidence about the guess, not about the target: come down to a size the
     // route will price before concluding anything at all.
     let probe = await this.#quoteRouteForSearch(route, high, request, budget);
+    if (route.some((leg) => request.paused.has(leg.market.address))) {
+      throw new KuruQuoteError(
+        "TARGET_OUTPUT_UNSATISFIABLE",
+        "amountOut",
+        "route contains a verified paused market at the quote block",
+      );
+    }
     if (!probe.ok) {
       const found = await this.#largestPriceable(route, high, probe, request, budget);
       if (!found) throw probe.error;
@@ -943,6 +971,7 @@ export class Kuru {
   }
 
   async #quoteRoute(route: Route, amountIn: bigint, request: QuoteRequest, budget: CallBudget) {
+    if (route.some((leg) => request.paused.has(leg.market.address))) return 0n;
     let amountOut = amountIn;
     for (const leg of route) {
       amountOut = await this.#quoteFill(leg, amountOut, request, budget);
@@ -952,6 +981,7 @@ export class Kuru {
   }
 
   async #quoteFill(leg: RouteLeg, amountIn: bigint, request: QuoteRequest, route: CallBudget) {
+    if (request.paused.has(leg.market.address)) return 0n;
     const size = leg.isBuy
       ? (amountIn * leg.market.params.pricePrecision) /
         10n ** BigInt(leg.market.params.quoteDecimals)
@@ -970,20 +1000,86 @@ export class Kuru {
     // Charged before the call, not after: a leg that priced and a later one that refused to
     // encode have both been paid for by then.
     spendCall(request, route);
-    const pending = leg.isBuy
-      ? leg.market.handle.call.placeAndExecuteMarketBuy([size, 0n, false, false], {
-          from: KURU_NATIVE,
-        })
-      : leg.market.handle.call.placeAndExecuteMarketSell(
-          [size, 0n, false, false],
-          leg.market.params.baseAsset === KURU_NATIVE
-            ? { value: amountIn, balance: amountIn }
-            : { from: KURU_NATIVE },
-        );
+    const functionName = leg.isBuy ? "placeAndExecuteMarketBuy" : "placeAndExecuteMarketSell";
+    const from =
+      !leg.isBuy && leg.market.params.baseAsset === KURU_NATIVE ? request.account : KURU_NATIVE;
+    const nativeSell = !leg.isBuy && leg.market.params.baseAsset === KURU_NATIVE;
+    const pending = this.runtime.client
+      .call({
+        to: leg.market.address,
+        account: from,
+        data: encodeFunctionData({
+          abi: KuruOrderbookAbi,
+          functionName,
+          args: [size, 0n, false, false],
+        }),
+        blockNumber: request.blockNumber,
+        ...(nativeSell
+          ? { value: amountIn, stateOverride: [{ address: from, balance: amountIn }] }
+          : {}),
+      })
+      .then((result) =>
+        decodeFunctionResult({ abi: KuruOrderbookAbi, functionName, data: result.data ?? "0x" }),
+      )
+      .catch(async (error: unknown) => {
+        // A selector alone is not proof: the deployed implementation and its explicit state
+        // must corroborate the refusal at exactly the block used for this probe.
+        if (isMarketStateError(error) && (await this.#isPaused(leg.market, request, route)))
+          return 0n;
+        throw error;
+      });
     // Remembered as the promise, so concurrent routes asking at the same moment share one call
     // rather than racing to make two. A rejection is remembered too: the same question put to the
     // same market in the same request has the same answer, and re-asking it would only re-spend.
     request.memo.set(key, pending);
+    return pending;
+  }
+
+  async #isPaused(
+    market: VerifiedMarket,
+    request: QuoteRequest,
+    route: CallBudget,
+  ): Promise<boolean> {
+    const remembered = request.stateProofs.get(market.address);
+    if (remembered) return remembered;
+    const pending = (async () => {
+      spendCall(request, route);
+      const proxy = await this.runtime.client.getCode({
+        address: market.address,
+        blockNumber: request.blockNumber,
+      });
+      if (!proxy || keccak256(proxy) !== REVIEWED_ORDERBOOK_PROXY_HASH) return false;
+      spendCall(request, route);
+      const slot = await this.runtime.client.getStorageAt({
+        address: market.address,
+        slot: ERC1967_SLOT,
+        blockNumber: request.blockNumber,
+      });
+      if (!slot || !/^0x0{24}[0-9a-fA-F]{40}$/.test(slot)) return false;
+      const implementation = getAddress(`0x${slot.slice(-40)}`);
+      let code = request.implementations.get(implementation);
+      if (!code) {
+        spendCall(request, route);
+        code = this.runtime.client.getCode({
+          address: implementation,
+          blockNumber: request.blockNumber,
+        });
+        request.implementations.set(implementation, code);
+      }
+      const bytecode = await code;
+      if (!bytecode || keccak256(bytecode) !== REVIEWED_ORDERBOOK_CODE_HASH) return false;
+      spendCall(request, route);
+      const state = await this.runtime.client.readContract({
+        address: market.address,
+        abi: KuruStateOrderbookAbi,
+        functionName: "marketState",
+        blockNumber: request.blockNumber,
+      });
+      if (state !== 1 && state !== 2) return false;
+      request.paused.add(market.address);
+      return true;
+    })();
+    request.stateProofs.set(market.address, pending);
     return pending;
   }
 }
@@ -1347,6 +1443,11 @@ type CallBudget = { left: number };
  */
 type QuoteRequest = CallBudget & {
   memo: Map<string, Promise<bigint>>;
+  blockNumber: bigint;
+  account: AddressValue;
+  paused: Set<AddressValue>;
+  stateProofs: Map<AddressValue, Promise<boolean>>;
+  implementations: Map<AddressValue, Promise<Hex | undefined>>;
   /**
    * The side the caller actually asked for. A budget refusal is raised deep inside route
    * evaluation, where only the route is in scope, yet it answers this request — so the side has to
@@ -1355,8 +1456,17 @@ type QuoteRequest = CallBudget & {
   side: KuruQuote["amountSide"];
 };
 
-function requestBudget(side: KuruQuote["amountSide"]): QuoteRequest {
-  return { left: MAX_CALLS_PER_REQUEST, memo: new Map(), side };
+function requestBudget(side: KuruQuote["amountSide"], account: AddressValue): QuoteRequest {
+  return {
+    left: MAX_CALLS_PER_REQUEST,
+    memo: new Map(),
+    side,
+    account,
+    blockNumber: 0n,
+    paused: new Set(),
+    stateProofs: new Map(),
+    implementations: new Map(),
+  };
 }
 
 /**
@@ -1585,6 +1695,31 @@ function isMarketArithmeticOverflow(error: unknown): boolean {
       }
     }
     current = current.cause;
+  }
+  return false;
+}
+
+/** Decode only a complete no-argument ABI error; hostile or malformed error objects are unknown. */
+function isMarketStateError(error: unknown): boolean {
+  try {
+    for (let current = error, depth = 0; current instanceof Error && depth < 16; depth += 1) {
+      const raw = (current as { data?: unknown }).data;
+      const data = typeof raw === "object" && raw !== null ? (raw as { data?: unknown }).data : raw;
+      if (typeof data === "string" && /^0x[0-9a-fA-F]{8}$/.test(data)) {
+        try {
+          if (
+            decodeErrorResult({ abi: KuruOrderbookAbi, data: data as Hex }).errorName ===
+            "MarketStateError"
+          )
+            return true;
+        } catch {
+          /* Unknown selector remains unavailable. */
+        }
+      }
+      current = current.cause;
+    }
+  } catch {
+    /* Accessors and proxies must not authenticate a refusal. */
   }
   return false;
 }

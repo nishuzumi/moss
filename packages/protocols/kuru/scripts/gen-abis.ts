@@ -6,8 +6,10 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generate } from "./abis.js";
+import { generate, generateState } from "./abis.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 writeFileSync(join(packageRoot, "src/abis/kuru.ts"), generate(packageRoot));
 console.log("regenerated src/abis/kuru.ts from abis-src/ (offline)");
+
+writeFileSync(join(packageRoot, "src/abis/kuru-state.ts"), generateState(packageRoot));

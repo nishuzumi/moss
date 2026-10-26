@@ -3,9 +3,9 @@ import { defineConfig } from "vitest/config";
 
 const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
-// The online explorer cross-check suite (pnpm test:abi:online). Kept apart
-// from the offline default so a missing MONADSCAN_API_KEY fails loudly here
-// without ever gating `pnpm test`.
+// Online ABI/deployment checks (pnpm test:abi:online). Explorer mode requires
+// MONADSCAN_API_KEY; the explicitly reviewed deployment-evidence mode does not.
+// Kept apart from the default test suite.
 export default defineConfig({
   esbuild: { target: "es2022" },
   test: { include: ["test-online/**/*.test.ts"] },

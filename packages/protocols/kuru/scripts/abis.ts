@@ -48,13 +48,13 @@ export function generate(packageRoot: string): string {
 //   tarball:  sha256 ${vendor.tarballSha256}
 //   vendored: ${vendor.vendoredAt} (release-age guard: ${vendor.releaseAgeGuardDays}d)
 //   verification: functions exercised live on Monad mainnet via rpc.monad.xyz;
-//   the adapter's e2e tests pin observable behavior. The Router ABI is also
-//   cross-checked against the explorer-verified implementation by
-//   \`pnpm test:abi:online\` (abis.json records the expected addresses).
-//   caveat:   Kuru contracts are upgradeable proxies (ERC-1967). The OrderBook
-//   ABI is vendored-only: this SDK version matches neither of the two deployed
-//   implementations checked on 2026-07-20 — see test-online/abi-explorer.test.ts
-//   for the required-surface verification record and the upgrade tripwire.
+//   the adapter's e2e tests pin observable behavior. abis.json explicitly selects
+//   exact-deployment evidence for the reviewed unverified Router: proxy and
+//   implementation code hashes plus required selectors/topics. Explorer mode
+//   requires full verified ABI comparison; failures never select evidence mode.
+//   Run \`pnpm test:abi:online\`; see DEPLOYMENT.md for the proof and limits.
+//   caveat: upgradeable ERC-1967 deployments; code/surface checks and live tests
+//   do not prove full ABI equivalence. Both trading ABIs retain vendored provenance.
 `;
 
   for (const source of SOURCES) {
@@ -70,4 +70,24 @@ export function generate(packageRoot: string): string {
   }
 
   return generated;
+}
+
+/** Keep the complete upstream orderBookAbi, not a hand-transcribed state getter. */
+export function generateState(packageRoot: string): string {
+  const vendor = JSON.parse(
+    readFileSync(join(packageRoot, "abis-src/ts-sdk/VENDOR.json"), "utf8"),
+  ) as { commit: string; file: string };
+  const raw = readFileSync(join(packageRoot, "abis-src/ts-sdk", vendor.file), "utf8");
+  const start = raw.indexOf("export const orderBookAbi = ");
+  const end = raw.indexOf("\nexport const ", start + 1);
+  if (start < 0 || end < 0) throw new Error("upstream orderBookAbi export not found");
+  const fullExport = raw.slice(start, end).trim().replace("orderBookAbi", "KuruStateOrderbookAbi");
+  return `// GENERATED FILE — do not edit by hand.
+// ABI origin: vendored (ADR 0007). Full orderBookAbi from Kuru-Labs/ts-sdk
+// commit ${vendor.commit}; see abis-src/ts-sdk/VENDOR.json.
+// Only marketState is used; the newer trading interface is NOT used by this adapter.
+import type { Abi } from "viem";
+
+${fullExport}
+`;
 }

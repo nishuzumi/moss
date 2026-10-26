@@ -1,0 +1,8 @@
+{
+  "sourceKind": "git",
+  "repository": "https://github.com/Kuru-Labs/ts-sdk",
+  "commit": "8588784c4d54183a04029cb1b513910c806905a9",
+  "file": "src/generated/abis.ts",
+  "fileSha256": "3d723fbc481ffa6928797d286166d487901f8bfc4eb18ebb726e2f1d9776c1f4",
+  "vendoredAt": "2026-10-12"
+}
