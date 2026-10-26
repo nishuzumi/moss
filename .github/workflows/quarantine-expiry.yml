@@ -1,0 +1,113 @@
+name: Quarantine expiry
+
+# Test-only quarantines expire on the wall clock (#195). Pull request CI skips
+# an expired one with a note so it cannot turn unrelated pull requests red; this
+# scheduled run fails instead and opens an issue, so the expiry still reaches
+# maintainers. Offline by design: the expiry checks need no chain access or
+# secrets, and the job that runs test code holds a read-only token.
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+# Queued rather than cancelled: a manual dispatch must not cancel a scheduled
+# run before it can report.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  expiry:
+    # Forks may still dispatch it by hand; only the upstream schedule reports.
+    if: github.event_name != 'schedule' || github.repository == 'nishuzumi/moss'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Same policy as CI, narrowed to what an offline run needs.
+      - name: Restrict runner egress
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            nodejs.org:443
+            registry.npmjs.org:443
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build precedes the suites: workspace packages resolve each other's
+      # types and entry points through their built dist output.
+      - name: Build
+        run: pnpm build
+
+      - name: Offline tests with quarantine expiry enforced
+        env:
+          MOSS_SKIP_E2E: "1"
+          MOSS_QUARANTINE_EXPIRY: enforce
+        run: pnpm -r --no-bail test
+
+  # A scheduled failure notifies only whoever last edited the cron line, so the
+  # expiry is filed as an issue instead. Separate job: the token that can write
+  # issues never shares a runner with test code, and nothing is checked out.
+  report:
+    needs: expiry
+    if: failure() && github.event_name == 'schedule' && github.repository == 'nishuzumi/moss'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Restrict runner egress
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+
+      # One open issue per expiry streak: later failures comment on it.
+      - name: Open or update the expiry issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled quarantine expiry run failed"
+          body="The scheduled \`Quarantine expiry\` run failed: $RUN_URL. A \`cleared its quarantine\` error names the quarantine to vendor and remove (#195); any other failure means the offline suites are red on main."
+          # Listed rather than searched: the search index can lag a fresh issue.
+          number=$(gh issue list --state open --limit 500 --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
