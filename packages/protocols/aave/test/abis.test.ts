@@ -12,6 +12,7 @@ import {
   AAVE_POOL_ADDRESSES_PROVIDER_ADDRESS,
   AAVE_POOL_IMPLEMENTATION_ADDRESS,
   AAVE_RESERVES,
+  reserveOf,
 } from "../src/index.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -98,6 +99,19 @@ describe("abi and deployment provenance chain", () => {
       aToken: getAddress("0xb93Ce4EB85eBA317f954Dadcbe112Ce6c3af9ae4"),
       variableDebtToken: getAddress("0x4d2D334Ff7b0A82394bc95668d99369e9EE06748"),
     });
+  });
+
+  it("surfaces PT-AUSD-17DEC2026 through the production reserve lookup", () => {
+    const underlying = getAddress("0x8B562578b2f9Aa8C14cCda3c5d6CBCEaD3B06a57");
+    const reserve = reserveOf(underlying.toLowerCase());
+    expect(reserve).toEqual({
+      symbol: "PT-AUSD-17DEC2026",
+      decimals: 6,
+      underlying,
+      aToken: getAddress("0x8F8d143F1FCe0A57A6e80D8DF7f7288703b2Eb7e"),
+      variableDebtToken: getAddress("0x7C10Ebde9C6ba023d4410Da645E013Fd8677795e"),
+    });
+    expect(AAVE_RESERVES).toContain(reserve);
   });
 
   it.each([

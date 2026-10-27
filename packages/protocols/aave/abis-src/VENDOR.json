@@ -1,18 +1,18 @@
 {
   "name": "@aave-dao/aave-address-book",
-  "version": "4.66.3",
-  "tarballSha256": "021486f9ec73c490a6962de4fe1bde6771e33a42bfc9540fb7d0a134afb9c0c8",
-  "vendoredAt": "2026-09-10",
+  "version": "4.74.2",
+  "tarballSha256": "5381465779ffa4ed42f539378f9ba9ca4f6e0e122cd33b0280dd64f80d2f2b01",
+  "vendoredAt": "2026-10-26",
   "releaseAgeGuardDays": 7,
   "files": {
-    "AaveV3Monad.mjs": "bfd8568749ad1b193b33189cc488a4b4deabc09131986a3e101a8c9265e0c93f",
-    "AaveV3Monad.mjs.map": "618ca532c9d134b55966764601f41bc0ee32b7946fb3661f840d06bb4ef64942",
+    "AaveV3Monad.mjs": "5f114223e585bf847db17bc328d155a3400dd500b6aa7c4eb8fe27dda5051232",
+    "AaveV3Monad.mjs.map": "6dc046c9a17f349c87be66dcef8ed13bfbd50f658ef09915b676730395623767",
     "abis/IAToken.mjs": "47e9f2b7c87556e813cdb612775ace46ac00cd74285c1125336a14b685139f06",
     "abis/IAToken.mjs.map": "8816a5acf3a75ac1f97c40350c3dfe4e66fa18d728979faabc157430cc2afc1b",
     "abis/IPool.mjs": "32faf98bff51dbcc0f8f0b63f231a7b0691a65f96e975c51dbf92e3c9bada584",
     "abis/IPool.mjs.map": "07b0d54dc340d9659489bbe3ecbef1d499796116c95e765fb592937a9d2652c9",
     "chunk-2MM5EJJX.mjs": "85e9dfed5a77cfb446092d842086a44379e22f7edc2a1146b2baa04fc21fd976",
     "chunk-2MM5EJJX.mjs.map": "8a44d0a59c3bcf7f0df97dd85de8c242efbe7a2d3a2501923280ada4842eb326",
-    "tokenlist.json": "4f41ddc28ad7df1eaaec495b9377a389ab600b75bb77b9f6c1721245bce40de5"
+    "tokenlist.json": "d612cd1f50d960364b8e5ed65cde9a7ddca25f7faa8f0faa32533948a7f27ef5"
   }
 }
