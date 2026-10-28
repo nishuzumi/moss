@@ -5,6 +5,7 @@ import {
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
+  type ReceiptResult,
   Registry,
 } from "@themoss/core";
 import { ERC20Abi, WETH9Abi } from "@themoss/erc";
@@ -22,6 +23,28 @@ import { AUSD_ADDRESS, USDC_ADDRESS, WMON, WMON_ADDRESS } from "../src/index.js"
 const ACCOUNT = getAddress("0xcccccccccccccccccccccccccccccccccccccccc");
 const RECEIVER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
+function withdrawalChange(amount: bigint): Change {
+  return {
+    kind: "event",
+    address: WMON_ADDRESS,
+    topics: encodeEventTopics({
+      abi: WETH9Abi,
+      eventName: "Withdrawal",
+      args: { src: ACCOUNT },
+    }) as readonly Hex[],
+    data: encodeAbiParameters([{ type: "uint256" }], [amount]),
+  };
+}
 
 function depositChange(amount: bigint): Change {
   return {
@@ -80,6 +103,45 @@ describe("WMON", () => {
       expect.objectContaining({ kind: "change", change: native }),
       expect.objectContaining({ kind: "change", change: deposit }),
     ]);
+
+    // Lock the exact text an Agent reads for each Change class. Raw base-unit
+    // amounts and address rendering are the accepted convention.
+    const nativeText = `Native MON Transfer: 1500000000000000000 from ${ACCOUNT} to ${WMON_ADDRESS}`;
+    const depositText = `WMON Deposit: 1500000000000000000 for ${ACCOUNT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      nativeText,
+      depositText,
+    ]);
+
+    // Top-level Receipt text is the operation summary, not a join of the leaves.
+    expect(receipt.text).toBe(`WMON wrap: 1500000000000000000 for ${ACCOUNT}`);
+
+    // The ordered leaf-text sequence, flattened exactly as receiptTexts projects
+    // it to Agents, locks order and completeness together.
+    expect(flattenReceiptTexts(receipt)).toEqual([nativeText, depositText]);
+  });
+
+  it("locks the Receipt text an Agent reads for an unwrap", async () => {
+    const registry = new Registry(runtime).use(WMON);
+    const capability = await registry.action("wmon", "unwrap", ACCOUNT, { amount: "1.5" });
+    if (capability.kind !== "capability") throw new Error("expected capability");
+    const native = {
+      kind: "nativeTransfer",
+      from: WMON_ADDRESS,
+      to: ACCOUNT,
+      value: "1500000000000000000",
+    } satisfies Change;
+    const withdrawal = withdrawalChange(1_500_000_000_000_000_000n);
+    const receipt = registry.parseReceipt(capability, [native, withdrawal]);
+
+    const nativeText = `Native MON Transfer: 1500000000000000000 from ${WMON_ADDRESS} to ${ACCOUNT}`;
+    const withdrawalText = `WMON Withdrawal: 1500000000000000000 for ${ACCOUNT}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      nativeText,
+      withdrawalText,
+    ]);
+    expect(receipt.text).toBe(`WMON unwrap: 1500000000000000000 for ${ACCOUNT}`);
+    expect(flattenReceiptTexts(receipt)).toEqual([nativeText, withdrawalText]);
   });
 });
 

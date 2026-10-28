@@ -26,6 +26,21 @@ const OTHER = getAddress("0xdddddddddddddddddddddddddddddddddddddddd");
 const ZERO = getAddress("0x0000000000000000000000000000000000000000");
 const runtime = { rpcUrl: "http://offline", client: {} as MossRuntime["client"] };
 
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
+
+// Leaf text per top-level entry; a delegated ERC20 movement is a nested Receipt,
+// so its slot is null while flattenReceiptTexts still carries its text.
+function topLevelTexts(receipt: ReceiptResult): (string | null)[] {
+  return receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null));
+}
+
 // Extracts the original Change from a Receipt entry. Changes delegated to the
 // erc20 dependency come back as nested Receipts (ADR 0011) whose single leaf
 // wraps the original Change object.
@@ -414,6 +429,76 @@ describe("claimReceipt", () => {
 // swapping topic1 and topic2 yields a byte-identical log and these cases cannot
 // discriminate those two indexed slots. Their order is pinned by the verified
 // implementation source on MonadScan (see the ABI header).
+describe("Receipt text an Agent reads", () => {
+  const LABEL = "Package(Apriori:aPriori)";
+
+  it("locks the stake text: native leg, delegated mint, then the Deposit summary", async () => {
+    const capability = await capabilityFor("stake", { amount: "1", receiver: ACCOUNT });
+    const receipt = parseWith(capability, [
+      nativeChange(ACCOUNT, APRMON_ADDRESS, ONE),
+      transferEvent(ZERO, ACCOUNT, 950_000_000_000_000_000n),
+      depositEvent(ACCOUNT, ACCOUNT, ONE, 950_000_000_000_000_000n),
+    ]);
+    const native = `Native MON Transfer: 1000000000000000000 from ${ACCOUNT} to ${LABEL}`;
+    const mint = `ERC20 Transfer: 950000000000000000 ${LABEL} from ${ZERO} to ${ACCOUNT}`;
+    const stake = `aPriori Stake: 1000000000000000000 MON -> 950000000000000000 aprMON for ${ACCOUNT}`;
+    // The aprMON mint is delegated ERC20 evidence: a nested Receipt at the top
+    // level, whose text only appears once flattened.
+    expect(topLevelTexts(receipt)).toEqual([native, null, stake]);
+    expect(receipt.text).toBe(stake);
+    expect(flattenReceiptTexts(receipt)).toEqual([native, mint, stake]);
+  });
+
+  it("locks the unstake text: delegated escrow transfer, then the queued request", async () => {
+    const capability = await capabilityFor("unstake", { shares: "1", controller: OTHER });
+    const receipt = parseWith(capability, [
+      transferEvent(ACCOUNT, APRMON_ADDRESS, ONE),
+      redeemRequestEvent(OTHER, ACCOUNT, 7n, ACCOUNT, ONE, 1_070_000_000_000_000_000n),
+    ]);
+    const escrow = `ERC20 Transfer: 1000000000000000000 ${LABEL} from ${ACCOUNT} to ${LABEL}`;
+    const unstake = `aPriori Unstake: 1000000000000000000 aprMON queued as request 7 for ${OTHER}`;
+    expect(topLevelTexts(receipt)).toEqual([null, unstake]);
+    expect(receipt.text).toBe(unstake);
+    expect(flattenReceiptTexts(receipt)).toEqual([escrow, unstake]);
+  });
+
+  it("locks the claim text: delegated burn, the Redeem, then the native payout", async () => {
+    const capability = await capabilityFor("claim", { requestId: "7", receiver: ACCOUNT });
+    const receipt = parseWith(capability, [
+      transferEvent(APRMON_ADDRESS, ZERO, CLAIM_SHARES),
+      redeemEvent(ACCOUNT, ACCOUNT, 7n, CLAIM_SHARES, CLAIM_ASSETS, CLAIM_FEE),
+      nativeChange(APRMON_ADDRESS, ACCOUNT, CLAIM_ASSETS),
+    ]);
+    const burn = `ERC20 Transfer: 950000000000000000 ${LABEL} from ${LABEL} to ${ZERO}`;
+    const claim = `aPriori Claim: request 7 -> 1000000000000000000 MON (fee 1001000000000000) to ${ACCOUNT}`;
+    const payout = `Native MON Transfer: 1000000000000000000 from ${LABEL} to ${ACCOUNT}`;
+    expect(topLevelTexts(receipt)).toEqual([null, claim, payout]);
+    expect(receipt.text).toBe(claim);
+    expect(flattenReceiptTexts(receipt)).toEqual([burn, claim, payout]);
+  });
+
+  it("locks a multi-ID claim: one leaf per request, one aggregated summary", async () => {
+    const capability = await capabilityFor("claim", { requestId: "10470", receiver: ACCOUNT });
+    const receipt = parseWith(capability, [
+      transferEvent(APRMON_ADDRESS, ZERO, CLAIM_SHARES),
+      redeemEvent(ACCOUNT, ACCOUNT, 10470n, CLAIM_SHARES, CLAIM_ASSETS, CLAIM_FEE),
+      transferEvent(APRMON_ADDRESS, ZERO, CLAIM_SHARES),
+      redeemEvent(ACCOUNT, ACCOUNT, 10471n, CLAIM_SHARES, CLAIM_ASSETS, CLAIM_FEE),
+      nativeChange(APRMON_ADDRESS, ACCOUNT, CLAIM_ASSETS * 2n),
+    ]);
+    const burn = `ERC20 Transfer: 950000000000000000 ${LABEL} from ${LABEL} to ${ZERO}`;
+    const first = `aPriori Claim: request 10470 -> 1000000000000000000 MON (fee 1001000000000000) to ${ACCOUNT}`;
+    const second = `aPriori Claim: request 10471 -> 1000000000000000000 MON (fee 1001000000000000) to ${ACCOUNT}`;
+    const payout = `Native MON Transfer: 2000000000000000000 from ${LABEL} to ${ACCOUNT}`;
+    // Leaves report each request on its own; the top-level text aggregates them.
+    expect(receipt.text).toBe(
+      `aPriori Claim: request 10470,10471 -> 2000000000000000000 MON (fee 2002000000000000) to ${ACCOUNT}`,
+    );
+    expect(topLevelTexts(receipt)).toEqual([null, first, null, second, payout]);
+    expect(flattenReceiptTexts(receipt)).toEqual([burn, first, burn, second, payout]);
+  });
+});
+
 const REDEEM_TX = "0x7413c8200dbec7806270958c68619f6f1458f70411cff80c84d6fd4eb9ced13f";
 const LIVE_VAULT = "0x0c65a0bc65a5d819235b71f554d210d3f80e0852" as const;
 const LIVE_ACTOR = "0x7c5f36507a74f22661eb793176811fef11438ea3" as const;

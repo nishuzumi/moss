@@ -4,6 +4,7 @@ import {
   flattenCapabilityTree,
   type Hex,
   type MossRuntime,
+  type ReceiptResult,
   Registry,
   verifyReceiptCoverage,
 } from "@themoss/core";
@@ -19,6 +20,15 @@ const OPERATOR = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 const RECIPIENT = getAddress("0x1111111111111111111111111111111111111111");
 const COLLECTION = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 const MAX_UINT256 = ((1n << 256n) - 1n).toString();
+
+// Mirrors the MCP layer's receiptTexts (mcp-server/src/server.ts): the ordered
+// leaf `text` strings an Agent reads. Kept local so the projection contract is
+// asserted without a dependency on the server package.
+function flattenReceiptTexts(receipt: ReceiptResult): string[] {
+  return receipt.changes.flatMap((entry) =>
+    entry.kind === "change" ? [entry.text] : flattenReceiptTexts(entry),
+  );
+}
 
 function registry(readBalance = 9n, readUri = "ipfs://example/{id}.json") {
   const runtime: MossRuntime = {
@@ -265,9 +275,27 @@ describe("ERC1155", () => {
       if (entry.kind === "change") expect(entry.change).toBe(changes[index]);
     }
     expect(() => verifyReceiptCoverage(changes, receipt)).not.toThrow();
-    expect(receipt.text).toContain("TransferSingle");
-    expect(receipt.text).toContain("TransferBatch");
-    expect(receipt.text).toContain("ApprovalForAll");
+
+    // Lock the exact leaf text an Agent reads for each Change class. Raw
+    // base-unit amounts, checksummed addresses and the batch item order are the
+    // accepted convention; a zero amount and a repeated token id are kept as-is.
+    const firstText = `ERC1155 TransferSingle: 0 of ${COLLECTION} #7 from ${ACCOUNT} to ${ACCOUNT} by ${ACCOUNT}`;
+    const batchText = `ERC1155 TransferBatch: 3 of #9, 0 of #9, 4 of #2 from ${ACCOUNT} to ${RECIPIENT} by ${OPERATOR} in ${COLLECTION}`;
+    const approvalText = `ERC1155 ApprovalForAll: ${ACCOUNT} approved ${OPERATOR} for ${COLLECTION}`;
+    const lastText = `ERC1155 TransferSingle: 5 of ${COLLECTION} #11 from ${ACCOUNT} to ${RECIPIENT} by ${OPERATOR}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      firstText,
+      batchText,
+      approvalText,
+      lastText,
+    ]);
+
+    // Top-level Receipt text joins the leaf texts in order.
+    expect(receipt.text).toBe([firstText, batchText, approvalText, lastText].join("; "));
+
+    // The ordered leaf-text sequence, flattened exactly as receiptTexts projects
+    // it to Agents, locks order and completeness together.
+    expect(flattenReceiptTexts(receipt)).toEqual([firstText, batchText, approvalText, lastText]);
   });
 
   it("narrows a direct transfer Receipt to exactly one TransferSingle", () => {
@@ -280,6 +308,10 @@ describe("ERC1155", () => {
       amount: "3",
     });
     expect(receipt.changes[0]).toMatchObject({ kind: "change", change: single });
+    // A direct transfer surfaces its single leaf text as the top-level text.
+    const singleText = `ERC1155 TransferSingle: 3 of ${COLLECTION} #42 from ${ACCOUNT} to ${RECIPIENT} by ${OPERATOR}`;
+    expect(receipt.text).toBe(singleText);
+    expect(flattenReceiptTexts(receipt)).toEqual([singleText]);
     expect(() => protocol.transferReceipt([])).toThrow("exactly one TransferSingle");
     expect(() => protocol.transferReceipt([single, transferSingle(43n, 1n)])).toThrow(
       "exactly one TransferSingle",
@@ -422,7 +454,29 @@ describe("ERC1155", () => {
       operator: OPERATOR,
       approved: true,
     });
-    expect(receipt.text).toContain("approved");
+    const approvalText = `ERC1155 ApprovalForAll: ${ACCOUNT} approved ${OPERATOR} for ${COLLECTION}`;
+    expect(receipt.changes.map((entry) => (entry.kind === "change" ? entry.text : null))).toEqual([
+      approvalText,
+    ]);
+    expect(receipt.text).toBe(approvalText);
+    expect(flattenReceiptTexts(receipt)).toEqual([approvalText]);
+  });
+
+  it("renders a revoked ApprovalForAll as revoked, not approved", () => {
+    const revocation: Change = {
+      kind: "event",
+      address: COLLECTION,
+      topics: encodeEventTopics({
+        abi: ierc1155Abi,
+        eventName: "ApprovalForAll",
+        args: { account: ACCOUNT, operator: OPERATOR },
+      }) as readonly Hex[],
+      data: encodeAbiParameters([{ type: "bool", name: "approved" }], [false]),
+    };
+    const receipt = (Object.create(ERC1155.prototype) as ERC1155).approvalReceipt([revocation]);
+    const revokedText = `ERC1155 ApprovalForAll: ${ACCOUNT} revoked ${OPERATOR} for ${COLLECTION}`;
+    expect(receipt.text).toBe(revokedText);
+    expect(flattenReceiptTexts(receipt)).toEqual([revokedText]);
   });
 
   it("approvalReceipt rejects non-ApprovalForAll events", () => {
