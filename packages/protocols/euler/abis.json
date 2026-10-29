@@ -1,0 +1,15 @@
+{
+  "evc": {
+    "address": "0x7a9324E8f270413fa2E458f5831226d99C7477CD"
+  },
+  "vaultFactory": {
+    "address": "0xba4Dd672062dE8FeeDb665DD4410658864483f1E",
+    "expectedImplementation": "0xef17750D3a162E28a302E266c474ff8989d60ECD"
+  },
+  "perspectives": {
+    "governed": "0x8707B105567661E7c6B41cDd1b3EC7D784e5FA50",
+    "escrowedCollateral": "0xf3e1Dd13C448A7E1a6e19ba8A7f29f45C1E93AaB"
+  },
+  "explorerRetrieved": "2026-07-26",
+  "allowedExplorerOnly": []
+}
