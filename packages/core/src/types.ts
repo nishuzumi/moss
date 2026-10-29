@@ -29,6 +29,7 @@ export const CATEGORIES = [
   "rewards",
   "token",
   "nft",
+  "oracle",
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 

@@ -21,6 +21,7 @@
       "@themoss/protocol-pancakeswap",
       "@themoss/protocol-pendle",
       "@themoss/protocol-uniswap",
+      "@themoss/protocol-pyth",
       "@themoss/mcp-server"
     ]
   ],

@@ -12,7 +12,8 @@
       "!**/node_modules",
       "!**/.changeset",
       "!**/src/abis",
-      "!**/abis-src"
+      "!**/abis-src",
+      "!packages/protocols/pyth/sources"
     ]
   },
   "formatter": {

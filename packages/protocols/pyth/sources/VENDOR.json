@@ -1,0 +1,24 @@
+{
+  "abi": {
+    "sourceKind": "npm",
+    "package": "@pythnetwork/pyth-sdk-solidity",
+    "version": "4.3.1",
+    "packageIntegrity": "sha512-dAzsVDSKXS/Tbhik5Hp2kix3vDp98SlCXmputDIOkVyF4SKKnhXmIn+iGVmSQdrlF9jCFtvjBj7XYP+9wwpA4A==",
+    "tarballSha256": "3460ac6b3c5a933b9e5fe70ba5b35abd2089789a8703f2fca1c1d0e4b838ff38",
+    "upstreamPath": "abis/IPyth.json",
+    "file": "sources/IPyth.json",
+    "url": "https://unpkg.com/@pythnetwork/pyth-sdk-solidity@4.3.1/abis/IPyth.json",
+    "fileSha256": "feaa7731ab53c8f24320790eabe485f3ca4f22edbea5e40067e2cf84026b9603"
+  },
+  "deployment": {
+    "sourceKind": "git",
+    "repository": "https://github.com/monad-crypto/protocols.git",
+    "commit": "9fc1f09766739570f6e77f68bee0383d68cfeb66",
+    "blob": "72ce6aed0426c7b9b746127b396da0f650004523",
+    "upstreamPath": "mainnet/pyth.jsonc",
+    "file": "sources/pyth.jsonc",
+    "url": "https://raw.githubusercontent.com/monad-crypto/protocols/9fc1f09766739570f6e77f68bee0383d68cfeb66/mainnet/pyth.jsonc",
+    "fileSha256": "2b17c48ac655cc29799407f80b60001ca9f21acda96cc0101a2f234c960d89c9"
+  },
+  "vendoredAt": "2026-07-29"
+}

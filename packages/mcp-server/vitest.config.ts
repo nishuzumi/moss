@@ -24,6 +24,7 @@ export default defineConfig({
       "@themoss/protocol-morpho": src("../protocols/morpho/src/index.ts"),
       "@themoss/protocol-nadfun": src("../protocols/nadfun/src/index.ts"),
       "@themoss/protocol-pancakeswap": src("../protocols/pancakeswap/src/index.ts"),
+      "@themoss/protocol-pyth": src("../protocols/pyth/src/index.ts"),
       "@themoss/system": src("../system/src/index.ts"),
     },
   },

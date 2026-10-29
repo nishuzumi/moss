@@ -1,0 +1,7 @@
+{
+  "priceFeed": {
+    "proxy": "0x2880aB155794e7179c9eE2e38200202908C17B43",
+    "implementation": "0xa2aa501b19aff244d90cc15a4cf739d2725b5729",
+    "allowedExplorerOnly": []
+  }
+}

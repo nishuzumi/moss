@@ -46,6 +46,14 @@ class LabeledFixture {}
 class InvalidLabeledFixture {}
 
 @Protocol({
+  name: "oracle-fixture",
+  category: "oracle",
+  description: "Compile-time oracle category fixture.",
+  contracts: {},
+})
+class OracleFixture {}
+
+@Protocol({
   name: "perps-fixture",
   category: "perps",
   description: "Compile-time perps vocabulary fixture.",
@@ -226,6 +234,7 @@ tokenMetadata("metadata", { address: ADDRESS });
 
 void LabeledFixture;
 void InvalidLabeledFixture;
+void OracleFixture;
 void PerpsFixture;
 void EmptyRiskFixture;
 void MissingRiskFixture;
